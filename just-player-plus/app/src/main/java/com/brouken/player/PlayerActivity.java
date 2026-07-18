@@ -128,6 +128,9 @@ public class PlayerActivity extends Activity {
 
     public Prefs mPrefs;
     public PlusPrefs mPlusPrefs;
+    private RememberedTrackStore rememberedTrackStore;
+    private boolean trackMemoryArmed;
+    private String trackMemorySignature;
     public BrightnessControl mBrightnessControl;
     public static boolean haveMedia;
     private boolean videoLoading;
@@ -221,6 +224,7 @@ public class PlayerActivity extends Activity {
         // Rotate ASAP, before super/inflating to avoid glitches with activity launch animation
         mPrefs = new Prefs(this);
         mPlusPrefs = new PlusPrefs(this);
+        rememberedTrackStore = new RememberedTrackStore(this);
         Utils.setOrientation(this, mPrefs.orientation);
 
         super.onCreate(savedInstanceState);
@@ -1181,6 +1185,8 @@ public class PlayerActivity extends Activity {
     public void initializePlayer() {
         boolean isNetworkUri = Utils.isSupportedNetworkUri(mPrefs.mediaUri);
         haveMedia = mPrefs.mediaUri != null;
+        trackMemoryArmed = false;
+        trackMemorySignature = null;
 
         if (player != null) {
             player.removeListener(playerListener);
@@ -1393,6 +1399,7 @@ public class PlayerActivity extends Activity {
     }
 
     public void releasePlayer(boolean save) {
+        trackMemoryArmed = false;
         if (save) {
             savePlayer();
         }
@@ -1570,12 +1577,26 @@ public class PlayerActivity extends Activity {
                                 C.TRACK_TYPE_AUDIO, mPrefs.audioTrackId) != null;
                         setSelectedTracks(mPrefs.subtitleTrackId, mPrefs.audioTrackId);
                     }
+
+                    mPlusPrefs.reload();
+                    RememberedTrackStore.Selection rememberedSelection =
+                            rememberedTrackStore.load(
+                                    mPlusPrefs.rememberTrackScope, apiTitle, mPrefs.mediaUri);
+                    if (!restoredAudioSelection && rememberedSelection != null) {
+                        restoredAudioSelection =
+                                applyRememberedAudioSelection(rememberedSelection);
+                    }
+                    if (!restoredSubtitleSelection && rememberedSelection != null) {
+                        restoredSubtitleSelection =
+                                applyRememberedSubtitleSelection(rememberedSelection);
+                    }
                     if (!restoredAudioSelection) {
                         applySmartAudioSelection();
                     }
                     if (!restoredSubtitleSelection) {
                         applySmartSubtitleSelection();
                     }
+                    armTrackMemory();
                 }
             } else if (state == Player.STATE_ENDED) {
                 playbackFinished = true;
@@ -1583,6 +1604,11 @@ public class PlayerActivity extends Activity {
                     finish();
                 }
             }
+        }
+
+        @Override
+        public void onTracksChanged(Tracks tracks) {
+            rememberManualTrackSelection(tracks);
         }
 
         @Override
@@ -1752,6 +1778,80 @@ public class PlayerActivity extends Activity {
         }
 
         player.setTrackSelectionParameters(builder.build());
+    }
+
+    private boolean applyRememberedAudioSelection(
+            RememberedTrackStore.Selection rememberedSelection) {
+        if (player == null || rememberedSelection.audioAutomatic) {
+            return false;
+        }
+        TrackSelectionOverride override = RememberedTrackStore.findAudioOverride(
+                player.getCurrentTracks(), rememberedSelection);
+        if (override == null) {
+            return false;
+        }
+        player.setTrackSelectionParameters(
+                player.getTrackSelectionParameters().buildUpon()
+                        .setOverrideForType(override)
+                        .build());
+        return true;
+    }
+
+    private boolean applyRememberedSubtitleSelection(
+            RememberedTrackStore.Selection rememberedSelection) {
+        if (player == null || rememberedSelection.subtitleAutomatic) {
+            return false;
+        }
+        TrackSelectionParameters.Builder builder =
+                player.getTrackSelectionParameters().buildUpon()
+                        .clearOverridesOfType(C.TRACK_TYPE_TEXT);
+        if (rememberedSelection.subtitleDisabled) {
+            player.setTrackSelectionParameters(
+                    builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build());
+            return true;
+        }
+        TrackSelectionOverride override = RememberedTrackStore.findSubtitleOverride(
+                player.getCurrentTracks(), rememberedSelection);
+        if (override == null) {
+            return false;
+        }
+        player.setTrackSelectionParameters(
+                builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                        .setOverrideForType(override)
+                        .build());
+        return true;
+    }
+
+    private void armTrackMemory() {
+        trackMemoryArmed = false;
+        playerView.postDelayed(() -> {
+            if (player == null) {
+                return;
+            }
+            RememberedTrackStore.Selection selection = RememberedTrackStore.capture(
+                    player.getCurrentTracks(), player.getTrackSelectionParameters());
+            trackMemorySignature = selection.signature();
+            trackMemoryArmed = true;
+        }, 500L);
+    }
+
+    private void rememberManualTrackSelection(Tracks tracks) {
+        if (!trackMemoryArmed || player == null) {
+            return;
+        }
+        mPlusPrefs.reload();
+        if ("off".equals(mPlusPrefs.rememberTrackScope)) {
+            return;
+        }
+        RememberedTrackStore.Selection selection = RememberedTrackStore.capture(
+                tracks, player.getTrackSelectionParameters());
+        String signature = selection.signature();
+        if (signature.equals(trackMemorySignature)) {
+            return;
+        }
+        trackMemorySignature = signature;
+        rememberedTrackStore.save(
+                mPlusPrefs.rememberTrackScope, apiTitle, mPrefs.mediaUri, selection);
     }
 
     private void applySmartAudioSelection() {
