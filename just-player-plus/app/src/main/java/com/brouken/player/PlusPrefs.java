@@ -155,6 +155,37 @@ class PlusPrefs {
         return true;
     }
 
+    String[] getPreferredSubtitleLanguages() {
+        LinkedHashSet<String> languages = new LinkedHashSet<>();
+        appendSubtitleLanguagePreference(languages, subtitleLanguagePrimary);
+        appendSubtitleLanguagePreference(languages, subtitleLanguageSecondary);
+        appendSubtitleLanguagePreference(languages, subtitleLanguageTertiary);
+        return languages.toArray(new String[0]);
+    }
+
+    boolean useMediaDefaultSubtitleFallback() {
+        return Prefs.TRACK_DEFAULT.equals(subtitleLanguagePrimary)
+                || Prefs.TRACK_DEFAULT.equals(subtitleLanguageSecondary)
+                || Prefs.TRACK_DEFAULT.equals(subtitleLanguageTertiary);
+    }
+
+    private void appendSubtitleLanguagePreference(LinkedHashSet<String> languages,
+                                                   String preference) {
+        if (preference == null || preference.isEmpty()
+                || TRACK_NONE.equals(preference) || Prefs.TRACK_DEFAULT.equals(preference)) {
+            return;
+        }
+        if (Prefs.TRACK_DEVICE.equals(preference)) {
+            for (String language : Utils.getDeviceLanguages()) {
+                if (language != null && !language.isEmpty()) {
+                    languages.add(language);
+                }
+            }
+        } else {
+            languages.add(preference);
+        }
+    }
+
     private int parseInt(String key, int fallback) {
         try {
             return Integer.parseInt(preferences.getString(key, String.valueOf(fallback)));

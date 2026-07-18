@@ -1204,18 +1204,13 @@ public class PlayerActivity extends Activity {
                     .setPreferredAudioLanguages(preferredAudioLanguages)
             );
         }
-        final CaptioningManager captioningManager = (CaptioningManager) getSystemService(Context.CAPTIONING_SERVICE);
-        if (!captioningManager.isEnabled()) {
-            trackSelector.setParameters(trackSelector.buildUponParameters()
-                    .setIgnoredTextSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-            );
-        }
-        Locale locale = captioningManager.getLocale();
-        if (locale != null) {
-            trackSelector.setParameters(trackSelector.buildUponParameters()
-                    .setPreferredTextLanguage(locale.getISO3Language())
-            );
-        }
+        final String[] preferredSubtitleLanguages = mPlusPrefs.getPreferredSubtitleLanguages();
+        TrackSelectionParameters.Builder subtitleParameters = trackSelector.buildUponParameters()
+                .setPreferredTextLanguages(preferredSubtitleLanguages)
+                .setSelectUndeterminedTextLanguage(mPlusPrefs.allowUnknownSubtitles)
+                .setSelectTextByDefault(false)
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true);
+        trackSelector.setParameters(subtitleParameters.build());
         // https://github.com/google/ExoPlayer/issues/8571
         DefaultExtractorsFactory extractorsFactory = new DefaultExtractorsFactory()
                 .setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ENABLE_HDMV_DTS_AUDIO_STREAMS)
@@ -1565,8 +1560,15 @@ public class PlayerActivity extends Activity {
                     if (mPrefs.speed <= 0.99f || mPrefs.speed >= 1.01f) {
                         player.setPlaybackSpeed(mPrefs.speed);
                     }
+                    boolean restoredSubtitleSelection = false;
                     if (!apiAccess) {
+                        restoredSubtitleSelection = "#none".equals(mPrefs.subtitleTrackId)
+                                || getTrackGroupFromFormatId(
+                                C.TRACK_TYPE_TEXT, mPrefs.subtitleTrackId) != null;
                         setSelectedTracks(mPrefs.subtitleTrackId, mPrefs.audioTrackId);
+                    }
+                    if (!restoredSubtitleSelection) {
+                        applySmartSubtitleSelection();
                     }
                 }
             } else if (state == Player.STATE_ENDED) {
@@ -1720,35 +1722,77 @@ public class PlayerActivity extends Activity {
     }
 
     public void setSelectedTracks(final String subtitleId, final String audioId) {
-        if ("#none".equals(subtitleId)) {
-            if (trackSelector == null) {
-                return;
-            }
-            trackSelector.setParameters(trackSelector.buildUponParameters().setDisabledTextTrackSelectionFlags(C.SELECTION_FLAG_DEFAULT | C.SELECTION_FLAG_FORCED));
+        if (player == null) {
+            return;
         }
 
         TrackGroup subtitleGroup = getTrackGroupFromFormatId(C.TRACK_TYPE_TEXT, subtitleId);
         TrackGroup audioGroup = getTrackGroupFromFormatId(C.TRACK_TYPE_AUDIO, audioId);
+        TrackSelectionParameters.Builder builder =
+                player.getTrackSelectionParameters().buildUpon();
 
-        TrackSelectionParameters.Builder overridesBuilder = new TrackSelectionParameters.Builder(this);
-        TrackSelectionOverride trackSelectionOverride = null;
-        final List<Integer> tracks = new ArrayList<>(); tracks.add(0);
-        if (subtitleGroup != null) {
-            trackSelectionOverride = new TrackSelectionOverride(subtitleGroup, tracks);
-            overridesBuilder.addOverride(trackSelectionOverride);
+        if ("#none".equals(subtitleId)) {
+            builder.clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true);
+        } else if (subtitleGroup != null) {
+            builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                    .setOverrideForType(new TrackSelectionOverride(
+                            subtitleGroup, Collections.singletonList(0)));
         }
+
         if (audioGroup != null) {
-            trackSelectionOverride = new TrackSelectionOverride(audioGroup, tracks);
-            overridesBuilder.addOverride(trackSelectionOverride);
+            builder.setOverrideForType(new TrackSelectionOverride(
+                    audioGroup, Collections.singletonList(0)));
         }
 
-        if (player != null) {
-            TrackSelectionParameters.Builder trackSelectionParametersBuilder = player.getTrackSelectionParameters().buildUpon();
-            if (trackSelectionOverride != null) {
-                trackSelectionParametersBuilder.setOverrideForType(trackSelectionOverride);
-            }
-            player.setTrackSelectionParameters(trackSelectionParametersBuilder.build());
+        player.setTrackSelectionParameters(builder.build());
+    }
+
+    private void applySmartSubtitleSelection() {
+        if (player == null) {
+            return;
         }
+
+        mPlusPrefs.reload();
+        final String mode = mPlusPrefs.subtitleMode;
+        final String[] languages = mPlusPrefs.getPreferredSubtitleLanguages();
+        final boolean allowMediaDefault = mPlusPrefs.useMediaDefaultSubtitleFallback();
+        TrackSelectionOverride subtitleOverride = null;
+
+        if ("forced".equals(mode)) {
+            subtitleOverride = SmartSubtitleSelector.findForcedSubtitle(
+                    player.getCurrentTracks(), languages, allowMediaDefault,
+                    mPlusPrefs.allowUnknownSubtitles);
+        } else if ("foreign_audio".equals(mode)) {
+            boolean nativeAudio = SmartSubtitleSelector.isAudioLanguageNative(
+                    player.getAudioFormat(), Utils.getDeviceLanguages());
+            if (nativeAudio) {
+                if (mPlusPrefs.preferForcedSubtitles) {
+                    subtitleOverride = SmartSubtitleSelector.findForcedSubtitle(
+                            player.getCurrentTracks(), languages, allowMediaDefault,
+                            mPlusPrefs.allowUnknownSubtitles);
+                }
+            } else {
+                subtitleOverride = SmartSubtitleSelector.findFullSubtitle(
+                        player.getCurrentTracks(), languages, allowMediaDefault,
+                        mPlusPrefs.allowUnknownSubtitles);
+            }
+        } else if ("always".equals(mode)) {
+            subtitleOverride = SmartSubtitleSelector.findFullSubtitle(
+                    player.getCurrentTracks(), languages, allowMediaDefault,
+                    mPlusPrefs.allowUnknownSubtitles);
+        }
+
+        TrackSelectionParameters.Builder builder =
+                player.getTrackSelectionParameters().buildUpon()
+                        .clearOverridesOfType(C.TRACK_TYPE_TEXT);
+        if (subtitleOverride == null) {
+            builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true);
+        } else {
+            builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                    .setOverrideForType(subtitleOverride);
+        }
+        player.setTrackSelectionParameters(builder.build());
     }
 
     private boolean hasOverrideType(final int trackType) {
