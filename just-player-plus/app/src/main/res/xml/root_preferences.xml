@@ -11,19 +11,6 @@
             app:title="@string/pref_file_access"
             app:useSimpleSummaryProvider="true" />
 
-        <ListPreference
-            app:key="languageAudio"
-            android:defaultValue="device"
-            app:title="@string/pref_language_audio"
-            app:useSimpleSummaryProvider="true" />
-
-        <SwitchPreferenceCompat
-            app:key="frameRateMatching"
-            app:defaultValue="false"
-            app:summaryOn="@string/pref_framerate_matching_on"
-            app:summaryOff="@string/pref_framerate_matching_off"
-            app:title="@string/pref_framerate_matching" />
-
         <SwitchPreferenceCompat
             app:key="autoPiP"
             app:defaultValue="false"
@@ -46,26 +33,224 @@
 
     </PreferenceCategory>
 
+    <PreferenceCategory app:title="@string/pref_audio_header">
+
+        <ListPreference
+            app:key="languageAudio"
+            app:defaultValue="device"
+            app:title="@string/pref_language_audio"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            app:key="languageAudioSecondary"
+            app:defaultValue="eng"
+            app:title="@string/pref_language_audio_secondary"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            app:key="languageAudioTertiary"
+            app:defaultValue="none"
+            app:title="@string/pref_language_audio_tertiary"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            app:key="audioQualityPreference"
+            app:defaultValue="best"
+            app:entries="@array/plus_audio_quality_entries"
+            app:entryValues="@array/plus_audio_quality_values"
+            app:title="@string/pref_audio_quality"
+            app:useSimpleSummaryProvider="true" />
+
+        <SwitchPreferenceCompat
+            app:key="ignoreCommentaryAudio"
+            app:defaultValue="true"
+            app:summary="@string/pref_ignore_commentary_audio_summary"
+            app:title="@string/pref_ignore_commentary_audio" />
+
+        <SwitchPreferenceCompat
+            app:key="ignoreAudioDescription"
+            app:defaultValue="true"
+            app:summary="@string/pref_ignore_audio_description_summary"
+            app:title="@string/pref_ignore_audio_description" />
+
+    </PreferenceCategory>
+
     <PreferenceCategory app:title="@string/pref_subtitle_header">
+
+        <ListPreference
+            app:key="languageSubtitlePrimary"
+            app:defaultValue="ces"
+            app:title="@string/pref_language_subtitle"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            app:key="languageSubtitleSecondary"
+            app:defaultValue="slk"
+            app:title="@string/pref_language_subtitle_secondary"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            app:key="languageSubtitleTertiary"
+            app:defaultValue="eng"
+            app:title="@string/pref_language_subtitle_tertiary"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            app:key="subtitleMode"
+            app:defaultValue="foreign_audio"
+            app:entries="@array/plus_subtitle_mode_entries"
+            app:entryValues="@array/plus_subtitle_mode_values"
+            app:title="@string/pref_subtitle_mode"
+            app:useSimpleSummaryProvider="true" />
+
+        <SwitchPreferenceCompat
+            app:key="preferForcedSubtitles"
+            app:defaultValue="true"
+            app:summary="@string/pref_prefer_forced_subtitles_summary"
+            app:title="@string/pref_prefer_forced_subtitles" />
+
+        <SwitchPreferenceCompat
+            app:key="allowUnknownSubtitles"
+            app:defaultValue="true"
+            app:summary="@string/pref_allow_unknown_subtitles_summary"
+            app:title="@string/pref_allow_unknown_subtitles" />
+
+        <SwitchPreferenceCompat
+            app:key="ignoreSdhSubtitles"
+            app:defaultValue="true"
+            app:summary="@string/pref_ignore_sdh_subtitles_summary"
+            app:title="@string/pref_ignore_sdh_subtitles" />
+
+        <ListPreference
+            app:key="subtitleSourcePreference"
+            app:defaultValue="auto"
+            app:entries="@array/plus_subtitle_source_entries"
+            app:entryValues="@array/plus_subtitle_source_values"
+            app:title="@string/pref_subtitle_source"
+            app:useSimpleSummaryProvider="true" />
+
+        <EditTextPreference
+            app:key="subtitleDelayMs"
+            app:defaultValue="0"
+            app:dialogTitle="@string/pref_subtitle_delay"
+            app:summary="@string/pref_subtitle_delay_summary"
+            app:title="@string/pref_subtitle_delay"
+            android:inputType="numberSigned" />
+
+        <ListPreference
+            app:key="subtitleScale"
+            app:defaultValue="system"
+            app:entries="@array/plus_subtitle_scale_entries"
+            app:entryValues="@array/plus_subtitle_scale_values"
+            app:title="@string/pref_subtitle_scale"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            app:key="subtitlePosition"
+            app:defaultValue="system"
+            app:entries="@array/plus_subtitle_position_entries"
+            app:entryValues="@array/plus_subtitle_position_values"
+            app:title="@string/pref_subtitle_position"
+            app:useSimpleSummaryProvider="true" />
 
         <SwitchPreferenceCompat
             app:key="subtitleStyleEmbedded"
             app:defaultValue="true"
-            android:summaryOn="@string/pref_subtitle_style_embedded_on"
-            android:summaryOff="@string/pref_subtitle_style_embedded_off"
+            app:summaryOn="@string/pref_subtitle_style_embedded_on"
+            app:summaryOff="@string/pref_subtitle_style_embedded_off"
             app:title="@string/pref_subtitle_style_embedded" />
 
         <SwitchPreferenceCompat
             app:key="subtitleStyleBold"
             app:defaultValue="false"
-            android:summaryOn="@string/pref_subtitle_style_bold_on"
-            android:summaryOff="@string/pref_subtitle_style_bold_off"
+            app:summaryOn="@string/pref_subtitle_style_bold_on"
+            app:summaryOff="@string/pref_subtitle_style_bold_off"
             app:title="@string/pref_subtitle_style_bold" />
 
-        <Preference
-            app:title="@string/pref_captioning_preferences">
+        <Preference app:title="@string/pref_captioning_preferences">
             <intent android:action="android.settings.CAPTIONING_SETTINGS" />
         </Preference>
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/pref_memory_header">
+
+        <ListPreference
+            app:key="rememberTrackScope"
+            app:defaultValue="series"
+            app:entries="@array/plus_remember_scope_entries"
+            app:entryValues="@array/plus_remember_scope_values"
+            app:title="@string/pref_remember_track_scope"
+            app:useSimpleSummaryProvider="true" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/pref_playback_header">
+
+        <ListPreference
+            app:key="resizeDefault"
+            app:defaultValue="remember"
+            app:entries="@array/plus_resize_default_entries"
+            app:entryValues="@array/plus_resize_default_values"
+            app:title="@string/pref_resize_default"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            app:key="speedDefault"
+            app:defaultValue="remember"
+            app:entries="@array/plus_speed_default_entries"
+            app:entryValues="@array/plus_speed_default_values"
+            app:title="@string/pref_speed_default"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            app:key="seekIncrementMs"
+            app:defaultValue="10000"
+            app:entries="@array/plus_seek_increment_entries"
+            app:entryValues="@array/plus_seek_increment_values"
+            app:title="@string/pref_seek_increment"
+            app:useSimpleSummaryProvider="true" />
+
+        <SwitchPreferenceCompat
+            app:key="frameRateMatching"
+            app:defaultValue="false"
+            app:summaryOn="@string/pref_framerate_matching_on"
+            app:summaryOff="@string/pref_framerate_matching_off"
+            app:title="@string/pref_framerate_matching" />
+
+        <ListPreference
+            app:key="frameRatePolicy"
+            app:defaultValue="legacy"
+            app:entries="@array/plus_frame_rate_policy_entries"
+            app:entryValues="@array/plus_frame_rate_policy_values"
+            app:title="@string/pref_frame_rate_policy"
+            app:useSimpleSummaryProvider="true" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/pref_external_player_header">
+
+        <ListPreference
+            app:key="backButtonBehavior"
+            app:defaultValue="controls_then_exit"
+            app:entries="@array/plus_back_button_entries"
+            app:entryValues="@array/plus_back_button_values"
+            app:title="@string/pref_back_button_behavior"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            app:key="completionRule"
+            app:defaultValue="percent_95"
+            app:entries="@array/plus_completion_entries"
+            app:entryValues="@array/plus_completion_values"
+            app:title="@string/pref_completion_rule"
+            app:useSimpleSummaryProvider="true" />
+
+        <SwitchPreferenceCompat
+            app:key="externalPlayerDiagnostics"
+            app:defaultValue="false"
+            app:summary="@string/pref_external_player_diagnostics_summary"
+            app:title="@string/pref_external_player_diagnostics" />
 
     </PreferenceCategory>
 

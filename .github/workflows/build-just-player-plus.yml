@@ -6,9 +6,11 @@ on:
     branches: [main]
     paths:
       - just-player-plus/**
+      - .github/workflows/build-just-player-plus.yml
   pull_request:
     paths:
       - just-player-plus/**
+      - .github/workflows/build-just-player-plus.yml
 
 permissions:
   contents: read
@@ -41,7 +43,19 @@ jobs:
       - name: Build release APK
         run: |
           chmod +x gradlew
-          ./gradlew assembleLatestUniversalRelease --stacktrace
+          set +e
+          ./gradlew assembleLatestUniversalRelease --stacktrace --console=plain > ../gradle-build.log 2>&1
+          status=$?
+          tail -n 200 ../gradle-build.log
+          exit $status
+
+      - name: Upload Gradle build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: justplayer-plus-gradle-log
+          path: gradle-build.log
+          if-no-files-found: warn
 
       - name: Collect APK
         run: |
