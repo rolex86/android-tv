@@ -1768,7 +1768,8 @@ public class PlayerActivity extends Activity {
                 player.getCurrentTracks(),
                 mPlusPrefs.getPreferredAudioLanguages(),
                 mPlusPrefs.ignoreCommentaryAudio,
-                mPlusPrefs.ignoreAudioDescription);
+                mPlusPrefs.ignoreAudioDescription,
+                "best".equals(mPlusPrefs.audioQualityPreference));
         if (audioOverride != null) {
             player.setTrackSelectionParameters(
                     player.getTrackSelectionParameters().buildUpon()
