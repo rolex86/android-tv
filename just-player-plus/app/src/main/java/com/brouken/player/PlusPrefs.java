@@ -4,6 +4,8 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.preference.PreferenceManager;
 
+import java.util.LinkedHashSet;
+
 /**
  * Preferences added by JustPlayer Plus.
  *
@@ -116,6 +118,41 @@ class PlusPrefs {
         completionRule = preferences.getString(KEY_COMPLETION_RULE, "percent_95");
         externalPlayerDiagnostics = preferences.getBoolean(
                 KEY_EXTERNAL_PLAYER_DIAGNOSTICS, false);
+    }
+
+    String[] getPreferredAudioLanguages() {
+        LinkedHashSet<String> languages = new LinkedHashSet<>();
+
+        if (!appendAudioLanguagePreference(languages, audioLanguagePrimary)) {
+            return languages.toArray(new String[0]);
+        }
+        if (!appendAudioLanguagePreference(languages, audioLanguageSecondary)) {
+            return languages.toArray(new String[0]);
+        }
+        appendAudioLanguagePreference(languages, audioLanguageTertiary);
+
+        return languages.toArray(new String[0]);
+    }
+
+    private boolean appendAudioLanguagePreference(LinkedHashSet<String> languages,
+                                                   String preference) {
+        if (preference == null || TRACK_NONE.equals(preference)) {
+            return true;
+        }
+        if (Prefs.TRACK_DEFAULT.equals(preference)) {
+            // Media default acts as the fallback point in the ordered list.
+            return false;
+        }
+        if (Prefs.TRACK_DEVICE.equals(preference)) {
+            for (String language : Utils.getDeviceLanguages()) {
+                if (language != null && !language.isEmpty()) {
+                    languages.add(language);
+                }
+            }
+        } else if (!preference.isEmpty()) {
+            languages.add(preference);
+        }
+        return true;
     }
 
     private int parseInt(String key, int fallback) {

@@ -127,6 +127,7 @@ public class PlayerActivity extends Activity {
     private Object mPictureInPictureParamsBuilder;
 
     public Prefs mPrefs;
+    public PlusPrefs mPlusPrefs;
     public BrightnessControl mBrightnessControl;
     public static boolean haveMedia;
     private boolean videoLoading;
@@ -219,6 +220,7 @@ public class PlayerActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         // Rotate ASAP, before super/inflating to avoid glitches with activity launch animation
         mPrefs = new Prefs(this);
+        mPlusPrefs = new PlusPrefs(this);
         Utils.setOrientation(this, mPrefs.orientation);
 
         super.onCreate(savedInstanceState);
@@ -1156,6 +1158,7 @@ public class PlayerActivity extends Activity {
             }
         } else if (requestCode == REQUEST_SETTINGS) {
             mPrefs.loadUserPreferences();
+            mPlusPrefs.reload();
             updateSubtitleStyle(this);
         } else {
             super.onActivityResult(requestCode, resultCode, data);
@@ -1194,18 +1197,12 @@ public class PlayerActivity extends Activity {
                     .setTunnelingEnabled(true)
             );
         }
-        switch (mPrefs.languageAudio) {
-            case Prefs.TRACK_DEFAULT:
-                break;
-            case Prefs.TRACK_DEVICE:
-                trackSelector.setParameters(trackSelector.buildUponParameters()
-                        .setPreferredAudioLanguages(Utils.getDeviceLanguages())
-                );
-                break;
-            default:
-                trackSelector.setParameters(trackSelector.buildUponParameters()
-                        .setPreferredAudioLanguages(mPrefs.languageAudio)
-                );
+        mPlusPrefs.reload();
+        final String[] preferredAudioLanguages = mPlusPrefs.getPreferredAudioLanguages();
+        if (preferredAudioLanguages.length > 0) {
+            trackSelector.setParameters(trackSelector.buildUponParameters()
+                    .setPreferredAudioLanguages(preferredAudioLanguages)
+            );
         }
         final CaptioningManager captioningManager = (CaptioningManager) getSystemService(Context.CAPTIONING_SERVICE);
         if (!captioningManager.isEnabled()) {
