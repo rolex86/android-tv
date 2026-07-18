@@ -207,6 +207,9 @@ public class PlayerActivity extends Activity {
     List<MediaItem.SubtitleConfiguration> apiSubs = new ArrayList<>();
     boolean intentReturnResult;
     boolean playbackFinished;
+    private long resultPosition = C.TIME_UNSET;
+    private long resultDuration = C.TIME_UNSET;
+    private AlertDialog exitDialog;
 
     DisplayManager displayManager;
     DisplayManager.DisplayListener displayListener;
@@ -317,7 +320,10 @@ public class PlayerActivity extends Activity {
                     intentReturnResult = bundle.getBoolean(API_RETURN_RESULT);
 
                     if (bundle.containsKey(API_POSITION)) {
-                        mPrefs.updatePosition((long) bundle.getInt(API_POSITION));
+                        Object requestedPosition = bundle.get(API_POSITION);
+                        if (requestedPosition instanceof Number) {
+                            mPrefs.updatePosition(((Number) requestedPosition).longValue());
+                        }
                     }
                 }
             }
@@ -764,32 +770,112 @@ public class PlayerActivity extends Activity {
         releasePlayer(false);
     }
 
-    @SuppressLint("GestureBackNavigation")
-    @Override
-    public void onBackPressed() {
+    private void snapshotPlaybackResult() {
+        if (player == null) {
+            return;
+        }
+        long duration = player.getDuration();
+        if (duration != C.TIME_UNSET && duration >= 0L) {
+            resultDuration = duration;
+        }
+        if (player.isCurrentMediaItemSeekable()) {
+            resultPosition = Math.max(0L, player.getCurrentPosition());
+        }
+        if (isPlaybackComplete(resultPosition, resultDuration)) {
+            playbackFinished = true;
+        }
+    }
+
+    private boolean isPlaybackComplete(long position, long duration) {
+        if (position < 0L || duration == C.TIME_UNSET || duration <= 0L) {
+            return false;
+        }
+        mPlusPrefs.reload();
+        switch (mPlusPrefs.completionRule) {
+            case "percent_90":
+                return position >= Math.round(duration * 0.90d);
+            case "percent_98":
+                return position >= Math.round(duration * 0.98d);
+            case "remaining_5m":
+                if (duration > TimeUnit.MINUTES.toMillis(5)) {
+                    return duration - position <= TimeUnit.MINUTES.toMillis(5);
+                }
+                return position >= Math.round(duration * 0.95d);
+            case "percent_95":
+            default:
+                return position >= Math.round(duration * 0.95d);
+        }
+    }
+
+    private static int externalResultValue(long value) {
+        if (value <= 0L) {
+            return 0;
+        }
+        return value > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) value;
+    }
+
+    private void finishFromBack() {
         restorePlayStateAllowed = false;
         super.onBackPressed();
     }
 
+    private void showExitConfirmation() {
+        if (exitDialog != null && exitDialog.isShowing()) {
+            return;
+        }
+        final boolean resumePlayback = player != null && player.isPlaying();
+        if (resumePlayback) {
+            player.pause();
+        }
+        exitDialog = new AlertDialog.Builder(this)
+                .setMessage(R.string.exit_playback_query)
+                .setNegativeButton(android.R.string.cancel, (dialog, which) -> {
+                    if (resumePlayback && player != null) {
+                        player.play();
+                    }
+                })
+                .setPositiveButton(R.string.exit_playback_confirm,
+                        (dialog, which) -> finishFromBack())
+                .setOnCancelListener(dialog -> {
+                    if (resumePlayback && player != null) {
+                        player.play();
+                    }
+                })
+                .create();
+        exitDialog.setOnDismissListener(dialog -> exitDialog = null);
+        exitDialog.show();
+    }
+
+    @SuppressLint("GestureBackNavigation")
+    @Override
+    public void onBackPressed() {
+        mPlusPrefs.reload();
+        if ("immediate".equals(mPlusPrefs.backButtonBehavior)) {
+            finishFromBack();
+            return;
+        }
+        if ("confirm".equals(mPlusPrefs.backButtonBehavior)) {
+            showExitConfirmation();
+            return;
+        }
+        if (controllerVisible && player != null && player.isPlaying()) {
+            playerView.hideController();
+            return;
+        }
+        finishFromBack();
+    }
+
     @Override
     public void finish() {
+        snapshotPlaybackResult();
         if (intentReturnResult) {
             Intent intent = new Intent("com.mxtech.intent.result.VIEW");
             intent.putExtra(API_END_BY, playbackFinished ? "playback_completion" : "user");
-            if (!playbackFinished) {
-                if (player != null) {
-                    long duration = player.getDuration();
-                    if (duration != C.TIME_UNSET) {
-                        intent.putExtra(API_DURATION, (int) player.getDuration());
-                    }
-                    if (player.isCurrentMediaItemSeekable()) {
-                        if (mPrefs.persistentMode) {
-                            intent.putExtra(API_POSITION, (int) mPrefs.nonPersitentPosition);
-                        } else {
-                            intent.putExtra(API_POSITION, (int) player.getCurrentPosition());
-                        }
-                    }
-                }
+            if (resultDuration != C.TIME_UNSET) {
+                intent.putExtra(API_DURATION, externalResultValue(resultDuration));
+            }
+            if (resultPosition != C.TIME_UNSET) {
+                intent.putExtra(API_POSITION, externalResultValue(resultPosition));
             }
             setResult(Activity.RESULT_OK, intent);
         }
@@ -915,12 +1001,8 @@ public class PlayerActivity extends Activity {
                 break;
             case KeyEvent.KEYCODE_BACK:
                 if (isTvBox) {
-                    if (controllerVisible && player != null && player.isPlaying()) {
-                        playerView.hideController();
-                        return true;
-                    } else {
-                        onBackPressed();
-                    }
+                    onBackPressed();
+                    return true;
                 }
                 break;
             case KeyEvent.KEYCODE_UNKNOWN:
@@ -1414,6 +1496,7 @@ public class PlayerActivity extends Activity {
 
     private void savePlayer() {
         if (player != null) {
+            snapshotPlaybackResult();
             mPrefs.updateBrightness(mBrightnessControl.currentBrightnessLevel);
             mPrefs.updateOrientation();
 
@@ -1634,6 +1717,7 @@ public class PlayerActivity extends Activity {
                 }
             } else if (state == Player.STATE_ENDED) {
                 playbackFinished = true;
+                snapshotPlaybackResult();
                 if (apiAccess) {
                     finish();
                 }
