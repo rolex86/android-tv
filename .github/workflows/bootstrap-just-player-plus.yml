@@ -13,6 +13,7 @@ permissions:
 jobs:
   bootstrap:
     runs-on: ubuntu-latest
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -43,9 +44,18 @@ jobs:
           root = Path('just-player-plus')
           gradle = root / 'app' / 'build.gradle'
           text = gradle.read_text(encoding='utf-8')
-          text = text.replace('applicationId "com.brouken.player"', 'applicationId "com.rolex86.justplayerplus"')
-          text = text.replace('versionName "0.${versionCode}"', 'versionName "0.${versionCode}-plus.1"')
-          text = text.replace('archivesName = "Just.Player.v${defaultConfig.versionName}"', 'archivesName = "JustPlayer.Plus.v${defaultConfig.versionName}"')
+          text = text.replace(
+              'applicationId "com.brouken.player"',
+              'applicationId "com.rolex86.justplayerplus"'
+          )
+          text = text.replace(
+              'versionName "0.${versionCode}"',
+              'versionName "0.${versionCode}-plus.1"'
+          )
+          text = text.replace(
+              'archivesName = "Just.Player.v${defaultConfig.versionName}"',
+              'archivesName = "JustPlayer.Plus.v${defaultConfig.versionName}"'
+          )
           gradle.write_text(text, encoding='utf-8')
 
           shortcuts = root / 'app' / 'src' / 'main' / 'res' / 'xml' / 'shortcuts.xml'
@@ -104,73 +114,8 @@ jobs:
           The original project is released under The Unlicense. See `LICENSE`.
           EOF
 
-          mkdir -p .github/workflows
-          cat > .github/workflows/build-just-player-plus.yml <<'EOF'
-          name: Build JustPlayer Plus
-
-          on:
-            workflow_dispatch:
-            push:
-              branches: [main]
-              paths:
-                - just-player-plus/**
-                - .github/workflows/build-just-player-plus.yml
-            pull_request:
-              paths:
-                - just-player-plus/**
-                - .github/workflows/build-just-player-plus.yml
-
-          permissions:
-            contents: read
-
-          jobs:
-            build:
-              runs-on: ubuntu-latest
-              defaults:
-                run:
-                  working-directory: just-player-plus
-
-              steps:
-                - name: Check out repository
-                  uses: actions/checkout@v4
-
-                - name: Set up Java
-                  uses: actions/setup-java@v4
-                  with:
-                    distribution: temurin
-                    java-version: '17'
-                    cache: gradle
-                    cache-dependency-path: just-player-plus/**/*.gradle*
-
-                - name: Set up Android SDK
-                  uses: android-actions/setup-android@v3
-
-                - name: Install Android platform
-                  run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
-
-                - name: Build release APK
-                  run: |
-                    chmod +x gradlew
-                    ./gradlew assembleLatestUniversalRelease --stacktrace
-
-                - name: Collect APK
-                  run: |
-                    mkdir -p ../artifacts
-                    find app/build/outputs/apk -type f -name '*.apk' -exec cp {} ../artifacts/ \;
-                    ls -lah ../artifacts
-
-                - name: Upload APK
-                  uses: actions/upload-artifact@v4
-                  with:
-                    name: justplayer-plus-apk
-                    path: artifacts/*.apk
-                    if-no-files-found: error
-          EOF
-
-          rm -f .github/workflows/bootstrap-just-player-plus.yml
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add README.md just-player-plus .github/workflows
+          git add README.md just-player-plus
           git commit -m "Import JustPlayer Plus"
           git push origin HEAD:main
