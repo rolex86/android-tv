@@ -129,7 +129,8 @@ public class SettingsActivity extends AppCompatActivity {
                 subtitleDelay.setOnBindEditTextListener(editText -> editText.setInputType(
                         InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_SIGNED));
                 subtitleDelay.setSummaryProvider(preference -> {
-                    String value = preference.getText();
+                    EditTextPreference editTextPreference = (EditTextPreference) preference;
+                    String value = editTextPreference.getText();
                     return (value == null || value.isEmpty() ? "0" : value) + " ms";
                 });
             }
