@@ -30,7 +30,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
           fetch-depth: 0
 
-      - name: Apply guarded step 7a patch
+      - name: Apply guarded step 7a subtitle patch
         if: hashFiles('tools/apply_step7a_subtitle_presentation.py') != ''
         working-directory: .
         run: |
