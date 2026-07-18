@@ -881,7 +881,7 @@ public class PlayerActivity extends Activity {
                     if (playerView.keySeekStart == -1) {
                         playerView.keySeekStart = pos;
                     }
-                    long seekTo = pos - 10_000;
+                    long seekTo = pos - mPlusPrefs.seekIncrementMs;
                     if (seekTo < 0)
                         seekTo = 0;
                     player.setSeekParameters(SeekParameters.PREVIOUS_SYNC);
@@ -902,7 +902,7 @@ public class PlayerActivity extends Activity {
                     if (playerView.keySeekStart == -1) {
                         playerView.keySeekStart = pos;
                     }
-                    long seekTo = pos + 10_000;
+                    long seekTo = pos + mPlusPrefs.seekIncrementMs;
                     long seekMax = player.getDuration();
                     if (seekMax != C.TIME_UNSET && seekTo > seekMax)
                         seekTo = seekMax;
@@ -1182,6 +1182,41 @@ public class PlayerActivity extends Activity {
         mPrefs.updateSubtitle(uri);
     }
 
+    private int getInitialResizeMode() {
+        if ("fit".equals(mPlusPrefs.resizeDefault)) {
+            return AspectRatioFrameLayout.RESIZE_MODE_FIT;
+        }
+        if ("crop".equals(mPlusPrefs.resizeDefault)) {
+            return AspectRatioFrameLayout.RESIZE_MODE_ZOOM;
+        }
+        return mPrefs.resizeMode;
+    }
+
+    private float getInitialPlaybackSpeed() {
+        if ("remember".equals(mPlusPrefs.speedDefault)) {
+            return mPrefs.speed;
+        }
+        try {
+            return Float.parseFloat(mPlusPrefs.speedDefault);
+        } catch (NumberFormatException ignored) {
+            return mPrefs.speed;
+        }
+    }
+
+    private boolean shouldMatchFrameRate(long duration) {
+        if ("off".equals(mPlusPrefs.frameRatePolicy)) {
+            return false;
+        }
+        if ("all".equals(mPlusPrefs.frameRatePolicy)) {
+            return true;
+        }
+        if ("long_form".equals(mPlusPrefs.frameRatePolicy)) {
+            return duration != C.TIME_UNSET
+                    && duration >= TimeUnit.MINUTES.toMillis(20);
+        }
+        return mPrefs.frameRateMatching;
+    }
+
     public void initializePlayer() {
         boolean isNetworkUri = Utils.isSupportedNetworkUri(mPrefs.mediaUri);
         haveMedia = mPrefs.mediaUri != null;
@@ -1281,9 +1316,11 @@ public class PlayerActivity extends Activity {
                 timeBar.setBufferedColor(0x33FFFFFF);
             }
 
-            playerView.setResizeMode(mPrefs.resizeMode);
+            final int initialResizeMode = getInitialResizeMode();
+            playerView.setResizeMode(initialResizeMode);
 
-            if (mPrefs.resizeMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM) {
+            if (initialResizeMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                    && "remember".equals(mPlusPrefs.resizeDefault)) {
                 playerView.setScale(mPrefs.scale);
             } else {
                 playerView.setScale(1.f);
@@ -1508,14 +1545,10 @@ public class PlayerActivity extends Activity {
                         updateSubtitleViewMargin(format);
                     }
 
-                    if (duration != C.TIME_UNSET && duration > TimeUnit.MINUTES.toMillis(20)) {
-                        timeBar.setKeyTimeIncrement(TimeUnit.MINUTES.toMillis(1));
-                    } else {
-                        timeBar.setKeyCountIncrement(20);
-                    }
+                    timeBar.setKeyTimeIncrement(mPlusPrefs.seekIncrementMs);
 
                     boolean switched = false;
-                    if (mPrefs.frameRateMatching) {
+                    if (shouldMatchFrameRate(duration)) {
                         if (play) {
                             if (displayManager == null) {
                                 displayManager = (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
@@ -1564,8 +1597,9 @@ public class PlayerActivity extends Activity {
 
                     updateLoading(false);
 
-                    if (mPrefs.speed <= 0.99f || mPrefs.speed >= 1.01f) {
-                        player.setPlaybackSpeed(mPrefs.speed);
+                    final float initialPlaybackSpeed = getInitialPlaybackSpeed();
+                    if (initialPlaybackSpeed <= 0.99f || initialPlaybackSpeed >= 1.01f) {
+                        player.setPlaybackSpeed(initialPlaybackSpeed);
                     }
                     boolean restoredSubtitleSelection = false;
                     boolean restoredAudioSelection = false;
