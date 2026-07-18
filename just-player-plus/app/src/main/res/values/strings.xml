@@ -96,4 +96,10 @@
     <string name="pref_external_player_diagnostics_summary">Record received intents, resume positions and selected tracks for troubleshooting</string>
     <string name="exit_playback_query">Exit playback?</string>
     <string name="exit_playback_confirm">Exit</string>
+    <string name="pref_external_player_diagnostics_view">View diagnostics</string>
+    <string name="pref_external_player_diagnostics_view_summary">Inspect received intent data, available tracks, selection reasons, results and playback errors</string>
+    <string name="pref_external_player_diagnostics_empty">No diagnostics have been recorded yet.</string>
+    <string name="pref_external_player_diagnostics_copy">Copy</string>
+    <string name="pref_external_player_diagnostics_copied">Diagnostics copied</string>
+    <string name="pref_external_player_diagnostics_clear">Clear</string>
 </resources>

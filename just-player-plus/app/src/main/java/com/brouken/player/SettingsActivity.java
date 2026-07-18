@@ -1,5 +1,9 @@
 package com.brouken.player;
 
+import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.os.Build;
@@ -7,6 +11,7 @@ import android.os.Bundle;
 import android.text.InputType;
 import android.view.View;
 import android.widget.LinearLayout;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -134,6 +139,40 @@ public class SettingsActivity extends AppCompatActivity {
                     return (value == null || value.isEmpty() ? "0" : value) + " ms";
                 });
             }
+
+            Preference diagnostics = findPreference("externalPlayerDiagnosticsView");
+            if (diagnostics != null) {
+                diagnostics.setOnPreferenceClickListener(preference -> {
+                    showDiagnostics();
+                    return true;
+                });
+            }
+        }
+
+        private void showDiagnostics() {
+            Context context = requireContext();
+            String log = ExternalPlayerDiagnostics.read(context);
+            String visibleLog = log.isEmpty()
+                    ? getString(R.string.pref_external_player_diagnostics_empty) : log;
+            new AlertDialog.Builder(context)
+                    .setTitle(R.string.pref_external_player_diagnostics_view)
+                    .setMessage(visibleLog)
+                    .setPositiveButton(R.string.pref_external_player_diagnostics_copy,
+                            (dialog, which) -> {
+                                ClipboardManager clipboard = (ClipboardManager)
+                                        context.getSystemService(Context.CLIPBOARD_SERVICE);
+                                if (clipboard != null) {
+                                    clipboard.setPrimaryClip(ClipData.newPlainText(
+                                            "JustPlayer Plus diagnostics", visibleLog));
+                                    Toast.makeText(context,
+                                            R.string.pref_external_player_diagnostics_copied,
+                                            Toast.LENGTH_SHORT).show();
+                                }
+                            })
+                    .setNeutralButton(R.string.pref_external_player_diagnostics_clear,
+                            (dialog, which) -> ExternalPlayerDiagnostics.clear(context))
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
         }
 
         private void setupLanguagePreference(String key, boolean includeDefault,
