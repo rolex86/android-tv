@@ -1892,7 +1892,9 @@ public class PlayerActivity extends Activity {
         if ("forced".equals(mode)) {
             subtitleOverride = SmartSubtitleSelector.findForcedSubtitle(
                     player.getCurrentTracks(), languages, allowMediaDefault,
-                    mPlusPrefs.allowUnknownSubtitles);
+                    mPlusPrefs.allowUnknownSubtitles,
+                    mPlusPrefs.ignoreSdhSubtitles,
+                    mPlusPrefs.subtitleSourcePreference);
         } else if ("foreign_audio".equals(mode)) {
             boolean nativeAudio = SmartSubtitleSelector.isAudioLanguageNative(
                     player.getAudioFormat(), Utils.getDeviceLanguages());
@@ -1900,17 +1902,23 @@ public class PlayerActivity extends Activity {
                 if (mPlusPrefs.preferForcedSubtitles) {
                     subtitleOverride = SmartSubtitleSelector.findForcedSubtitle(
                             player.getCurrentTracks(), languages, allowMediaDefault,
-                            mPlusPrefs.allowUnknownSubtitles);
+                            mPlusPrefs.allowUnknownSubtitles,
+                    mPlusPrefs.ignoreSdhSubtitles,
+                    mPlusPrefs.subtitleSourcePreference);
                 }
             } else {
                 subtitleOverride = SmartSubtitleSelector.findFullSubtitle(
                         player.getCurrentTracks(), languages, allowMediaDefault,
-                        mPlusPrefs.allowUnknownSubtitles);
+                        mPlusPrefs.allowUnknownSubtitles,
+                    mPlusPrefs.ignoreSdhSubtitles,
+                    mPlusPrefs.subtitleSourcePreference);
             }
         } else if ("always".equals(mode)) {
             subtitleOverride = SmartSubtitleSelector.findFullSubtitle(
                     player.getCurrentTracks(), languages, allowMediaDefault,
-                    mPlusPrefs.allowUnknownSubtitles);
+                    mPlusPrefs.allowUnknownSubtitles,
+                    mPlusPrefs.ignoreSdhSubtitles,
+                    mPlusPrefs.subtitleSourcePreference);
         }
 
         TrackSelectionParameters.Builder builder =
@@ -2123,7 +2131,18 @@ public class PlayerActivity extends Activity {
         final CaptioningManager captioningManager = (CaptioningManager) getSystemService(Context.CAPTIONING_SERVICE);
         final SubtitleView subtitleView = playerView.getSubtitleView();
         final boolean isTablet = Utils.isTablet(context);
-        subtitlesScale = SubtitleUtils.normalizeFontScale(captioningManager.getFontScale(), isTvBox || isTablet);
+        mPlusPrefs.reload();
+        subtitlesScale = SubtitleUtils.normalizeFontScale(
+                captioningManager.getFontScale(), isTvBox || isTablet);
+        if (!"system".equals(mPlusPrefs.subtitleScale)) {
+            try {
+                float requestedScale = Float.parseFloat(mPlusPrefs.subtitleScale) / 100f;
+                subtitlesScale = SubtitleUtils.normalizeFontScale(
+                        1f, isTvBox || isTablet) * requestedScale;
+            } catch (NumberFormatException ignored) {
+                // Keep the system-derived size for malformed stored values.
+            }
+        }
         if (subtitleView != null) {
             final CaptioningManager.CaptionStyle userStyle = captioningManager.getUserStyle();
             final CaptionStyleCompat userStyleCompat = CaptionStyleCompat.createFromCaptionStyle(userStyle);
@@ -2137,7 +2156,13 @@ public class PlayerActivity extends Activity {
                             mPrefs.subtitleStyleBold ? Typeface.BOLD : Typeface.NORMAL));
             subtitleView.setStyle(captionStyle);
             subtitleView.setApplyEmbeddedStyles(mPrefs.subtitleStyleEmbedded);
-            subtitleView.setBottomPaddingFraction(SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION * 2f / 3f);
+            float bottomPadding = SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION * 2f / 3f;
+            if ("bottom".equals(mPlusPrefs.subtitlePosition)) {
+                bottomPadding = 0.02f;
+            } else if ("raised".equals(mPlusPrefs.subtitlePosition)) {
+                bottomPadding = 0.14f;
+            }
+            subtitleView.setBottomPaddingFraction(bottomPadding);
         }
         setSubtitleTextSize();
     }

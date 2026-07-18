@@ -275,7 +275,9 @@ class SubtitleUtils {
                 .setMimeType(subtitleMime)
                 .setLanguage(subtitleLanguage)
                 .setRoleFlags(C.ROLE_FLAG_SUBTITLE)
-                .setLabel(subtitleName);
+                .setLabel(subtitleName)
+                .setId(SmartSubtitleSelector.EXTERNAL_ID_PREFIX
+                        + Integer.toHexString(uri.toString().hashCode()));
         if (selected) {
             subtitleConfigurationBuilder.setSelectionFlags(C.SELECTION_FLAG_DEFAULT);
         }
