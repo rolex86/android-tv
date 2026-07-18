@@ -4,6 +4,7 @@ import android.content.res.Configuration;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.InputType;
 import android.view.View;
 import android.widget.LinearLayout;
 
@@ -11,6 +12,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.ActionBar;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.preference.EditTextPreference;
 import androidx.preference.ListPreference;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
@@ -109,15 +111,51 @@ public class SettingsActivity extends AppCompatActivity {
                 listPreferenceFileAccess.setEntryValues(values.toArray(new String[0]));
             }
 
-            ListPreference listPreferenceLanguageAudio = findPreference("languageAudio");
-            if (listPreferenceLanguageAudio != null) {
-                LinkedHashMap<String, String> entries = new LinkedHashMap<>();
-                entries.put(Prefs.TRACK_DEFAULT, getString(R.string.pref_language_track_default));
-                entries.put(Prefs.TRACK_DEVICE, getString(R.string.pref_language_track_device));
-                entries.putAll(getLanguages());
-                listPreferenceLanguageAudio.setEntries(entries.values().toArray(new String[0]));
-                listPreferenceLanguageAudio.setEntryValues(entries.keySet().toArray(new String[0]));
+            setupLanguagePreference(
+                    PlusPrefs.KEY_AUDIO_LANGUAGE_PRIMARY, true, true, false);
+            setupLanguagePreference(
+                    PlusPrefs.KEY_AUDIO_LANGUAGE_SECONDARY, true, true, true);
+            setupLanguagePreference(
+                    PlusPrefs.KEY_AUDIO_LANGUAGE_TERTIARY, true, true, true);
+            setupLanguagePreference(
+                    PlusPrefs.KEY_SUBTITLE_LANGUAGE_PRIMARY, true, true, false);
+            setupLanguagePreference(
+                    PlusPrefs.KEY_SUBTITLE_LANGUAGE_SECONDARY, true, true, true);
+            setupLanguagePreference(
+                    PlusPrefs.KEY_SUBTITLE_LANGUAGE_TERTIARY, true, true, true);
+
+            EditTextPreference subtitleDelay = findPreference(PlusPrefs.KEY_SUBTITLE_DELAY_MS);
+            if (subtitleDelay != null) {
+                subtitleDelay.setOnBindEditTextListener(editText -> editText.setInputType(
+                        InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_SIGNED));
+                subtitleDelay.setSummaryProvider(preference -> {
+                    String value = preference.getText();
+                    return (value == null || value.isEmpty() ? "0" : value) + " ms";
+                });
             }
+        }
+
+        private void setupLanguagePreference(String key, boolean includeDefault,
+                                             boolean includeDevice, boolean includeNone) {
+            ListPreference preference = findPreference(key);
+            if (preference == null) {
+                return;
+            }
+
+            LinkedHashMap<String, String> entries = new LinkedHashMap<>();
+            if (includeNone) {
+                entries.put(PlusPrefs.TRACK_NONE, getString(R.string.pref_language_track_none));
+            }
+            if (includeDefault) {
+                entries.put(Prefs.TRACK_DEFAULT, getString(R.string.pref_language_track_default));
+            }
+            if (includeDevice) {
+                entries.put(Prefs.TRACK_DEVICE, getString(R.string.pref_language_track_device));
+            }
+            entries.putAll(getLanguages());
+
+            preference.setEntries(entries.values().toArray(new String[0]));
+            preference.setEntryValues(entries.keySet().toArray(new String[0]));
         }
 
         @Override
