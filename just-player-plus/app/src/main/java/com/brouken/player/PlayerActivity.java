@@ -1561,11 +1561,17 @@ public class PlayerActivity extends Activity {
                         player.setPlaybackSpeed(mPrefs.speed);
                     }
                     boolean restoredSubtitleSelection = false;
+                    boolean restoredAudioSelection = false;
                     if (!apiAccess) {
                         restoredSubtitleSelection = "#none".equals(mPrefs.subtitleTrackId)
                                 || getTrackGroupFromFormatId(
                                 C.TRACK_TYPE_TEXT, mPrefs.subtitleTrackId) != null;
+                        restoredAudioSelection = getTrackGroupFromFormatId(
+                                C.TRACK_TYPE_AUDIO, mPrefs.audioTrackId) != null;
                         setSelectedTracks(mPrefs.subtitleTrackId, mPrefs.audioTrackId);
+                    }
+                    if (!restoredAudioSelection) {
+                        applySmartAudioSelection();
                     }
                     if (!restoredSubtitleSelection) {
                         applySmartSubtitleSelection();
@@ -1746,6 +1752,29 @@ public class PlayerActivity extends Activity {
         }
 
         player.setTrackSelectionParameters(builder.build());
+    }
+
+    private void applySmartAudioSelection() {
+        if (player == null) {
+            return;
+        }
+
+        mPlusPrefs.reload();
+        if (!mPlusPrefs.ignoreCommentaryAudio && !mPlusPrefs.ignoreAudioDescription) {
+            return;
+        }
+
+        TrackSelectionOverride audioOverride = SmartAudioSelector.findPreferredAudio(
+                player.getCurrentTracks(),
+                mPlusPrefs.getPreferredAudioLanguages(),
+                mPlusPrefs.ignoreCommentaryAudio,
+                mPlusPrefs.ignoreAudioDescription);
+        if (audioOverride != null) {
+            player.setTrackSelectionParameters(
+                    player.getTrackSelectionParameters().buildUpon()
+                            .setOverrideForType(audioOverride)
+                            .build());
+        }
     }
 
     private void applySmartSubtitleSelection() {
