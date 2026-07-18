@@ -12,7 +12,7 @@ import java.util.Collections;
 import java.util.Locale;
 import java.util.MissingResourceException;
 
-/** Filters commentary and audio-description tracks without changing audio rendering. */
+/** Filters and ranks audio tracks without changing audio rendering or passthrough. */
 final class SmartAudioSelector {
     private SmartAudioSelector() {}
 
@@ -21,12 +21,15 @@ final class SmartAudioSelector {
             Tracks tracks,
             String[] preferredLanguages,
             boolean ignoreCommentary,
-            boolean ignoreAudioDescription) {
+            boolean ignoreAudioDescription,
+            boolean preferBestQuality) {
         Candidate best = findBest(
-                tracks, preferredLanguages, ignoreCommentary, ignoreAudioDescription);
+                tracks, preferredLanguages, ignoreCommentary,
+                ignoreAudioDescription, preferBestQuality);
         if (best == null) {
             // Never leave the user without audio only because all labels are unusual.
-            best = findBest(tracks, preferredLanguages, false, false);
+            best = findBest(
+                    tracks, preferredLanguages, false, false, preferBestQuality);
         }
         if (best == null) {
             return null;
@@ -40,7 +43,8 @@ final class SmartAudioSelector {
             Tracks tracks,
             String[] preferredLanguages,
             boolean ignoreCommentary,
-            boolean ignoreAudioDescription) {
+            boolean ignoreAudioDescription,
+            boolean preferBestQuality) {
         Candidate best = null;
         int sourceOrder = 0;
 
@@ -69,7 +73,8 @@ final class SmartAudioSelector {
                     languageRank = preferredLanguages.length + 100;
                 }
                 Candidate candidate = new Candidate(
-                        trackGroup, trackIndex, languageRank, sourceOrder++);
+                        trackGroup, trackIndex, format, languageRank,
+                        sourceOrder++, preferBestQuality);
                 if (best == null || candidate.score < best.score) {
                     best = candidate;
                 }
@@ -116,6 +121,34 @@ final class SmartAudioSelector {
         return -1;
     }
 
+    private static int formatRank(@Nullable String mimeType) {
+        if (mimeType == null) {
+            return 50;
+        }
+        switch (mimeType) {
+            case "audio/true-hd":
+                return 0;
+            case "audio/vnd.dts.hd":
+                return 1;
+            case "audio/eac3-joc":
+                return 2;
+            case "audio/eac3":
+                return 3;
+            case "audio/vnd.dts":
+                return 4;
+            case "audio/ac3":
+                return 5;
+            case "audio/flac":
+                return 6;
+            case "audio/opus":
+                return 7;
+            case "audio/mp4a-latm":
+                return 8;
+            default:
+                return 20;
+        }
+    }
+
     private static String normalizeLanguage(String language) {
         String clean = language.replace('_', '-');
         Locale locale = Locale.forLanguageTag(clean);
@@ -150,10 +183,27 @@ final class SmartAudioSelector {
         final int trackIndex;
         final long score;
 
-        Candidate(TrackGroup trackGroup, int trackIndex, int languageRank, int sourceOrder) {
+        Candidate(TrackGroup trackGroup,
+                  int trackIndex,
+                  Format format,
+                  int languageRank,
+                  int sourceOrder,
+                  boolean preferBestQuality) {
             this.trackGroup = trackGroup;
             this.trackIndex = trackIndex;
-            this.score = ((long) languageRank * 1_000_000L) + sourceOrder;
+
+            long languageScore = (long) languageRank * 1_000_000_000L;
+            if (!preferBestQuality) {
+                this.score = languageScore + sourceOrder;
+                return;
+            }
+
+            int channels = Math.max(0, format.channelCount);
+            int bitrate = Math.max(0, format.bitrate);
+            long qualityScore = (long) formatRank(format.sampleMimeType) * 10_000_000L
+                    + (long) (32 - Math.min(32, channels)) * 100_000L
+                    + (100_000L - Math.min(100_000L, bitrate / 100));
+            this.score = languageScore + qualityScore + sourceOrder;
         }
     }
 }
