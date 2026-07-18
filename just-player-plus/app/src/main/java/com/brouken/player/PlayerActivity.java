@@ -129,6 +129,7 @@ public class PlayerActivity extends Activity {
     public Prefs mPrefs;
     public PlusPrefs mPlusPrefs;
     private RememberedTrackStore rememberedTrackStore;
+    private ExternalPlayerDiagnostics externalDiagnostics;
     private boolean trackMemoryArmed;
     private String trackMemorySignature;
     public BrightnessControl mBrightnessControl;
@@ -228,6 +229,7 @@ public class PlayerActivity extends Activity {
         mPrefs = new Prefs(this);
         mPlusPrefs = new PlusPrefs(this);
         rememberedTrackStore = new RememberedTrackStore(this);
+        externalDiagnostics = new ExternalPlayerDiagnostics(this);
         Utils.setOrientation(this, mPrefs.orientation);
 
         super.onCreate(savedInstanceState);
@@ -329,6 +331,17 @@ public class PlayerActivity extends Activity {
             }
             focusPlay = true;
         }
+
+        long requestedPosition = mPrefs.mediaUri != null
+                ? mPrefs.getPosition() : C.TIME_UNSET;
+        externalDiagnostics.recordLaunch(
+                mPrefs.mediaUri,
+                apiTitle,
+                apiAccess,
+                apiAccessPartial,
+                intentReturnResult,
+                requestedPosition,
+                apiSubs.size());
 
         coordinatorLayout = findViewById(R.id.coordinatorLayout);
         mAudioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
@@ -868,9 +881,13 @@ public class PlayerActivity extends Activity {
     @Override
     public void finish() {
         snapshotPlaybackResult();
+        String resultEndBy = playbackFinished ? "playback_completion" : "user";
+        if (apiAccess || apiAccessPartial || intentReturnResult) {
+            externalDiagnostics.recordResult(resultPosition, resultDuration, resultEndBy);
+        }
         if (intentReturnResult) {
             Intent intent = new Intent("com.mxtech.intent.result.VIEW");
-            intent.putExtra(API_END_BY, playbackFinished ? "playback_completion" : "user");
+            intent.putExtra(API_END_BY, resultEndBy);
             if (resultDuration != C.TIME_UNSET) {
                 intent.putExtra(API_DURATION, externalResultValue(resultDuration));
             }
@@ -1686,6 +1703,8 @@ public class PlayerActivity extends Activity {
                     }
                     boolean restoredSubtitleSelection = false;
                     boolean restoredAudioSelection = false;
+                    String audioSelectionReason = "media_default";
+                    String subtitleSelectionReason = "smart_subtitle_policy";
                     if (!apiAccess) {
                         restoredSubtitleSelection = "#none".equals(mPrefs.subtitleTrackId)
                                 || getTrackGroupFromFormatId(
@@ -1693,6 +1712,12 @@ public class PlayerActivity extends Activity {
                         restoredAudioSelection = getTrackGroupFromFormatId(
                                 C.TRACK_TYPE_AUDIO, mPrefs.audioTrackId) != null;
                         setSelectedTracks(mPrefs.subtitleTrackId, mPrefs.audioTrackId);
+                        if (restoredAudioSelection) {
+                            audioSelectionReason = "saved_file_selection";
+                        }
+                        if (restoredSubtitleSelection) {
+                            subtitleSelectionReason = "saved_file_selection";
+                        }
                     }
 
                     mPlusPrefs.reload();
@@ -1702,18 +1727,30 @@ public class PlayerActivity extends Activity {
                     if (!restoredAudioSelection && rememberedSelection != null) {
                         restoredAudioSelection =
                                 applyRememberedAudioSelection(rememberedSelection);
+                        if (restoredAudioSelection) {
+                            audioSelectionReason = "remembered_" + mPlusPrefs.rememberTrackScope;
+                        }
                     }
                     if (!restoredSubtitleSelection && rememberedSelection != null) {
                         restoredSubtitleSelection =
                                 applyRememberedSubtitleSelection(rememberedSelection);
+                        if (restoredSubtitleSelection) {
+                            subtitleSelectionReason = "remembered_" + mPlusPrefs.rememberTrackScope;
+                        }
                     }
                     if (!restoredAudioSelection) {
                         applySmartAudioSelection();
+                        audioSelectionReason = "smart_audio_policy";
                     }
                     if (!restoredSubtitleSelection) {
                         applySmartSubtitleSelection();
+                        subtitleSelectionReason = "smart_subtitle_policy";
                     }
                     armTrackMemory();
+                    final String diagnosticAudioReason = audioSelectionReason;
+                    final String diagnosticSubtitleReason = subtitleSelectionReason;
+                    playerView.postDelayed(() -> externalDiagnostics.recordTracks(
+                            player, diagnosticAudioReason, diagnosticSubtitleReason), 300L);
                 }
             } else if (state == Player.STATE_ENDED) {
                 playbackFinished = true;
@@ -1731,6 +1768,7 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onPlayerError(PlaybackException error) {
+            externalDiagnostics.recordError(error);
             updateLoading(false);
             if (error instanceof ExoPlaybackException) {
                 final ExoPlaybackException exoPlaybackException = (ExoPlaybackException) error;
@@ -1957,10 +1995,6 @@ public class PlayerActivity extends Activity {
         if (!trackMemoryArmed || player == null) {
             return;
         }
-        mPlusPrefs.reload();
-        if ("off".equals(mPlusPrefs.rememberTrackScope)) {
-            return;
-        }
         RememberedTrackStore.Selection selection = RememberedTrackStore.capture(
                 tracks, player.getTrackSelectionParameters());
         String signature = selection.signature();
@@ -1968,6 +2002,12 @@ public class PlayerActivity extends Activity {
             return;
         }
         trackMemorySignature = signature;
+        externalDiagnostics.recordTracks(player, "manual_selection", "manual_selection");
+
+        mPlusPrefs.reload();
+        if ("off".equals(mPlusPrefs.rememberTrackScope)) {
+            return;
+        }
         rememberedTrackStore.save(
                 mPlusPrefs.rememberTrackScope, apiTitle, mPrefs.mediaUri, selection);
     }

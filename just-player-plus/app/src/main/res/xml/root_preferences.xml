@@ -252,6 +252,12 @@
             app:summary="@string/pref_external_player_diagnostics_summary"
             app:title="@string/pref_external_player_diagnostics" />
 
+        <Preference
+            app:key="externalPlayerDiagnosticsView"
+            app:dependency="externalPlayerDiagnostics"
+            app:summary="@string/pref_external_player_diagnostics_view_summary"
+            app:title="@string/pref_external_player_diagnostics_view" />
+
     </PreferenceCategory>
 
     <PreferenceCategory app:title="@string/pref_dangerous_header">
