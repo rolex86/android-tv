@@ -14,6 +14,8 @@ import java.util.MissingResourceException;
 
 /** Selects subtitle tracks without changing any audio or video renderer configuration. */
 final class SmartSubtitleSelector {
+    static final String EXTERNAL_ID_PREFIX = "plus-external:";
+
     private SmartSubtitleSelector() {}
 
     @Nullable
@@ -21,16 +23,18 @@ final class SmartSubtitleSelector {
             Tracks tracks,
             String[] preferredLanguages,
             boolean allowMediaDefault,
-            boolean allowUnknownLanguage) {
+            boolean allowUnknownLanguage,
+            boolean ignoreSdh,
+            String sourcePreference) {
         TrackSelectionOverride regular = findBest(
                 tracks, preferredLanguages, allowMediaDefault, allowUnknownLanguage,
-                false, true);
+                ignoreSdh, sourcePreference, false, true);
         if (regular != null) {
             return regular;
         }
         return findBest(
                 tracks, preferredLanguages, allowMediaDefault, allowUnknownLanguage,
-                true, false);
+                ignoreSdh, sourcePreference, true, false);
     }
 
     @Nullable
@@ -38,10 +42,12 @@ final class SmartSubtitleSelector {
             Tracks tracks,
             String[] preferredLanguages,
             boolean allowMediaDefault,
-            boolean allowUnknownLanguage) {
+            boolean allowUnknownLanguage,
+            boolean ignoreSdh,
+            String sourcePreference) {
         return findBest(
                 tracks, preferredLanguages, allowMediaDefault, allowUnknownLanguage,
-                true, false);
+                ignoreSdh, sourcePreference, true, false);
     }
 
     static boolean isAudioLanguageNative(@Nullable Format audioFormat, String[] nativeLanguages) {
@@ -63,9 +69,12 @@ final class SmartSubtitleSelector {
             String[] preferredLanguages,
             boolean allowMediaDefault,
             boolean allowUnknownLanguage,
+            boolean ignoreSdh,
+            String sourcePreference,
             boolean requireForced,
             boolean excludeForced) {
         Candidate best = null;
+        int sourceOrder = 0;
 
         for (Tracks.Group group : tracks.getGroups()) {
             if (group.getType() != C.TRACK_TYPE_TEXT) {
@@ -74,14 +83,21 @@ final class SmartSubtitleSelector {
             TrackGroup trackGroup = group.getMediaTrackGroup();
             for (int trackIndex = 0; trackIndex < trackGroup.length; trackIndex++) {
                 if (!group.isTrackSupported(trackIndex)) {
+                    sourceOrder++;
                     continue;
                 }
                 Format format = trackGroup.getFormat(trackIndex);
                 boolean forced = isForced(format);
                 if (requireForced && !forced) {
+                    sourceOrder++;
                     continue;
                 }
                 if (excludeForced && forced) {
+                    sourceOrder++;
+                    continue;
+                }
+                if (ignoreSdh && isSdh(format)) {
+                    sourceOrder++;
                     continue;
                 }
 
@@ -92,23 +108,45 @@ final class SmartSubtitleSelector {
                 }
                 if (languageRank < 0) {
                     if (!allowUnknownLanguage || !hasUnknownLanguage(format)) {
+                        sourceOrder++;
                         continue;
                     }
                     languageRank = preferredLanguages.length + 100;
                 }
 
-                Candidate candidate = new Candidate(trackGroup, trackIndex, languageRank);
+                Candidate candidate = new Candidate(
+                        trackGroup,
+                        trackIndex,
+                        languageRank,
+                        sourceRank(format, sourcePreference),
+                        sourceOrder++);
                 if (best == null || candidate.score < best.score) {
                     best = candidate;
                 }
             }
         }
 
+        if (best == null && ignoreSdh) {
+            return findBest(
+                    tracks, preferredLanguages, allowMediaDefault, allowUnknownLanguage,
+                    false, sourcePreference, requireForced, excludeForced);
+        }
         if (best == null) {
             return null;
         }
         return new TrackSelectionOverride(
                 best.trackGroup, Collections.singletonList(best.trackIndex));
+    }
+
+    private static int sourceRank(Format format, String sourcePreference) {
+        boolean external = format.id != null && format.id.startsWith(EXTERNAL_ID_PREFIX);
+        if ("external".equals(sourcePreference)) {
+            return external ? 0 : 1;
+        }
+        if ("embedded".equals(sourcePreference)) {
+            return external ? 1 : 0;
+        }
+        return 0;
     }
 
     private static int languageRank(Format format, String[] preferredLanguages) {
@@ -174,6 +212,19 @@ final class SmartSubtitleSelector {
                 || containsLabelPhrase(label, "erzwungen");
     }
 
+    private static boolean isSdh(Format format) {
+        if ((format.roleFlags & C.ROLE_FLAG_CAPTION) != 0) {
+            return true;
+        }
+        String label = normalizeLabel(format.label);
+        return containsLabelToken(label, "sdh")
+                || containsLabelToken(label, "hi")
+                || containsLabelPhrase(label, "hearing impaired")
+                || containsLabelPhrase(label, "hard of hearing")
+                || containsLabelPhrase(label, "neslysici")
+                || containsLabelPhrase(label, "pro neslysici");
+    }
+
     private static boolean hasUnknownLanguage(Format format) {
         return isUndetermined(format.language) && normalizeLabel(format.label).isEmpty();
     }
@@ -225,12 +276,18 @@ final class SmartSubtitleSelector {
     private static final class Candidate {
         final TrackGroup trackGroup;
         final int trackIndex;
-        final int score;
+        final long score;
 
-        Candidate(TrackGroup trackGroup, int trackIndex, int score) {
+        Candidate(TrackGroup trackGroup,
+                  int trackIndex,
+                  int languageRank,
+                  int sourceRank,
+                  int sourceOrder) {
             this.trackGroup = trackGroup;
             this.trackIndex = trackIndex;
-            this.score = score;
+            this.score = ((long) languageRank * 1_000_000L)
+                    + ((long) sourceRank * 100_000L)
+                    + sourceOrder;
         }
     }
 }
