@@ -1210,7 +1210,7 @@ public class PlayerActivity extends Activity {
                 .setSelectUndeterminedTextLanguage(mPlusPrefs.allowUnknownSubtitles)
                 .setSelectTextByDefault(false)
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true);
-        trackSelector.setParameters(subtitleParameters);
+        trackSelector.setParameters(subtitleParameters.build());
         // https://github.com/google/ExoPlayer/issues/8571
         DefaultExtractorsFactory extractorsFactory = new DefaultExtractorsFactory()
                 .setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ENABLE_HDMV_DTS_AUDIO_STREAMS)
