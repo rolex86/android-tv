@@ -1,0 +1,57 @@
+name: Build JustPlayer Plus
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - just-player-plus/**
+  pull_request:
+    paths:
+      - just-player-plus/**
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: just-player-plus
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: just-player-plus/**/*.gradle*
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Build release APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleLatestUniversalRelease --stacktrace
+
+      - name: Collect APK
+        run: |
+          mkdir -p ../artifacts
+          find app/build/outputs/apk -type f -name '*.apk' -exec cp {} ../artifacts/ \;
+          ls -lah ../artifacts
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: justplayer-plus-apk
+          path: artifacts/*.apk
+          if-no-files-found: error
