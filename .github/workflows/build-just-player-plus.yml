@@ -10,11 +10,10 @@ on:
   pull_request:
     paths:
       - just-player-plus/**
-      - tools/fix_step3_track_parameters.py
       - .github/workflows/build-just-player-plus.yml
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -26,28 +25,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
-          fetch-depth: 0
-
-      - name: Apply step 3 compile fix
-        if: hashFiles('tools/fix_step3_track_parameters.py') != ''
-        working-directory: .
-        run: |
-          python3 tools/fix_step3_track_parameters.py
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add just-player-plus/app/src/main/java/com/brouken/player/PlayerActivity.java
-          git rm tools/fix_step3_track_parameters.py
-          git commit -m "Step 3: build subtitle track parameters"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
-
-      - name: Verify protected playback construction
-        working-directory: .
-        run: |
-          grep -F '.setExtensionRendererMode(mPrefs.decoderPriority)' just-player-plus/app/src/main/java/com/brouken/player/PlayerActivity.java
-          grep -F '.setMapDV7ToHevc(mPrefs.mapDV7ToHevc)' just-player-plus/app/src/main/java/com/brouken/player/PlayerActivity.java
-          grep -F 'player.setAudioAttributes(audioAttributes, true);' just-player-plus/app/src/main/java/com/brouken/player/PlayerActivity.java
 
       - name: Set up Java
         uses: actions/setup-java@v4
