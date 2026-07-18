@@ -94,4 +94,6 @@
     <string name="pref_completion_rule">Mark playback completed</string>
     <string name="pref_external_player_diagnostics">External-player diagnostics</string>
     <string name="pref_external_player_diagnostics_summary">Record received intents, resume positions and selected tracks for troubleshooting</string>
+    <string name="exit_playback_query">Exit playback?</string>
+    <string name="exit_playback_confirm">Exit</string>
 </resources>
