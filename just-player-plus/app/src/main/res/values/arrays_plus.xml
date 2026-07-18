@@ -1,2 +1,154 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources />
+<resources>
+    <string-array name="plus_subtitle_mode_entries">
+        <item>Off</item>
+        <item>Forced subtitles only</item>
+        <item>Preferred subtitles for foreign audio</item>
+        <item>Always use preferred subtitles</item>
+    </string-array>
+    <string-array name="plus_subtitle_mode_values">
+        <item>off</item>
+        <item>forced</item>
+        <item>foreign_audio</item>
+        <item>always</item>
+    </string-array>
+
+    <string-array name="plus_audio_quality_entries">
+        <item>Keep media order</item>
+        <item>Prefer best format and channel count</item>
+    </string-array>
+    <string-array name="plus_audio_quality_values">
+        <item>source</item>
+        <item>best</item>
+    </string-array>
+
+    <string-array name="plus_subtitle_source_entries">
+        <item>Automatic</item>
+        <item>Prefer external subtitles</item>
+        <item>Prefer embedded subtitles</item>
+    </string-array>
+    <string-array name="plus_subtitle_source_values">
+        <item>auto</item>
+        <item>external</item>
+        <item>embedded</item>
+    </string-array>
+
+    <string-array name="plus_remember_scope_entries">
+        <item>Do not remember manual track choices</item>
+        <item>Remember for this title</item>
+        <item>Remember for the whole series</item>
+        <item>Use the last choice globally</item>
+    </string-array>
+    <string-array name="plus_remember_scope_values">
+        <item>off</item>
+        <item>title</item>
+        <item>series</item>
+        <item>global</item>
+    </string-array>
+
+    <string-array name="plus_subtitle_scale_entries">
+        <item>Use system size</item>
+        <item>75%</item>
+        <item>100%</item>
+        <item>125%</item>
+        <item>150%</item>
+    </string-array>
+    <string-array name="plus_subtitle_scale_values">
+        <item>system</item>
+        <item>75</item>
+        <item>100</item>
+        <item>125</item>
+        <item>150</item>
+    </string-array>
+
+    <string-array name="plus_subtitle_position_entries">
+        <item>System position</item>
+        <item>Bottom</item>
+        <item>Raised</item>
+    </string-array>
+    <string-array name="plus_subtitle_position_values">
+        <item>system</item>
+        <item>bottom</item>
+        <item>raised</item>
+    </string-array>
+
+    <string-array name="plus_resize_default_entries">
+        <item>Remember last choice</item>
+        <item>Fit</item>
+        <item>Crop</item>
+    </string-array>
+    <string-array name="plus_resize_default_values">
+        <item>remember</item>
+        <item>fit</item>
+        <item>crop</item>
+    </string-array>
+
+    <string-array name="plus_speed_default_entries">
+        <item>Remember last speed</item>
+        <item>0.50×</item>
+        <item>0.75×</item>
+        <item>1.00×</item>
+        <item>1.25×</item>
+        <item>1.50×</item>
+        <item>2.00×</item>
+    </string-array>
+    <string-array name="plus_speed_default_values">
+        <item>remember</item>
+        <item>0.50</item>
+        <item>0.75</item>
+        <item>1.00</item>
+        <item>1.25</item>
+        <item>1.50</item>
+        <item>2.00</item>
+    </string-array>
+
+    <string-array name="plus_seek_increment_entries">
+        <item>5 seconds</item>
+        <item>10 seconds</item>
+        <item>30 seconds</item>
+        <item>60 seconds</item>
+    </string-array>
+    <string-array name="plus_seek_increment_values">
+        <item>5000</item>
+        <item>10000</item>
+        <item>30000</item>
+        <item>60000</item>
+    </string-array>
+
+    <string-array name="plus_frame_rate_policy_entries">
+        <item>Use original Just Player setting</item>
+        <item>Never match frame rate</item>
+        <item>Match all video</item>
+        <item>Match long-form video only</item>
+    </string-array>
+    <string-array name="plus_frame_rate_policy_values">
+        <item>legacy</item>
+        <item>off</item>
+        <item>all</item>
+        <item>long_form</item>
+    </string-array>
+
+    <string-array name="plus_back_button_entries">
+        <item>Show controls first, then exit</item>
+        <item>Exit immediately</item>
+        <item>Confirm before exit</item>
+    </string-array>
+    <string-array name="plus_back_button_values">
+        <item>controls_then_exit</item>
+        <item>immediate</item>
+        <item>confirm</item>
+    </string-array>
+
+    <string-array name="plus_completion_entries">
+        <item>90%</item>
+        <item>95%</item>
+        <item>98%</item>
+        <item>When 5 minutes remain</item>
+    </string-array>
+    <string-array name="plus_completion_values">
+        <item>percent_90</item>
+        <item>percent_95</item>
+        <item>percent_98</item>
+        <item>remaining_5m</item>
+    </string-array>
+</resources>
