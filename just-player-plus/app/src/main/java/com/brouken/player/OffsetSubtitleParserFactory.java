@@ -114,18 +114,22 @@ final class OffsetSubtitleParserFactory implements SubtitleParser.Factory {
     }
 
     private static long safeAdd(long value, long delta) {
-        try {
-            return Math.addExact(value, delta);
-        } catch (ArithmeticException ignored) {
-            return delta >= 0L ? Long.MAX_VALUE : Long.MIN_VALUE;
+        if (delta > 0L && value > Long.MAX_VALUE - delta) {
+            return Long.MAX_VALUE;
         }
+        if (delta < 0L && value < Long.MIN_VALUE - delta) {
+            return Long.MIN_VALUE;
+        }
+        return value + delta;
     }
 
     private static long safeSubtract(long value, long delta) {
-        try {
-            return Math.subtractExact(value, delta);
-        } catch (ArithmeticException ignored) {
-            return delta >= 0L ? Long.MIN_VALUE : Long.MAX_VALUE;
+        if (delta > 0L && value < Long.MIN_VALUE + delta) {
+            return Long.MIN_VALUE;
         }
+        if (delta < 0L && value > Long.MAX_VALUE + delta) {
+            return Long.MAX_VALUE;
+        }
+        return value - delta;
     }
 }

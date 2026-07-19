@@ -6,10 +6,13 @@ on:
     branches: [main]
     paths:
       - just-player-plus/**
+      - tools/check_plus_preferences.py
       - .github/workflows/build-just-player-plus.yml
   pull_request:
     paths:
       - just-player-plus/**
+      - tools/check_plus_preferences.py
+      - IMPLEMENTATION_PLAN.md
       - .github/workflows/build-just-player-plus.yml
 
 permissions:
@@ -25,6 +28,10 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Verify Plus preference wiring
+        working-directory: .
+        run: python3 tools/check_plus_preferences.py
 
       - name: Set up Java
         uses: actions/setup-java@v4
