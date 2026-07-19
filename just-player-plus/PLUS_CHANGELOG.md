@@ -1,5 +1,11 @@
 # JustPlayer Plus changelog
 
+## Step 17 — Stremio movie titles
+
+- Stremio movie launches now resolve their display title from Cinemeta once at startup.
+- Movie title enrichment performs no playback-position polling and cannot arm the next-episode popup.
+- Late metadata responses are ignored after the player session changes or the connector is disabled.
+
 ## Step 16 — Projected playback end time
 
 - Shows the projected wall-clock end beside the current position and media duration.

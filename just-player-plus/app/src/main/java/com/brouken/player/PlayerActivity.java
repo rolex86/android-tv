@@ -59,6 +59,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 import androidx.appcompat.app.AppCompatDelegate;
 import androidx.coordinatorlayout.widget.CoordinatorLayout;
@@ -882,8 +883,11 @@ public class PlayerActivity extends Activity {
                 return;
             }
             if (!content.isSeries()) {
-                externalDiagnostics.recordStremioConnector(
-                        "next_episode_skipped", "movie/" + content.id);
+                NextEpisodeMetadataResolver resolver = nextEpisodeMetadataResolver;
+                if (resolver != null && isNextEpisodeFeatureEnabled()) {
+                    resolver.resolveMovieTitle(content.id, title -> acceptMovieTitle(
+                            session, content.id, title));
+                }
                 return;
             }
             StremioEpisodeId current = content.episode;
@@ -893,6 +897,26 @@ public class PlayerActivity extends Activity {
                         session, current.raw, result));
             }
         }, delay);
+    }
+
+    private void acceptMovieTitle(int session, String movieId, @Nullable String title) {
+        playerView.post(() -> {
+            if (session != nextEpisodeSession || isFinishing()
+                    || !isNextEpisodeFeatureEnabled()) {
+                return;
+            }
+            if (title == null) {
+                externalDiagnostics.recordStremioConnector(
+                        "movie_title_unavailable", movieId);
+                return;
+            }
+            apiTitle = title;
+            if (titleView != null) {
+                titleView.setText(title);
+            }
+            externalDiagnostics.recordStremioConnector(
+                    "movie_title_resolved", movieId);
+        });
     }
 
     private void acceptEpisodeMetadata(int session,

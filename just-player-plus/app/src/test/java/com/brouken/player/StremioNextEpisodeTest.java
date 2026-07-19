@@ -106,6 +106,21 @@ public class StremioNextEpisodeTest {
         assertNull(result.nextEpisode);
     }
 
+    @Test
+    public void movieMetadataUsesCinemetaName() throws JSONException {
+        String title = NextEpisodeMetadataResolver.parseMovieTitle(
+                "{\"meta\":{\"id\":\"tt123\",\"name\":\"The Matrix\"}}");
+
+        assertEquals("The Matrix", title);
+    }
+
+    @Test
+    public void movieMetadataFallsBackToTitleAndRejectsMissingMeta() throws JSONException {
+        assertEquals("Fallback title", NextEpisodeMetadataResolver.parseMovieTitle(
+                "{\"meta\":{\"title\":\"Fallback title\"}}"));
+        assertNull(NextEpisodeMetadataResolver.parseMovieTitle("{}"));
+    }
+
     private static StremioConnectorStore.Event event(String id, long timestamp) {
         return new StremioConnectorStore.Event("series", id, timestamp);
     }

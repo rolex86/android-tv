@@ -22,14 +22,20 @@ import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
-/** Resolves the next released IMDb/Cinemeta episode, its name, and artwork. */
+/** Resolves IMDb/Cinemeta display metadata and the next released series episode. */
 final class NextEpisodeMetadataResolver {
     private static final Pattern IMDB_ID = Pattern.compile("tt\\d+");
-    private static final String CINEMETA =
+    private static final String CINEMETA_SERIES =
             "https://v3-cinemeta.strem.io/meta/series/%s.json";
+    private static final String CINEMETA_MOVIE =
+            "https://v3-cinemeta.strem.io/meta/movie/%s.json";
 
     interface Listener {
         void onResolved(@Nullable Result result);
+    }
+
+    interface MovieTitleListener {
+        void onResolved(@Nullable String title);
     }
 
     static final class Result {
@@ -61,7 +67,7 @@ final class NextEpisodeMetadataResolver {
             return;
         }
         Request request = new Request.Builder()
-                .url(String.format(java.util.Locale.US, CINEMETA, current.metaId))
+                .url(String.format(java.util.Locale.US, CINEMETA_SERIES, current.metaId))
                 .header("Accept", "application/json")
                 .build();
         client.newCall(request).enqueue(new Callback() {
@@ -84,6 +90,48 @@ final class NextEpisodeMetadataResolver {
                 }
             }
         });
+    }
+
+    /** Resolves a movie title once at launch; no playback-position polling is involved. */
+    void resolveMovieTitle(String movieId, MovieTitleListener listener) {
+        if (movieId == null || !IMDB_ID.matcher(movieId).matches()) {
+            listener.onResolved(null);
+            return;
+        }
+        Request request = new Request.Builder()
+                .url(String.format(java.util.Locale.US, CINEMETA_MOVIE, movieId))
+                .header("Accept", "application/json")
+                .build();
+        client.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(@NonNull Call call, @NonNull IOException error) {
+                listener.onResolved(null);
+            }
+
+            @Override
+            public void onResponse(@NonNull Call call, @NonNull Response response) {
+                try (Response closeable = response) {
+                    ResponseBody body = closeable.body();
+                    if (!closeable.isSuccessful() || body == null) {
+                        listener.onResolved(null);
+                        return;
+                    }
+                    listener.onResolved(parseMovieTitle(body.string()));
+                } catch (IOException | JSONException error) {
+                    listener.onResolved(null);
+                }
+            }
+        });
+    }
+
+    @Nullable
+    static String parseMovieTitle(String json) throws JSONException {
+        JSONObject meta = new JSONObject(json).optJSONObject("meta");
+        if (meta == null) {
+            return null;
+        }
+        return emptyToNull(firstNonEmpty(
+                meta.optString("name", null), meta.optString("title", null)));
     }
 
     /** Derives the next released episode when Stremio observed only the current stream. */
