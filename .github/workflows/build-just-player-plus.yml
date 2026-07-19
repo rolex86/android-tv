@@ -35,8 +35,17 @@ jobs:
         if: hashFiles('tools/apply_step11_original_audio.py') != ''
         working-directory: .
         run: |
-          python3 tools/apply_step11_original_audio.py
-          python3 tools/apply_step11_original_audio_always.py
+          set +e
+          python3 tools/apply_step11_original_audio.py > step11-patch.log 2>&1
+          status=$?
+          if [ "$status" -eq 0 ]; then
+            python3 tools/apply_step11_original_audio_always.py >> step11-patch.log 2>&1
+            status=$?
+          fi
+          cat step11-patch.log
+          if [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add just-player-plus/app/src/main/java/com/brouken/player/PlusPrefs.java \
@@ -49,6 +58,14 @@ jobs:
                  tools/apply_step11_original_audio_always.py
           git commit -m "Step 11: add original and dubbed audio preference"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
+
+      - name: Upload step 11 patch log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: step11-patch-log
+          path: step11-patch.log
+          if-no-files-found: warn
 
       - name: Verify protected playback construction
         working-directory: .
