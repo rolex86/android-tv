@@ -177,14 +177,28 @@ public class SettingsActivity extends AppCompatActivity {
                     Context context = requireContext();
                     if (!StremioConnectorService.start(context)) {
                         Toast.makeText(context,
-                                R.string.pref_stremio_connector_install_failed,
+                                R.string.pref_stremio_connector_start_failed,
                                 Toast.LENGTH_LONG).show();
                         return true;
                     }
                     new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                        ClipboardManager clipboard = (ClipboardManager)
+                                context.getSystemService(Context.CLIPBOARD_SERVICE);
+                        if (clipboard == null) {
+                            Toast.makeText(context,
+                                    R.string.pref_stremio_connector_copy_failed,
+                                    Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        clipboard.setPrimaryClip(ClipData.newPlainText(
+                                "JustPlayer Plus connector",
+                                StremioConnectorService.HTTP_MANIFEST_URL));
+                        Toast.makeText(context,
+                                R.string.pref_stremio_connector_install_instructions,
+                                Toast.LENGTH_LONG).show();
                         try {
                             Intent intent = new Intent(Intent.ACTION_VIEW,
-                                    Uri.parse(StremioConnectorService.INSTALL_URL));
+                                    Uri.parse(StremioConnectorService.STREMIO_ADDONS_URL));
                             startActivity(intent);
                         } catch (RuntimeException error) {
                             Toast.makeText(context,

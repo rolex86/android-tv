@@ -12,15 +12,15 @@ import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Small bounded journal used to correlate Stremio's current and prefetched-next requests. */
+/** Small bounded journal used to correlate Stremio's latest series request with player launch. */
 final class StremioConnectorStore {
     private static final Object LOCK = new Object();
     private static final String PREFS_NAME = "justplayer_plus_stremio_connector";
     private static final String KEY_EVENTS = "stream_requests";
-    private static final String KEY_CLAIMED_PAIR = "claimed_pair";
+    private static final String LEGACY_KEY_CLAIMED_PAIR = "claimed_pair";
+    private static final String KEY_CLAIMED_EPISODE = "claimed_episode";
     private static final int MAX_EVENTS = 24;
-    private static final long MAX_PAIR_AGE_MS = 15 * 60_000L;
-    private static final long MAX_EVENT_GAP_MS = 5 * 60_000L;
+    private static final long MAX_EVENT_AGE_MS = 15 * 60_000L;
     private static final long DEDUPLICATE_WINDOW_MS = 2_000L;
 
     private final SharedPreferences preferences;
@@ -53,65 +53,50 @@ final class StremioConnectorStore {
     }
 
     /**
-     * Returns only a pair that Stremio requested in order: current, then prefetched next.
-     * A lone request is deliberately not treated as evidence that another episode exists.
+     * Claims Stremio's latest current-episode request. Android TV normally asks stream addons
+     * only for the episode being launched, so Cinemeta derives the following episode from it.
      */
     @Nullable
-    Pair claimRecentPair(long nowMs) {
+    StremioEpisodeId claimRecentEpisode(long nowMs) {
         synchronized (LOCK) {
             List<Event> events = readEvents();
-            Pair pair = findRecentPair(events, nowMs);
-            if (pair == null) {
+            Event event = findRecentEvent(events, nowMs);
+            if (event == null) {
                 return null;
             }
-            String token = pair.current.raw + "\n" + pair.next.raw + "\n" + pair.observedAtMs;
-            if (token.equals(preferences.getString(KEY_CLAIMED_PAIR, null))) {
+            String token = event.id + "\n" + event.timestampMs;
+            if (token.equals(preferences.getString(KEY_CLAIMED_EPISODE, null))) {
+                return null;
+            }
+            StremioEpisodeId episode = StremioEpisodeId.parse(event.id);
+            if (episode == null) {
                 return null;
             }
 
-            // Keep the observed next episode as the current seed for the following playback,
-            // but discard older requests so a stale pair cannot be reused on another launch.
-            List<Event> remaining = new ArrayList<>();
-            remaining.add(new Event("series", pair.next.raw, pair.observedAtMs));
-            for (Event event : events) {
-                if (event.timestampMs > pair.observedAtMs) {
-                    remaining.add(event);
-                }
-            }
-            writeEvents(remaining);
-            preferences.edit().putString(KEY_CLAIMED_PAIR, token).apply();
-            return pair;
+            // A single current request supersedes all older observations. A later Stremio
+            // launch will record a fresh event (including when it automatically continues).
+            writeEvents(new ArrayList<>());
+            preferences.edit().putString(KEY_CLAIMED_EPISODE, token).apply();
+            return episode;
         }
     }
 
     @Nullable
-    static Pair findRecentPair(List<Event> events, long nowMs) {
-        for (int nextIndex = events.size() - 1; nextIndex > 0; nextIndex--) {
-            Event nextEvent = events.get(nextIndex);
-            if (nextEvent.timestampMs > nowMs + 10_000L
-                    || nowMs - nextEvent.timestampMs > MAX_PAIR_AGE_MS) {
+    static StremioEpisodeId findRecentEpisode(List<Event> events, long nowMs) {
+        Event event = findRecentEvent(events, nowMs);
+        return event == null ? null : StremioEpisodeId.parse(event.id);
+    }
+
+    @Nullable
+    private static Event findRecentEvent(List<Event> events, long nowMs) {
+        for (int index = events.size() - 1; index >= 0; index--) {
+            Event event = events.get(index);
+            if (event.timestampMs > nowMs + 10_000L
+                    || nowMs - event.timestampMs > MAX_EVENT_AGE_MS) {
                 continue;
             }
-            StremioEpisodeId next = StremioEpisodeId.parse(nextEvent.id);
-            if (next == null) {
-                continue;
-            }
-            for (int currentIndex = nextIndex - 1; currentIndex >= 0; currentIndex--) {
-                Event currentEvent = events.get(currentIndex);
-                long gap = nextEvent.timestampMs - currentEvent.timestampMs;
-                if (gap < 0L) {
-                    continue;
-                }
-                if (gap > MAX_EVENT_GAP_MS) {
-                    break;
-                }
-                StremioEpisodeId current = StremioEpisodeId.parse(currentEvent.id);
-                if (current == null || current.equals(next)) {
-                    continue;
-                }
-                if (current.belongsToSameSeries(next) && isAfter(current, next)) {
-                    return new Pair(current, next, nextEvent.timestampMs);
-                }
+            if ("series".equals(event.type) && StremioEpisodeId.parse(event.id) != null) {
+                return event;
             }
         }
         return null;
@@ -119,13 +104,12 @@ final class StremioConnectorStore {
 
     void clear() {
         synchronized (LOCK) {
-            preferences.edit().remove(KEY_EVENTS).remove(KEY_CLAIMED_PAIR).apply();
+            preferences.edit()
+                    .remove(KEY_EVENTS)
+                    .remove(LEGACY_KEY_CLAIMED_PAIR)
+                    .remove(KEY_CLAIMED_EPISODE)
+                    .apply();
         }
-    }
-
-    private static boolean isAfter(StremioEpisodeId current, StremioEpisodeId next) {
-        return next.season > current.season
-                || next.season == current.season && next.episode > current.episode;
     }
 
     private List<Event> readEvents() {
@@ -167,18 +151,6 @@ final class StremioConnectorStore {
             preferences.edit().putString(KEY_EVENTS, array.toString()).apply();
         } catch (JSONException ignored) {
             // Only primitive values are written, so this is defensive.
-        }
-    }
-
-    static final class Pair {
-        final StremioEpisodeId current;
-        final StremioEpisodeId next;
-        final long observedAtMs;
-
-        Pair(StremioEpisodeId current, StremioEpisodeId next, long observedAtMs) {
-            this.current = current;
-            this.next = next;
-            this.observedAtMs = observedAtMs;
         }
     }
 

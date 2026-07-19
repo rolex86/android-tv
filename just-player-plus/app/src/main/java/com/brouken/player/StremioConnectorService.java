@@ -34,8 +34,7 @@ public final class StremioConnectorService extends Service {
     static final int PORT = 16745;
     static final String HTTP_MANIFEST_URL =
             "http://127.0.0.1:" + PORT + "/manifest.json";
-    static final String INSTALL_URL =
-            "stremio://127.0.0.1:" + PORT + "/manifest.json";
+    static final String STREMIO_ADDONS_URL = "stremio:///addons/series";
 
     private static final String CHANNEL_ID = "stremio_connector";
     private static final int NOTIFICATION_ID = 16745;

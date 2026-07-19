@@ -22,7 +22,7 @@ import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
-/** Resolves IMDb/Cinemeta episode names and artwork; gracefully falls back to observed IDs. */
+/** Resolves the next released IMDb/Cinemeta episode, its name, and artwork. */
 final class NextEpisodeMetadataResolver {
     private static final Pattern IMDB_ID = Pattern.compile("tt\\d+");
     private static final String CINEMETA =
@@ -38,19 +38,19 @@ final class NextEpisodeMetadataResolver {
         this.client = client;
     }
 
-    void resolve(StremioConnectorStore.Pair pair, Listener listener) {
-        if (!IMDB_ID.matcher(pair.current.metaId).matches()) {
-            listener.onResolved(generic(pair));
+    void resolve(StremioEpisodeId current, Listener listener) {
+        if (!IMDB_ID.matcher(current.metaId).matches()) {
+            listener.onResolved(null);
             return;
         }
         Request request = new Request.Builder()
-                .url(String.format(java.util.Locale.US, CINEMETA, pair.current.metaId))
+                .url(String.format(java.util.Locale.US, CINEMETA, current.metaId))
                 .header("Accept", "application/json")
                 .build();
         client.newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException error) {
-                listener.onResolved(generic(pair));
+                listener.onResolved(null);
             }
 
             @Override
@@ -58,57 +58,70 @@ final class NextEpisodeMetadataResolver {
                 try (Response closeable = response) {
                     ResponseBody body = closeable.body();
                     if (!closeable.isSuccessful() || body == null) {
-                        listener.onResolved(generic(pair));
+                        listener.onResolved(null);
                         return;
                     }
-                    listener.onResolved(parse(pair, body.string(), System.currentTimeMillis()));
+                    listener.onResolved(parse(current, body.string(), System.currentTimeMillis()));
                 } catch (IOException | JSONException error) {
-                    listener.onResolved(generic(pair));
+                    listener.onResolved(null);
                 }
             }
         });
     }
 
-    private static NextEpisodeInfo generic(StremioConnectorStore.Pair pair) {
-        return new NextEpisodeInfo(pair.current, pair.next, null, null, null);
-    }
-
+    /** Derives the next released episode when Stremio observed only the current stream. */
     @Nullable
-    static NextEpisodeInfo parse(StremioConnectorStore.Pair pair, String json, long nowMs)
+    static NextEpisodeInfo parse(StremioEpisodeId current, String json, long nowMs)
             throws JSONException {
         JSONObject root = new JSONObject(json);
         JSONObject meta = root.optJSONObject("meta");
         if (meta == null) {
-            return generic(pair);
+            return null;
         }
-        String seriesTitle = meta.optString("name", null);
-        String fallbackArtwork = firstNonEmpty(
-                meta.optString("background", null), meta.optString("poster", null));
         JSONArray videos = meta.optJSONArray("videos");
         if (videos == null) {
-            return new NextEpisodeInfo(
-                    pair.current, pair.next, seriesTitle, null, fallbackArtwork);
+            return null;
         }
-        for (int i = 0; i < videos.length(); i++) {
-            JSONObject video = videos.optJSONObject(i);
-            if (video == null || !pair.next.raw.equals(video.optString("id"))) {
+
+        StremioEpisodeId next = null;
+        JSONObject nextVideo = null;
+        for (int index = 0; index < videos.length(); index++) {
+            JSONObject video = videos.optJSONObject(index);
+            if (video == null) {
                 continue;
             }
-            if (isUpcoming(video.optString("released", null), nowMs)) {
-                return null;
+            StremioEpisodeId candidate = StremioEpisodeId.parse(video.optString("id", null));
+            if (candidate == null
+                    || !current.belongsToSameSeries(candidate)
+                    || !isAfter(current, candidate)
+                    || next != null && !isAfter(candidate, next)) {
+                continue;
             }
-            String artwork = firstNonEmpty(
-                    video.optString("thumbnail", null), fallbackArtwork);
-            return new NextEpisodeInfo(
-                    pair.current,
-                    pair.next,
-                    seriesTitle,
-                    video.optString("title", null),
-                    artwork);
+            next = candidate;
+            nextVideo = video;
         }
-        // The connector observed the exact next id even if Cinemeta is temporarily incomplete.
+        if (next == null || nextVideo == null
+                || isUpcoming(nextVideo.optString("released", null), nowMs)) {
+            return null;
+        }
+
+        String fallbackArtwork = firstNonEmpty(
+                meta.optString("background", null), meta.optString("poster", null));
+        String artwork = firstNonEmpty(
+                nextVideo.optString("thumbnail", null), fallbackArtwork);
         return new NextEpisodeInfo(
-                pair.current, pair.next, seriesTitle, null, fallbackArtwork);
+                current,
+                next,
+                meta.optString("name", null),
+                firstNonEmpty(
+                        nextVideo.optString("title", null),
+                        nextVideo.optString("name", null)),
+                artwork);
+    }
+
+    private static boolean isAfter(StremioEpisodeId current, StremioEpisodeId candidate) {
+        return candidate.season > current.season
+                || candidate.season == current.season && candidate.episode > current.episode;
     }
 
     private static boolean isUpcoming(String released, long nowMs) {

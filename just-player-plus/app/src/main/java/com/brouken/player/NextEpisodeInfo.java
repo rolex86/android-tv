@@ -2,7 +2,7 @@ package com.brouken.player;
 
 import androidx.annotation.Nullable;
 
-/** Display-ready next episode metadata, backed by an observed Stremio next-stream request. */
+/** Display-ready next episode metadata, observed or derived from Stremio episode metadata. */
 final class NextEpisodeInfo {
     final StremioEpisodeId current;
     final StremioEpisodeId next;

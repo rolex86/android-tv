@@ -817,7 +817,7 @@ public class PlayerActivity extends Activity {
             return;
         }
         final int session = nextEpisodeSession;
-        resolveNextEpisodePair(session, 0);
+        resolveNextEpisode(session, 0);
     }
 
     private boolean isStremioCaller() {
@@ -826,44 +826,51 @@ public class PlayerActivity extends Activity {
                 || callingPackage.toLowerCase(Locale.US).contains("stremio");
     }
 
-    private void resolveNextEpisodePair(int session, int attempt) {
+    private void resolveNextEpisode(int session, int attempt) {
         long delay = attempt == 0 ? 900L : 1_200L;
         playerView.postDelayed(() -> {
             if (session != nextEpisodeSession || isFinishing()) {
                 return;
             }
-            StremioConnectorStore.Pair pair = new StremioConnectorStore(this)
-                    .claimRecentPair(System.currentTimeMillis());
-            if (pair == null) {
+            StremioConnectorStore store = new StremioConnectorStore(this);
+            long now = System.currentTimeMillis();
+            StremioEpisodeId current = store.claimRecentEpisode(now);
+            if (current == null) {
                 if (attempt < 3) {
-                    resolveNextEpisodePair(session, attempt + 1);
+                    resolveNextEpisode(session, attempt + 1);
+                } else {
+                    externalDiagnostics.recordStremioConnector(
+                            "next_episode_no_request", "no recent series stream request");
                 }
                 return;
             }
-            nextEpisodeMetadataResolver.resolve(pair, info -> playerView.post(() -> {
-                if (session != nextEpisodeSession || isFinishing()) {
-                    return;
-                }
-                if (info == null) {
-                    externalDiagnostics.recordNextEpisode(
-                            pair.current.raw,
-                            pair.next.raw,
-                            false,
-                            false,
-                            "unreleased");
-                    return;
-                }
-                nextEpisodeInfo = info;
-                externalDiagnostics.recordNextEpisode(
-                        info.current.raw,
-                        info.next.raw,
-                        info.seriesTitle != null,
-                        info.artworkUrl != null,
-                        "resolved");
-                playerView.removeCallbacks(nextEpisodeProgressRunnable);
-                playerView.post(nextEpisodeProgressRunnable);
-            }));
+            nextEpisodeMetadataResolver.resolve(current, info -> acceptNextEpisodeInfo(
+                    session, current.raw, info));
         }, delay);
+    }
+
+    private void acceptNextEpisodeInfo(int session,
+                                       String currentId,
+                                       NextEpisodeInfo info) {
+        playerView.post(() -> {
+            if (session != nextEpisodeSession || isFinishing()) {
+                return;
+            }
+            if (info == null) {
+                externalDiagnostics.recordNextEpisode(
+                        currentId, "", false, false, "unavailable");
+                return;
+            }
+            nextEpisodeInfo = info;
+            externalDiagnostics.recordNextEpisode(
+                    info.current.raw,
+                    info.next.raw,
+                    info.seriesTitle != null,
+                    info.artworkUrl != null,
+                    "resolved");
+            playerView.removeCallbacks(nextEpisodeProgressRunnable);
+            playerView.post(nextEpisodeProgressRunnable);
+        });
     }
 
     private void resetNextEpisodeSession() {
