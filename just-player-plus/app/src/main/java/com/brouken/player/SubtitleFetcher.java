@@ -11,6 +11,7 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 
 import okhttp3.Call;
@@ -23,16 +24,18 @@ import okhttp3.ResponseBody;
 
 class SubtitleFetcher {
 
-    private PlayerActivity activity;
+    private final PlayerActivity activity;
     private CountDownLatch countDownLatch;
     private final List<Uri> urls;
+    private final Uri expectedMediaUri;
     private Uri subtitleUri;
     private final List<Uri> foundUrls;
 
     public SubtitleFetcher(PlayerActivity activity, List<Uri> urls) {
         this.activity = activity;
         this.urls = urls;
-        this.foundUrls = new ArrayList<>();
+        this.expectedMediaUri = activity.mPrefs.mediaUri;
+        this.foundUrls = Collections.synchronizedList(new ArrayList<>());
     }
 
     public void start() {
@@ -51,13 +54,15 @@ class SubtitleFetcher {
 
                 @Override
                 public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
-                    Uri url = Uri.parse(response.request().url().toString());
-                    Utils.log(response.code() + ": " + url);
-                    if (response.isSuccessful()) {
-                        foundUrls.add(url);
+                    try (Response closeableResponse = response) {
+                        Uri url = Uri.parse(closeableResponse.request().url().toString());
+                        Utils.log(closeableResponse.code() + ": " + url);
+                        if (closeableResponse.isSuccessful()) {
+                            foundUrls.add(url);
+                        }
+                    } finally {
+                        countDownLatch.countDown();
                     }
-                    response.close();
-                    countDownLatch.countDown();
                 }
             };
 
@@ -77,7 +82,8 @@ class SubtitleFetcher {
             try {
                 countDownLatch.await();
             } catch (InterruptedException e) {
-                e.printStackTrace();
+                Thread.currentThread().interrupt();
+                return;
             }
 
             for (Uri url : urls) {
@@ -101,6 +107,9 @@ class SubtitleFetcher {
 
             Request request = new Request.Builder().url(subtitleUri.toString()).build();
             try (Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful() || !isTargetCurrent()) {
+                    return;
+                }
                 final ResponseBody responseBody = response.body();
 
                 if (responseBody == null || responseBody.contentLength() > 2_000_000) {
@@ -115,6 +124,9 @@ class SubtitleFetcher {
                 }
 
                 activity.runOnUiThread(() -> {
+                    if (!isTargetCurrent()) {
+                        return;
+                    }
                     activity.mPrefs.updateSubtitle(convertedSubtitleUri);
                     if (PlayerActivity.player != null) {
                         MediaItem mediaItem = PlayerActivity.player.getCurrentMediaItem();
@@ -133,6 +145,12 @@ class SubtitleFetcher {
                 e.printStackTrace();
             }
         }).start();
+    }
+
+    private boolean isTargetCurrent() {
+        return !activity.isFinishing()
+                && !activity.isDestroyed()
+                && Objects.equals(expectedMediaUri, activity.mPrefs.mediaUri);
     }
 
 }

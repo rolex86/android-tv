@@ -213,10 +213,12 @@ public class SettingsActivity extends AppCompatActivity {
                     // MissingResourceException: Couldn't find 3-letter language code for zz
                     String key = locale.getISO3Language();
                     String language = locale.getDisplayLanguage();
-                    int length = language.offsetByCodePoints(0, 1);
-                    if (!language.isEmpty()) {
-                        language = language.substring(0, length).toUpperCase(locale) + language.substring(length);
+                    if (key.isEmpty() || language.isEmpty()) {
+                        continue;
                     }
+                    int length = language.offsetByCodePoints(0, 1);
+                    language = language.substring(0, length).toUpperCase(locale)
+                            + language.substring(length);
                     String value = language + " [" + key + "]";
                     languages.put(key, value);
                 } catch (MissingResourceException e) {

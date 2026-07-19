@@ -68,6 +68,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.MissingResourceException;
 
 class Utils {
 
@@ -390,7 +391,9 @@ class Utils {
         final int minutes = totalSeconds % 3600 / 60;
         final int hours = totalSeconds / 3600;
 
-        return (hours > 0 ? String.format("%d:%02d:%02d", hours, minutes, seconds) : String.format("%02d:%02d", minutes, seconds));
+        return (hours > 0
+                ? String.format(Locale.ROOT, "%d:%02d:%02d", hours, minutes, seconds)
+                : String.format(Locale.ROOT, "%02d:%02d", minutes, seconds));
     }
 
     public static String formatMilisSign(long time) {
@@ -505,8 +508,15 @@ class Utils {
     }
 
     @RequiresApi(api = Build.VERSION_CODES.M)
-    static void handleFrameRate(final PlayerActivity activity, float frameRate, boolean play) {
+    static void handleFrameRate(final PlayerActivity activity,
+                                final Uri mediaUri,
+                                final int playerGeneration,
+                                float frameRate,
+                                boolean play) {
         activity.runOnUiThread(() -> {
+            if (!activity.isCurrentPlayerSession(playerGeneration, mediaUri)) {
+                return;
+            }
             boolean switchingModes = false;
 
             if (BuildConfig.DEBUG)
@@ -607,7 +617,7 @@ class Utils {
                         activity.releasePlayer();
                         Uri uri = DocumentFile.fromFile(pathFile).getUri();
                         if (video) {
-                            activity.mPrefs.setPersistent(true);
+                            activity.resetApiAccess();
                             activity.mPrefs.updateMedia(activity, uri, null);
                             activity.searchSubtitles();
                         } else {
@@ -638,7 +648,7 @@ class Utils {
     public static Uri convertToUTF(PlayerActivity activity, Uri subtitleUri) {
         try {
             String scheme = subtitleUri.getScheme();
-            if (scheme != null && scheme.toLowerCase().startsWith("http")) {
+            if (scheme != null && scheme.toLowerCase(Locale.ROOT).startsWith("http")) {
                 List<Uri> urls = new ArrayList<>();
                 urls.add(subtitleUri);
                 SubtitleFetcher subtitleFetcher = new SubtitleFetcher(activity, urls);
@@ -713,9 +723,9 @@ class Utils {
         if (path == null) {
             return false;
         }
-        path = path.toLowerCase();
+        path = path.toLowerCase(Locale.ROOT);
         for (String extension : supportedExtensionsVideo) {
-            if (path.endsWith(extension)) {
+            if (path.endsWith("." + extension)) {
                 return true;
             }
         }
@@ -727,13 +737,25 @@ class Utils {
         if (Build.VERSION.SDK_INT >= 24) {
             final LocaleList localeList = Resources.getSystem().getConfiguration().getLocales();
             for (int i = 0; i < localeList.size(); i++) {
-                locales.add(localeList.get(i).getISO3Language());
+                addLanguageCode(locales, localeList.get(i));
             }
         } else {
             final Locale locale = Resources.getSystem().getConfiguration().locale;
-            locales.add(locale.getISO3Language());
+            addLanguageCode(locales, locale);
         }
         return locales.toArray(new String[0]);
+    }
+
+    private static void addLanguageCode(List<String> languages, Locale locale) {
+        String language;
+        try {
+            language = locale.getISO3Language();
+        } catch (MissingResourceException ignored) {
+            language = locale.getLanguage();
+        }
+        if (language != null && !language.isEmpty() && !languages.contains(language)) {
+            languages.add(language);
+        }
     }
 
     public static ComponentName getSystemComponent(Context context, Intent intent) {
@@ -816,7 +838,7 @@ class Utils {
             for (int i = 1; i < (timestamps.size() - ignoreSamples); i++) {
                 totalFrameDuration += (timestamps.get(i) - timestamps.get(i - 1));
             }
-            if (timestamps.size() > 1) {
+            if (timestamps.size() > ignoreSamples + 1) {
                 float averageFrameDuration = (float) totalFrameDuration / (timestamps.size() - ignoreSamples - 1);
                 frameRate = 1_000_000f / averageFrameDuration;
                 if (frameRate > 23.95f && frameRate < 23.988f) {
@@ -850,9 +872,14 @@ class Utils {
             if (activity.frameRateSwitchThread != null) {
                 activity.frameRateSwitchThread.interrupt();
             }
+            final int playerGeneration = activity.getPlayerGeneration();
             activity.frameRateSwitchThread = new Thread(() -> {
                 float frameRate = getFrameRate(activity, uri);
-                Utils.handleFrameRate(activity, frameRate, play);
+                if (!Thread.currentThread().isInterrupted()
+                        && activity.isCurrentPlayerSession(playerGeneration, uri)) {
+                    Utils.handleFrameRate(
+                            activity, uri, playerGeneration, frameRate, play);
+                }
             });
             activity.frameRateSwitchThread.start();
             return true;

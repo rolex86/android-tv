@@ -133,10 +133,12 @@ public class PlayerActivity extends Activity {
     private boolean trackMemoryArmed;
     private String trackMemoryAudioSignature;
     private String trackMemorySubtitleSignature;
+    private boolean trackSelectionChangePending;
     private boolean audioSelectionExplicit;
     private boolean subtitleSelectionExplicit;
     private boolean persistAudioSelectionPerFile;
     private boolean persistSubtitleSelectionPerFile;
+    private volatile int playerGeneration;
     public BrightnessControl mBrightnessControl;
     public static boolean haveMedia;
     private boolean videoLoading;
@@ -187,7 +189,7 @@ public class PlayerActivity extends Activity {
     public boolean frameRendered;
     private boolean alive;
     public static boolean focusPlay = false;
-    private Uri nextUri;
+    private volatile Uri nextUri;
     private static boolean isTvBox;
     public static boolean locked = false;
     private Thread nextUriThread;
@@ -861,6 +863,9 @@ public class PlayerActivity extends Activity {
 
             if (Intent.ACTION_VIEW.equals(action) && uri != null) {
                 if (SubtitleUtils.isSubtitle(uri, type)) {
+                    // Preserve playback position and play/pause state before rebuilding the
+                    // current media item with the newly supplied subtitle.
+                    releasePlayer();
                     handleSubtitles(uri);
                 } else {
                     // Persist the current item while Prefs still points at it. initializePlayer()
@@ -1353,6 +1358,19 @@ public class PlayerActivity extends Activity {
     }
 
     public void initializePlayer() {
+        if (frameRateSwitchThread != null) {
+            frameRateSwitchThread.interrupt();
+            frameRateSwitchThread = null;
+        }
+        if (nextUriThread != null) {
+            nextUriThread.interrupt();
+            nextUriThread = null;
+        }
+        if (displayManager != null && displayListener != null) {
+            displayManager.unregisterDisplayListener(displayListener);
+        }
+        playerGeneration++;
+        trackSelectionChangePending = false;
         boolean isNetworkUri = Utils.isSupportedNetworkUri(mPrefs.mediaUri);
         haveMedia = mPrefs.mediaUri != null;
         trackMemoryArmed = false;
@@ -1412,7 +1430,7 @@ public class PlayerActivity extends Activity {
                         .setSubtitleParserFactory(subtitleParserFactory));
 
         if (haveMedia && isNetworkUri) {
-            if (mPrefs.mediaUri.getScheme().toLowerCase().startsWith("http")) {
+            if (mPrefs.mediaUri.getScheme().toLowerCase(Locale.ROOT).startsWith("http")) {
                 HashMap<String, String> headers = new HashMap<>();
                 String userInfo = mPrefs.mediaUri.getUserInfo();
                 if (userInfo != null && userInfo.length() > 0 && userInfo.contains(":")) {
@@ -1536,9 +1554,13 @@ public class PlayerActivity extends Activity {
                     nextUriThread.interrupt();
                 }
                 nextUri = null;
+                final int nextSearchGeneration = playerGeneration;
+                final Uri nextSearchMedia = mPrefs.mediaUri;
                 nextUriThread = new Thread(() -> {
                     Uri uri = findNext();
-                    if (!Thread.currentThread().isInterrupted()) {
+                    if (!Thread.currentThread().isInterrupted()
+                            && isCurrentPlayerSession(
+                                    nextSearchGeneration, nextSearchMedia)) {
                         nextUri = uri;
                     }
                 });
@@ -1591,8 +1613,22 @@ public class PlayerActivity extends Activity {
 
     public void releasePlayer(boolean save) {
         trackMemoryArmed = false;
+        trackSelectionChangePending = false;
         if (save) {
             savePlayer();
+        }
+        playerGeneration++;
+        if (frameRateSwitchThread != null) {
+            frameRateSwitchThread.interrupt();
+            frameRateSwitchThread = null;
+        }
+        if (nextUriThread != null) {
+            nextUriThread.interrupt();
+            nextUriThread = null;
+        }
+
+        if (displayManager != null && displayListener != null) {
+            displayManager.unregisterDisplayListener(displayListener);
         }
 
         if (player != null) {
@@ -1611,8 +1647,20 @@ public class PlayerActivity extends Activity {
             player.release();
             player = null;
         }
+        play = false;
         titleView.setVisibility(View.GONE);
         updateButtons(false);
+    }
+
+    int getPlayerGeneration() {
+        return playerGeneration;
+    }
+
+    boolean isCurrentPlayerSession(int generation, Uri uri) {
+        return generation == playerGeneration
+                && !isFinishing()
+                && !isDestroyed()
+                && Objects.equals(mPrefs.mediaUri, uri);
     }
 
     private class PlayerListener implements Player.Listener {
@@ -1809,9 +1857,16 @@ public class PlayerActivity extends Activity {
                     armTrackMemory();
                     final String diagnosticAudioReason = audioSelectionReason;
                     final String diagnosticSubtitleReason = subtitleSelectionReason;
+                    final int diagnosticGeneration = playerGeneration;
                     if (isExternalPlayerLaunch()) {
-                        playerView.postDelayed(() -> externalDiagnostics.recordTracks(
-                                player, diagnosticAudioReason, diagnosticSubtitleReason), 300L);
+                        playerView.postDelayed(() -> {
+                            if (diagnosticGeneration == playerGeneration) {
+                                externalDiagnostics.recordTracks(
+                                        player,
+                                        diagnosticAudioReason,
+                                        diagnosticSubtitleReason);
+                            }
+                        }, 300L);
                     }
                 }
             } else if (state == Player.STATE_ENDED) {
@@ -1825,7 +1880,27 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onTracksChanged(Tracks tracks) {
-            rememberManualTrackSelection(tracks);
+            if (trackSelectionChangePending) {
+                trackSelectionChangePending = false;
+                rememberManualTrackSelection(tracks);
+            }
+        }
+
+        @Override
+        public void onTrackSelectionParametersChanged(TrackSelectionParameters parameters) {
+            if (!trackMemoryArmed || player == null) {
+                return;
+            }
+            trackSelectionChangePending = true;
+            final int generation = playerGeneration;
+            playerView.postDelayed(() -> {
+                if (generation == playerGeneration
+                        && trackSelectionChangePending
+                        && player != null) {
+                    trackSelectionChangePending = false;
+                    rememberManualTrackSelection(player.getCurrentTracks());
+                }
+            }, 100L);
         }
 
         @Override
@@ -2044,8 +2119,9 @@ public class PlayerActivity extends Activity {
 
     private void armTrackMemory() {
         trackMemoryArmed = false;
+        final int generation = playerGeneration;
         playerView.postDelayed(() -> {
-            if (player == null) {
+            if (generation != playerGeneration || player == null) {
                 return;
             }
             RememberedTrackStore.Selection selection = RememberedTrackStore.capture(

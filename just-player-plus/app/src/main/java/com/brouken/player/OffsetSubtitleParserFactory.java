@@ -84,7 +84,7 @@ final class OffsetSubtitleParserFactory implements SubtitleParser.Factory {
         }
     }
 
-    private static OutputOptions adjustOutputOptions(OutputOptions options, long delayUs) {
+    static OutputOptions adjustOutputOptions(OutputOptions options, long delayUs) {
         if (delayUs == 0L || options.startTimeUs == C.TIME_UNSET) {
             return options;
         }
@@ -96,7 +96,7 @@ final class OffsetSubtitleParserFactory implements SubtitleParser.Factory {
                 : OutputOptions.onlyCuesAfter(delegateStartTimeUs);
     }
 
-    private static CuesWithTiming shift(CuesWithTiming cuesWithTiming, long delayUs) {
+    static CuesWithTiming shift(CuesWithTiming cuesWithTiming, long delayUs) {
         if (delayUs == 0L) {
             return cuesWithTiming;
         }
@@ -113,7 +113,7 @@ final class OffsetSubtitleParserFactory implements SubtitleParser.Factory {
                 cuesWithTiming.cues, shiftedStartTimeUs, cuesWithTiming.durationUs);
     }
 
-    private static long safeAdd(long value, long delta) {
+    static long safeAdd(long value, long delta) {
         if (delta > 0L && value > Long.MAX_VALUE - delta) {
             return Long.MAX_VALUE;
         }
@@ -123,7 +123,7 @@ final class OffsetSubtitleParserFactory implements SubtitleParser.Factory {
         return value + delta;
     }
 
-    private static long safeSubtract(long value, long delta) {
+    static long safeSubtract(long value, long delta) {
         if (delta > 0L && value < Long.MIN_VALUE + delta) {
             return Long.MIN_VALUE;
         }

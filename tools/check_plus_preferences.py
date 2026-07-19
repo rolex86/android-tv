@@ -16,6 +16,7 @@ TEST_PATH = (
     ROOT / "just-player-plus" / "app" / "src" / "test" / "java"
     / "com" / "brouken" / "player" / "SmartSelectionPolicyTest.java"
 )
+OFFSET_TEST_PATH = TEST_PATH.with_name("OffsetSubtitleParserFactoryTest.java")
 
 plus_prefs = PREFS_PATH.read_text(encoding="utf-8")
 player = PLAYER_PATH.read_text(encoding="utf-8")
@@ -119,6 +120,13 @@ runtime_regression_anchors = (
     "persistAudioSelectionPerFile",
     "persistSubtitleSelectionPerFile",
     "isExternalPlayerLaunch()",
+    "onTrackSelectionParametersChanged",
+    "isCurrentPlayerSession",
+    "activity.resetApiAccess()",
+    "Collections.synchronizedList",
+    "updateMeta(null, null, resizeMode, scale, speed)",
+    "String permission = Manifest.permission.READ_EXTERNAL_STORAGE",
+    "Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED",
 )
 for anchor in runtime_regression_anchors:
     if anchor not in external_java:
@@ -136,6 +144,19 @@ else:
     ):
         if test_name not in tests:
             errors.append(f"Missing smart-selection regression test: {test_name}")
+
+if not OFFSET_TEST_PATH.exists():
+    errors.append("Subtitle-delay regression tests are missing")
+else:
+    offset_tests = OFFSET_TEST_PATH.read_text(encoding="utf-8")
+    for test_name in (
+        "cueTimesShiftInBothDirections",
+        "unsetCueTimeBecomesRelativeDelay",
+        "seekThresholdMovesOppositeToDelay",
+        "timestampMathSaturatesInsteadOfOverflowing",
+    ):
+        if test_name not in offset_tests:
+            errors.append(f"Missing subtitle-delay regression test: {test_name}")
 
 # These binaries contain the protected Media3 renderer/audio path and extension decoders.
 # An intentional upstream refresh must review the playback regression matrix and update hashes.

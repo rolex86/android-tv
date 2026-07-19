@@ -109,7 +109,12 @@ class Prefs {
             subtitleTrackId = mSharedPreferences.getString(PREF_KEY_SUBTITLE_TRACK_ID, subtitleTrackId);
         if (mSharedPreferences.contains(PREF_KEY_RESIZE_MODE))
             resizeMode = mSharedPreferences.getInt(PREF_KEY_RESIZE_MODE, resizeMode);
-        orientation = Utils.Orientation.values()[mSharedPreferences.getInt(PREF_KEY_ORIENTATION, orientation.value)];
+        int orientationValue = mSharedPreferences.getInt(
+                PREF_KEY_ORIENTATION, orientation.value);
+        Utils.Orientation[] orientations = Utils.Orientation.values();
+        if (orientationValue >= 0 && orientationValue < orientations.length) {
+            orientation = orientations[orientationValue];
+        }
         scale = mSharedPreferences.getFloat(PREF_KEY_SCALE, scale);
         if (mSharedPreferences.contains(PREF_KEY_SCOPE_URI))
             scopeUri = Uri.parse(mSharedPreferences.getString(PREF_KEY_SCOPE_URI, null));
@@ -125,7 +130,12 @@ class Prefs {
         frameRateMatching = mSharedPreferences.getBoolean(PREF_KEY_FRAMERATE_MATCHING, frameRateMatching);
         repeatToggle = mSharedPreferences.getBoolean(PREF_KEY_REPEAT_TOGGLE, repeatToggle);
         fileAccess = mSharedPreferences.getString(PREF_KEY_FILE_ACCESS, fileAccess);
-        decoderPriority = Integer.parseInt(mSharedPreferences.getString(PREF_KEY_DECODER_PRIORITY, String.valueOf(decoderPriority)));
+        try {
+            decoderPriority = Integer.parseInt(mSharedPreferences.getString(
+                    PREF_KEY_DECODER_PRIORITY, String.valueOf(decoderPriority)));
+        } catch (NumberFormatException ignored) {
+            decoderPriority = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON;
+        }
         mapDV7ToHevc = mSharedPreferences.getBoolean(PREF_KEY_MAP_DV7, mapDV7ToHevc);
         languageAudio = mSharedPreferences.getString(PREF_KEY_LANGUAGE_AUDIO, languageAudio);
         subtitleStyleEmbedded = mSharedPreferences.getBoolean(PREF_KEY_SUBTITLE_STYLE_EMBEDDED, subtitleStyleEmbedded);
@@ -136,13 +146,15 @@ class Prefs {
         mediaUri = uri;
         mediaType = type;
         updateSubtitle(null);
-        updateMeta(null, null, AspectRatioFrameLayout.RESIZE_MODE_FIT, 1.f, 1.f);
+        // Track IDs belong to the previous media item, but presentation defaults are global
+        // "remember last" choices and must survive opening the next item.
+        updateMeta(null, null, resizeMode, scale, speed);
 
         if (mediaType != null && mediaType.endsWith("/*")) {
             mediaType = null;
         }
 
-        if (mediaType == null) {
+        if (mediaType == null && mediaUri != null) {
             if (ContentResolver.SCHEME_CONTENT.equals(mediaUri.getScheme())) {
                 mediaType = context.getContentResolver().getType(mediaUri);
             }
@@ -180,11 +192,11 @@ class Prefs {
         if (mediaUri == null)
             return;
 
-        while (positions.size() > 100)
-            positions.remove(positions.keySet().toArray()[0]);
-
         if (persistentMode) {
             positions.put(mediaUri.toString(), position);
+            while (positions.size() > 100) {
+                positions.remove(positions.keySet().toArray()[0]);
+            }
             savePositions();
         } else {
             nonPersitentPosition = position;
@@ -240,6 +252,9 @@ class Prefs {
     }
 
     public long getPosition() {
+        if (mediaUri == null) {
+            return 0L;
+        }
         if (!persistentMode) {
             return nonPersitentPosition;
         }

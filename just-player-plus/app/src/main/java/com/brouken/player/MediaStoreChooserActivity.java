@@ -48,13 +48,26 @@ public class MediaStoreChooserActivity extends Activity {
         this.subtitles = intent.getBooleanExtra(SUBTITLES, false);
         this.title = intent.getStringExtra(TITLE);
 
-        String permission = Manifest.permission.WRITE_EXTERNAL_STORAGE;
+        String permission = Manifest.permission.READ_EXTERNAL_STORAGE;
         if (Build.VERSION.SDK_INT >= 33 && getApplicationContext().getApplicationInfo().targetSdkVersion >= 33) {
             permission = Manifest.permission.READ_MEDIA_VIDEO;
         }
 
-        if (checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
+        boolean hasPermission = checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED;
+        if (Build.VERSION.SDK_INT >= 34
+                && getApplicationContext().getApplicationInfo().targetSdkVersion >= 34) {
+            hasPermission |= checkSelfPermission(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+                    == PackageManager.PERMISSION_GRANTED;
+        }
+
+        if (hasPermission) {
             start();
+        } else if (Build.VERSION.SDK_INT >= 34
+                && getApplicationContext().getApplicationInfo().targetSdkVersion >= 34) {
+            requestPermissions(new String[]{
+                    Manifest.permission.READ_MEDIA_VIDEO,
+                    Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
+            }, REQUEST_PERMISSION_STORAGE);
         } else {
             requestPermissions(new String[]{permission}, REQUEST_PERMISSION_STORAGE);
         }
@@ -88,8 +101,11 @@ public class MediaStoreChooserActivity extends Activity {
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         switch (requestCode) {
             case REQUEST_PERMISSION_STORAGE:
-                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                    start();
+                for (int grantResult : grantResults) {
+                    if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                        start();
+                        break;
+                    }
                 }
                 break;
             default:

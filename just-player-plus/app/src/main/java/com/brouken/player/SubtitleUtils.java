@@ -13,11 +13,13 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 
 class SubtitleUtils {
 
     public static String getSubtitleMime(Uri uri) {
-        final String path = uri.getPath();
+        final String path = uri.getPath() == null
+                ? "" : uri.getPath().toLowerCase(Locale.ROOT);
         if (path.endsWith(".ssa") || path.endsWith(".ass")) {
             return MimeTypes.TEXT_SSA;
         } else if (path.endsWith(".vtt")) {
@@ -30,7 +32,10 @@ class SubtitleUtils {
     }
 
     public static String getSubtitleLanguage(Uri uri) {
-        final String path = uri.getPath().toLowerCase();
+        if (uri.getPath() == null) {
+            return null;
+        }
+        final String path = uri.getPath().toLowerCase(Locale.ROOT);
 
         if (path.endsWith(".srt")) {
             int last = path.lastIndexOf(".");
@@ -147,7 +152,11 @@ class SubtitleUtils {
     }
 
     public static DocumentFile findSubtitle(DocumentFile video, DocumentFile dir) {
-        String videoName = getFileBaseName(video.getName());
+        String rawVideoName = video.getName();
+        if (rawVideoName == null) {
+            return null;
+        }
+        String videoName = getFileBaseName(rawVideoName);
         int videoFiles = 0;
 
         if (dir == null || !dir.isDirectory())
@@ -171,7 +180,8 @@ class SubtitleUtils {
 
         if (candidates.size() >= 1) {
             for (DocumentFile candidate : candidates) {
-                if (candidate.getName().startsWith(videoName + '.')) {
+                String candidateName = candidate.getName();
+                if (candidateName != null && candidateName.startsWith(videoName + '.')) {
                     return candidate;
                 }
             }
@@ -214,13 +224,18 @@ class SubtitleUtils {
     }
 
     public static boolean isVideoFile(DocumentFile file) {
-        return file.isFile() && file.getType().startsWith("video/");
+        String type = file.getType();
+        return file.isFile() && type != null && type.startsWith("video/");
     }
 
     public static boolean isSubtitleFile(DocumentFile file) {
         if (!file.isFile())
             return false;
-        final String name = file.getName().toLowerCase();
+        final String fileName = file.getName();
+        if (fileName == null) {
+            return false;
+        }
+        final String name = fileName.toLowerCase(Locale.ROOT);
         return name.endsWith(".srt") || name.endsWith(".ssa") || name.endsWith(".ass")
                 || name.endsWith(".vtt") || name.endsWith(".ttml");
     }
@@ -241,7 +256,7 @@ class SubtitleUtils {
             if (Utils.isSupportedNetworkUri(uri)) {
                 String path = uri.getPath();
                 if (path != null) {
-                    path = path.toLowerCase();
+                    path = path.toLowerCase(Locale.ROOT);
                     for (String extension : Utils.supportedExtensionsSubtitle) {
                         if (path.endsWith("." + extension)) {
                             return true;
