@@ -102,4 +102,8 @@
     <string name="pref_external_player_diagnostics_copy">Copy</string>
     <string name="pref_external_player_diagnostics_copied">Diagnostics copied</string>
     <string name="pref_external_player_diagnostics_clear">Clear</string>
+    <string name="pref_audio_content_preference">Original audio or dubbing</string>
+    <string name="pref_audio_content_language_order">Follow language order</string>
+    <string name="pref_audio_content_original">Prefer explicitly marked original audio</string>
+    <string name="pref_audio_content_dubbed">Prefer explicitly marked dubbed audio</string>
 </resources>

@@ -2018,16 +2018,14 @@ public class PlayerActivity extends Activity {
         }
 
         mPlusPrefs.reload();
-        if (!mPlusPrefs.ignoreCommentaryAudio && !mPlusPrefs.ignoreAudioDescription) {
-            return;
-        }
 
         TrackSelectionOverride audioOverride = SmartAudioSelector.findPreferredAudio(
                 player.getCurrentTracks(),
                 mPlusPrefs.getPreferredAudioLanguages(),
                 mPlusPrefs.ignoreCommentaryAudio,
                 mPlusPrefs.ignoreAudioDescription,
-                "best".equals(mPlusPrefs.audioQualityPreference));
+                "best".equals(mPlusPrefs.audioQualityPreference),
+                mPlusPrefs.audioContentPreference);
         if (audioOverride != null) {
             player.setTrackSelectionParameters(
                     player.getTrackSelectionParameters().buildUpon()

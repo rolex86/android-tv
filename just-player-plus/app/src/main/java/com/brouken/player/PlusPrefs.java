@@ -20,6 +20,7 @@ class PlusPrefs {
     static final String KEY_AUDIO_LANGUAGE_SECONDARY = "languageAudioSecondary";
     static final String KEY_AUDIO_LANGUAGE_TERTIARY = "languageAudioTertiary";
     static final String KEY_AUDIO_QUALITY = "audioQualityPreference";
+    static final String KEY_AUDIO_CONTENT_PREFERENCE = "audioContentPreference";
     static final String KEY_IGNORE_COMMENTARY_AUDIO = "ignoreCommentaryAudio";
     static final String KEY_IGNORE_AUDIO_DESCRIPTION = "ignoreAudioDescription";
 
@@ -51,6 +52,7 @@ class PlusPrefs {
     String audioLanguageSecondary;
     String audioLanguageTertiary;
     String audioQualityPreference;
+    String audioContentPreference;
     boolean ignoreCommentaryAudio;
     boolean ignoreAudioDescription;
 
@@ -89,6 +91,8 @@ class PlusPrefs {
         audioLanguageTertiary = preferences.getString(
                 KEY_AUDIO_LANGUAGE_TERTIARY, TRACK_NONE);
         audioQualityPreference = preferences.getString(KEY_AUDIO_QUALITY, "best");
+        audioContentPreference = preferences.getString(
+                KEY_AUDIO_CONTENT_PREFERENCE, "language");
         ignoreCommentaryAudio = preferences.getBoolean(KEY_IGNORE_COMMENTARY_AUDIO, true);
         ignoreAudioDescription = preferences.getBoolean(KEY_IGNORE_AUDIO_DESCRIPTION, true);
 
