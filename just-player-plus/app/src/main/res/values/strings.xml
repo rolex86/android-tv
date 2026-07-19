@@ -30,6 +30,7 @@
     <string name="pref_stremio_connector_start_failed">The local connector could not be started.</string>
     <string name="pref_stremio_connector_copy_failed">The addon URL could not be copied.</string>
     <string name="pref_next_episode_notice">Show next episode before the end</string>
+    <string name="pref_network_buffer">Network buffer</string>
     <string name="stremio_connector_notification_channel">Stremio connector</string>
     <string name="stremio_connector_notification_channel_summary">Keeps the local next-episode metadata bridge available</string>
     <string name="stremio_connector_notification_title">JustPlayer Plus connector</string>

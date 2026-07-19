@@ -15,6 +15,17 @@
         <item>90</item>
     </string-array>
 
+    <string-array name="plus_network_buffer_entries">
+        <item>Default — current Media3 behavior</item>
+        <item>Larger — up to 90 s / 256 MiB</item>
+        <item>Maximum ⚠ — up to 120 s / 384 MiB; higher memory risk</item>
+    </string-array>
+    <string-array name="plus_network_buffer_values" translatable="false">
+        <item>default</item>
+        <item>larger</item>
+        <item>maximum</item>
+    </string-array>
+
     <string-array name="plus_subtitle_mode_entries">
         <item>Off</item>
         <item>Forced subtitles only</item>

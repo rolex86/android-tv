@@ -55,6 +55,7 @@ runtime_anchors = {
     "KEY_SPEED_DEFAULT": "mPlusPrefs.speedDefault",
     "KEY_SEEK_INCREMENT_MS": "mPlusPrefs.seekIncrementMs",
     "KEY_FRAME_RATE_POLICY": "mPlusPrefs.frameRatePolicy",
+    "KEY_NETWORK_BUFFER_PROFILE": "mPlusPrefs.networkBufferProfile",
     "KEY_BACK_BUTTON_BEHAVIOR": "mPlusPrefs.backButtonBehavior",
     "KEY_COMPLETION_RULE": "mPlusPrefs.completionRule",
     "KEY_EXTERNAL_PLAYER_DIAGNOSTICS": "PlusPrefs.KEY_EXTERNAL_PLAYER_DIAGNOSTICS",
@@ -105,10 +106,10 @@ for snippet in protected_snippets:
         errors.append(f"Protected playback snippet must occur once: {snippet!r}; found {count}")
 
 parser_injections = player.count(".setSubtitleParserFactory(subtitleParserFactory)")
-if parser_injections != 3:
+if parser_injections != 2:
     errors.append(
-        "Subtitle delay parser must be injected into extractor, default media source and "
-        f"authenticated media source paths; found {parser_injections} injections"
+        "Subtitle delay parser must be injected into the extractor and unified media source; "
+        f"found {parser_injections} injections"
     )
 
 for forbidden in ("Math.addExact", "Math.subtractExact"):
@@ -129,6 +130,12 @@ runtime_regression_anchors = (
     "updateMeta(null, null, resizeMode, scale, speed)",
     "String permission = Manifest.permission.READ_EXTERNAL_STORAGE",
     "Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+    "NetworkBufferConfig.fromPreference(",
+    "setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(",
+    "initializeNextEpisodeFeature();",
+    "releaseNextEpisodeFeature();",
+    "nextEpisodeHttpClient.dispatcher().cancelAll();",
+    "!isNextEpisodeFeatureEnabled()",
 )
 for anchor in runtime_regression_anchors:
     if anchor not in external_java:

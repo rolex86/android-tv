@@ -219,6 +219,14 @@
             app:title="@string/pref_seek_increment"
             app:useSimpleSummaryProvider="true" />
 
+        <ListPreference
+            app:key="networkBufferProfile"
+            app:defaultValue="default"
+            app:entries="@array/plus_network_buffer_entries"
+            app:entryValues="@array/plus_network_buffer_values"
+            app:title="@string/pref_network_buffer"
+            app:useSimpleSummaryProvider="true" />
+
         <SwitchPreferenceCompat
             app:key="frameRateMatching"
             app:defaultValue="false"

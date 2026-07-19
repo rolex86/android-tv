@@ -18,6 +18,7 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.content.UriPermission;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
@@ -75,14 +76,18 @@ import androidx.media3.common.TrackGroup;
 import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
+import androidx.media3.datasource.DefaultDataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
+import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlaybackException;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.PlayerMessage;
 import androidx.media3.exoplayer.RenderersFactory;
 import androidx.media3.exoplayer.SeekParameters;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector;
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy;
 import androidx.media3.extractor.DefaultExtractorsFactory;
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory;
 import androidx.media3.extractor.ts.TsExtractor;
@@ -132,6 +137,7 @@ public class PlayerActivity extends Activity {
     public PlusPrefs mPlusPrefs;
     private RememberedTrackStore rememberedTrackStore;
     private ExternalPlayerDiagnostics externalDiagnostics;
+    private SharedPreferences plusPreferences;
     private OkHttpClient nextEpisodeHttpClient;
     private NextEpisodeMetadataResolver nextEpisodeMetadataResolver;
     private NextEpisodeOverlay nextEpisodeOverlay;
@@ -228,38 +234,24 @@ public class PlayerActivity extends Activity {
     private long resultPosition = C.TIME_UNSET;
     private long resultDuration = C.TIME_UNSET;
     private AlertDialog exitDialog;
+    private PlayerMessage nextEpisodePopupMessage;
+    private int nextEpisodePopupScheduleGeneration;
+    private long nextEpisodeNoticeMs = TimeUnit.SECONDS.toMillis(30L);
 
-    private final Runnable nextEpisodeProgressRunnable = new Runnable() {
-        @Override
-        public void run() {
-            if (playerView == null || player == null || nextEpisodeInfo == null
-                    || nextEpisodeDismissed || nextEpisodeShown || isFinishing()) {
-                return;
-            }
-            long duration = player.getDuration();
-            long position = player.getCurrentPosition();
-            mPlusPrefs.reload();
-            long threshold = TimeUnit.SECONDS.toMillis(mPlusPrefs.nextEpisodeNoticeSeconds);
-            if (player.isPlaying()
-                    && !player.isCurrentMediaItemLive()
-                    && duration != C.TIME_UNSET
-                    && duration > 0L
-                    && position >= 0L
-                    && duration - position <= threshold) {
-                nextEpisodeShown = true;
-                playerView.hideController();
-                nextEpisodeOverlay.show(nextEpisodeInfo);
-                externalDiagnostics.recordNextEpisode(
-                        nextEpisodeInfo.current.raw,
-                        nextEpisodeInfo.next.raw,
-                        nextEpisodeInfo.seriesTitle != null,
-                        nextEpisodeInfo.artworkUrl != null,
-                        "shown");
-                return;
-            }
-            playerView.postDelayed(this, 1_000L);
-        }
-    };
+    private final SharedPreferences.OnSharedPreferenceChangeListener plusPreferenceListener =
+            (preferences, key) -> {
+                if (!PlusPrefs.KEY_STREMIO_CONNECTOR_ENABLED.equals(key)) {
+                    return;
+                }
+                runOnUiThread(() -> {
+                    mPlusPrefs.reload();
+                    if (!mPlusPrefs.stremioConnectorEnabled) {
+                        releaseNextEpisodeFeature();
+                        StremioConnectorService.stop(PlayerActivity.this);
+                        new StremioConnectorStore(PlayerActivity.this).clear();
+                    }
+                });
+            };
 
     DisplayManager displayManager;
     DisplayManager.DisplayListener displayListener;
@@ -282,6 +274,11 @@ public class PlayerActivity extends Activity {
         Utils.setOrientation(this, mPrefs.orientation);
 
         super.onCreate(savedInstanceState);
+        if (mPlusPrefs.stremioConnectorEnabled) {
+            plusPreferences = android.preference.PreferenceManager
+                    .getDefaultSharedPreferences(this);
+            plusPreferences.registerOnSharedPreferenceChangeListener(plusPreferenceListener);
+        }
         if (Build.VERSION.SDK_INT == 28 && Build.MANUFACTURER.equalsIgnoreCase("xiaomi") &&
                 (Build.DEVICE.equalsIgnoreCase("oneday") || Build.DEVICE.equalsIgnoreCase("once"))) {
             setContentView(R.layout.activity_player_textureview);
@@ -339,25 +336,10 @@ public class PlayerActivity extends Activity {
         coordinatorLayout = findViewById(R.id.coordinatorLayout);
         mAudioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         playerView = findViewById(R.id.video_view);
-        nextEpisodeHttpClient = new OkHttpClient.Builder()
-                .connectTimeout(8, TimeUnit.SECONDS)
-                .readTimeout(10, TimeUnit.SECONDS)
-                .build();
-        nextEpisodeMetadataResolver = new NextEpisodeMetadataResolver(nextEpisodeHttpClient);
-        nextEpisodeOverlay = new NextEpisodeOverlay(
-                coordinatorLayout, nextEpisodeHttpClient, new NextEpisodeOverlay.Listener() {
-            @Override
-            public void onPlayNow() {
-                playNextEpisodeNow();
-            }
-
-            @Override
-            public void onDismiss() {
-                dismissNextEpisode();
-            }
-        });
         if (mPlusPrefs.stremioConnectorEnabled) {
             StremioConnectorService.start(this);
+        } else {
+            StremioConnectorService.stop(this);
         }
         startNextEpisodeResolution();
         exoPlayPause = findViewById(R.id.exo_play_pause);
@@ -799,22 +781,69 @@ public class PlayerActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        resetNextEpisodeSession();
-        if (nextEpisodeOverlay != null) {
-            nextEpisodeOverlay.release();
+        if (plusPreferences != null) {
+            plusPreferences.unregisterOnSharedPreferenceChangeListener(plusPreferenceListener);
+            plusPreferences = null;
         }
-        if (nextEpisodeHttpClient != null) {
-            nextEpisodeHttpClient.dispatcher().cancelAll();
-            nextEpisodeHttpClient.connectionPool().evictAll();
-        }
+        releaseNextEpisodeFeature();
         super.onDestroy();
     }
 
-    private void startNextEpisodeResolution() {
+    private void initializeNextEpisodeFeature() {
+        if (nextEpisodeHttpClient != null
+                && nextEpisodeMetadataResolver != null
+                && nextEpisodeOverlay != null) {
+            return;
+        }
         mPlusPrefs.reload();
-        if (!mPlusPrefs.stremioConnectorEnabled || !intentReturnResult
-                || !isStremioCaller()
-                || playerView == null || nextEpisodeMetadataResolver == null) {
+        if (!mPlusPrefs.stremioConnectorEnabled || coordinatorLayout == null) {
+            return;
+        }
+        nextEpisodeHttpClient = new OkHttpClient.Builder()
+                .connectTimeout(8, TimeUnit.SECONDS)
+                .readTimeout(10, TimeUnit.SECONDS)
+                .build();
+        nextEpisodeMetadataResolver = new NextEpisodeMetadataResolver(nextEpisodeHttpClient);
+        nextEpisodeOverlay = new NextEpisodeOverlay(
+                coordinatorLayout, nextEpisodeHttpClient, new NextEpisodeOverlay.Listener() {
+            @Override
+            public void onPlayNow() {
+                playNextEpisodeNow();
+            }
+
+            @Override
+            public void onDismiss() {
+                dismissNextEpisode();
+            }
+        });
+    }
+
+    private void releaseNextEpisodeFeature() {
+        resetNextEpisodeSession();
+        if (nextEpisodeOverlay != null) {
+            nextEpisodeOverlay.release();
+            nextEpisodeOverlay = null;
+        }
+        nextEpisodeMetadataResolver = null;
+        if (nextEpisodeHttpClient != null) {
+            nextEpisodeHttpClient.dispatcher().cancelAll();
+            nextEpisodeHttpClient.connectionPool().evictAll();
+            nextEpisodeHttpClient = null;
+        }
+    }
+
+    private boolean isNextEpisodeFeatureEnabled() {
+        mPlusPrefs.reload();
+        return mPlusPrefs.stremioConnectorEnabled;
+    }
+
+    private void startNextEpisodeResolution() {
+        if (!isNextEpisodeFeatureEnabled()) {
+            return;
+        }
+        initializeNextEpisodeFeature();
+        if (!intentReturnResult || !isStremioCaller() || playerView == null
+                || nextEpisodeMetadataResolver == null || nextEpisodeOverlay == null) {
             return;
         }
         final int session = nextEpisodeSession;
@@ -830,13 +859,14 @@ public class PlayerActivity extends Activity {
     private void resolveNextEpisode(int session, int attempt) {
         long delay = attempt == 0 ? 900L : 1_200L;
         playerView.postDelayed(() -> {
-            if (session != nextEpisodeSession || isFinishing()) {
+            if (session != nextEpisodeSession || isFinishing()
+                    || !isNextEpisodeFeatureEnabled()) {
                 return;
             }
             StremioConnectorStore store = new StremioConnectorStore(this);
             long now = System.currentTimeMillis();
-            StremioEpisodeId current = store.claimRecentEpisode(now);
-            if (current == null) {
+            StremioConnectorStore.Content content = store.claimRecentContent(now);
+            if (content == null) {
                 if (attempt < 3) {
                     resolveNextEpisode(session, attempt + 1);
                 } else {
@@ -845,8 +875,17 @@ public class PlayerActivity extends Activity {
                 }
                 return;
             }
-            nextEpisodeMetadataResolver.resolve(current, result -> acceptEpisodeMetadata(
-                    session, current.raw, result));
+            if (!content.isSeries()) {
+                externalDiagnostics.recordStremioConnector(
+                        "next_episode_skipped", "movie/" + content.id);
+                return;
+            }
+            StremioEpisodeId current = content.episode;
+            NextEpisodeMetadataResolver resolver = nextEpisodeMetadataResolver;
+            if (resolver != null && isNextEpisodeFeatureEnabled()) {
+                resolver.resolve(current, result -> acceptEpisodeMetadata(
+                        session, current.raw, result));
+            }
         }, delay);
     }
 
@@ -854,7 +893,8 @@ public class PlayerActivity extends Activity {
                                        String currentId,
                                        NextEpisodeMetadataResolver.Result result) {
         playerView.post(() -> {
-            if (session != nextEpisodeSession || isFinishing()) {
+            if (session != nextEpisodeSession || isFinishing()
+                    || !isNextEpisodeFeatureEnabled()) {
                 return;
             }
             if (result == null) {
@@ -879,8 +919,7 @@ public class PlayerActivity extends Activity {
                     info.seriesTitle != null,
                     info.artworkUrl != null,
                     "resolved");
-            playerView.removeCallbacks(nextEpisodeProgressRunnable);
-            playerView.post(nextEpisodeProgressRunnable);
+            scheduleNextEpisodePopup();
         });
     }
 
@@ -898,19 +937,110 @@ public class PlayerActivity extends Activity {
 
     private void resetNextEpisodeSession() {
         nextEpisodeSession++;
+        cancelNextEpisodePopupMessage();
         nextEpisodeInfo = null;
         nextEpisodeDismissed = false;
         nextEpisodeShown = false;
-        if (playerView != null) {
-            playerView.removeCallbacks(nextEpisodeProgressRunnable);
-        }
         if (nextEpisodeOverlay != null) {
             nextEpisodeOverlay.hide(false);
         }
     }
 
+    private void cancelNextEpisodePopupMessage() {
+        nextEpisodePopupScheduleGeneration++;
+        if (nextEpisodePopupMessage != null) {
+            nextEpisodePopupMessage.cancel();
+            nextEpisodePopupMessage = null;
+        }
+    }
+
+    /**
+     * Arms a Media3 position message instead of polling playback position. Media3 delivers the
+     * message only when playback reaches the configured media timestamp, automatically accounting
+     * for pauses, buffering and playback speed.
+     */
+    private void scheduleNextEpisodePopup() {
+        cancelNextEpisodePopupMessage();
+        if (!isNextEpisodeFeatureEnabled()) {
+            releaseNextEpisodeFeature();
+            return;
+        }
+        if (playerView == null || player == null || nextEpisodeInfo == null
+                || nextEpisodeDismissed || nextEpisodeShown || isFinishing()
+                || player.isCurrentMediaItemLive() || nextEpisodeOverlay == null) {
+            return;
+        }
+        long duration = player.getDuration();
+        long position = player.getCurrentPosition();
+        if (duration == C.TIME_UNSET || duration <= 0L || position < 0L) {
+            return;
+        }
+
+        mPlusPrefs.reload();
+        nextEpisodeNoticeMs = TimeUnit.SECONDS.toMillis(mPlusPrefs.nextEpisodeNoticeSeconds);
+        long triggerPosition = Math.max(0L, duration - nextEpisodeNoticeMs);
+        if (position >= triggerPosition) {
+            showNextEpisodePopup(nextEpisodeSession);
+            return;
+        }
+
+        final int session = nextEpisodeSession;
+        final int scheduleGeneration = nextEpisodePopupScheduleGeneration;
+        try {
+            nextEpisodePopupMessage = player.createMessage((messageType, payload) -> {
+                if (playerView != null) {
+                    playerView.post(() -> {
+                        if (session == nextEpisodeSession
+                                && scheduleGeneration == nextEpisodePopupScheduleGeneration) {
+                            nextEpisodePopupMessage = null;
+                            showNextEpisodePopup(session);
+                        }
+                    });
+                }
+            }).setPosition(triggerPosition).setDeleteAfterDelivery(true).send();
+        } catch (IllegalStateException ignored) {
+            // STATE_READY or a later timeline update will arm the message once duration is known.
+        }
+    }
+
+    private void showNextEpisodePopup(int session) {
+        if (!isNextEpisodeFeatureEnabled()) {
+            releaseNextEpisodeFeature();
+            return;
+        }
+        if (session != nextEpisodeSession || playerView == null || player == null
+                || nextEpisodeInfo == null || nextEpisodeDismissed || nextEpisodeShown
+                || isFinishing() || player.isCurrentMediaItemLive()
+                || nextEpisodeOverlay == null) {
+            return;
+        }
+        long duration = player.getDuration();
+        long position = player.getCurrentPosition();
+        if (duration == C.TIME_UNSET || duration <= 0L || position < 0L) {
+            return;
+        }
+        if (duration - position > nextEpisodeNoticeMs) {
+            scheduleNextEpisodePopup();
+            return;
+        }
+        if (!player.isPlaying()) {
+            return;
+        }
+
+        nextEpisodeShown = true;
+        playerView.hideController();
+        nextEpisodeOverlay.show(nextEpisodeInfo);
+        externalDiagnostics.recordNextEpisode(
+                nextEpisodeInfo.current.raw,
+                nextEpisodeInfo.next.raw,
+                nextEpisodeInfo.seriesTitle != null,
+                nextEpisodeInfo.artworkUrl != null,
+                "shown");
+    }
+
     private void dismissNextEpisode() {
         nextEpisodeDismissed = true;
+        cancelNextEpisodePopupMessage();
         if (nextEpisodeInfo != null) {
             externalDiagnostics.recordNextEpisode(
                     nextEpisodeInfo.current.raw,
@@ -919,7 +1049,9 @@ public class PlayerActivity extends Activity {
                     nextEpisodeInfo.artworkUrl != null,
                     "dismissed");
         }
-        nextEpisodeOverlay.hide(true);
+        if (nextEpisodeOverlay != null) {
+            nextEpisodeOverlay.hide(true);
+        }
         playerView.requestFocus();
     }
 
@@ -940,7 +1072,9 @@ public class PlayerActivity extends Activity {
             return;
         }
         nextEpisodeDismissed = true;
-        nextEpisodeOverlay.hide(false);
+        if (nextEpisodeOverlay != null) {
+            nextEpisodeOverlay.hide(false);
+        }
         player.seekTo(Math.max(0L, duration - 750L));
         player.play();
     }
@@ -1658,25 +1792,44 @@ public class PlayerActivity extends Activity {
                 .setExtensionRendererMode(mPrefs.decoderPriority)
                 .setMapDV7ToHevc(mPrefs.mapDV7ToHevc);
 
+        DefaultHttpDataSource.Factory httpDataSourceFactory =
+                new DefaultHttpDataSource.Factory()
+                        .setConnectTimeoutMs(NetworkBufferConfig.HTTP_CONNECT_TIMEOUT_MS)
+                        .setReadTimeoutMs(NetworkBufferConfig.HTTP_READ_TIMEOUT_MS);
+        if (haveMedia && isNetworkUri
+                && mPrefs.mediaUri.getScheme().toLowerCase(Locale.ROOT).startsWith("http")) {
+            String userInfo = mPrefs.mediaUri.getUserInfo();
+            if (userInfo != null && userInfo.length() > 0 && userInfo.contains(":")) {
+                HashMap<String, String> headers = new HashMap<>();
+                headers.put("Authorization", "Basic "
+                        + Base64.encodeToString(userInfo.getBytes(), Base64.NO_WRAP));
+                httpDataSourceFactory.setDefaultRequestProperties(headers);
+            }
+        }
+        DefaultMediaSourceFactory mediaSourceFactory = new DefaultMediaSourceFactory(
+                new DefaultDataSource.Factory(this, httpDataSourceFactory), extractorsFactory)
+                .setSubtitleParserFactory(subtitleParserFactory);
+        if (isNetworkUri) {
+            mediaSourceFactory.setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(
+                    NetworkBufferConfig.LOAD_RETRY_COUNT));
+        }
+
         ExoPlayer.Builder playerBuilder = new ExoPlayer.Builder(this, renderersFactory)
                 .setTrackSelector(trackSelector)
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(this, extractorsFactory)
-                        .setSubtitleParserFactory(subtitleParserFactory));
+                .setMediaSourceFactory(mediaSourceFactory);
 
-        if (haveMedia && isNetworkUri) {
-            if (mPrefs.mediaUri.getScheme().toLowerCase(Locale.ROOT).startsWith("http")) {
-                HashMap<String, String> headers = new HashMap<>();
-                String userInfo = mPrefs.mediaUri.getUserInfo();
-                if (userInfo != null && userInfo.length() > 0 && userInfo.contains(":")) {
-                    headers.put("Authorization", "Basic " + Base64.encodeToString(userInfo.getBytes(), Base64.NO_WRAP));
-                    DefaultHttpDataSource.Factory defaultHttpDataSourceFactory = new DefaultHttpDataSource.Factory();
-                    defaultHttpDataSourceFactory.setDefaultRequestProperties(headers);
-                    playerBuilder.setMediaSourceFactory(
-                            new DefaultMediaSourceFactory(
-                                    defaultHttpDataSourceFactory, extractorsFactory)
-                                    .setSubtitleParserFactory(subtitleParserFactory));
-                }
-            }
+        NetworkBufferConfig bufferConfig = NetworkBufferConfig.fromPreference(
+                mPlusPrefs.networkBufferProfile);
+        if (isNetworkUri && !bufferConfig.usesMedia3Defaults()) {
+            DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
+                    .setBufferDurationsMsForStreaming(
+                            bufferConfig.minBufferMs,
+                            bufferConfig.maxBufferMs,
+                            bufferConfig.bufferForPlaybackMs,
+                            bufferConfig.bufferForPlaybackAfterRebufferMs)
+                    .setTargetBufferBytes(bufferConfig.targetBufferBytes)
+                    .build();
+            playerBuilder.setLoadControl(loadControl);
         }
 
         player = playerBuilder.build();
@@ -1846,6 +1999,7 @@ public class PlayerActivity extends Activity {
     }
 
     public void releasePlayer(boolean save) {
+        cancelNextEpisodePopupMessage();
         trackMemoryArmed = false;
         trackSelectionChangePending = false;
         if (save) {
@@ -1939,6 +2093,17 @@ public class PlayerActivity extends Activity {
 
             if (!isPlaying) {
                 PlayerActivity.locked = false;
+            } else if (nextEpisodeInfo != null && nextEpisodePopupMessage == null) {
+                scheduleNextEpisodePopup();
+            }
+        }
+
+        @Override
+        public void onPositionDiscontinuity(@NonNull Player.PositionInfo oldPosition,
+                                            @NonNull Player.PositionInfo newPosition,
+                                            int reason) {
+            if (nextEpisodeInfo != null && !nextEpisodeDismissed && !nextEpisodeShown) {
+                scheduleNextEpisodePopup();
             }
         }
 
@@ -1959,8 +2124,7 @@ public class PlayerActivity extends Activity {
                 frameRendered = true;
 
                 if (nextEpisodeInfo != null && !nextEpisodeDismissed && !nextEpisodeShown) {
-                    playerView.removeCallbacks(nextEpisodeProgressRunnable);
-                    playerView.post(nextEpisodeProgressRunnable);
+                    scheduleNextEpisodePopup();
                 }
 
                 if (videoLoading) {

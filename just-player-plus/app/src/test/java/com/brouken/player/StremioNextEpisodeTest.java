@@ -35,16 +35,33 @@ public class StremioNextEpisodeTest {
     public void matcherUsesLatestEpisodeRequestAsCurrent() {
         long now = 1_000_000L;
 
-        StremioEpisodeId current = StremioConnectorStore.findRecentEpisode(
+        StremioConnectorStore.Content current = StremioConnectorStore.findRecentContent(
                 events(
                         event("tt1:2:3", now - 2_000),
                         event("tt1:2:4", now - 1_000)),
                 now);
 
         assertNotNull(current);
-        assertEquals("tt1:2:4", current.raw);
-        assertNull(StremioConnectorStore.findRecentEpisode(
+        assertNotNull(current.episode);
+        assertEquals("tt1:2:4", current.episode.raw);
+        assertNull(StremioConnectorStore.findRecentContent(
                 events(event("tt1:2:4", now - 16 * 60_000L)), now));
+    }
+
+    @Test
+    public void freshMovieRequestSupersedesStaleSeriesRequest() {
+        long now = 1_000_000L;
+
+        StremioConnectorStore.Content current = StremioConnectorStore.findRecentContent(
+                events(
+                        event("tt1:2:3", now - 2_000),
+                        new StremioConnectorStore.Event("movie", "tt999", now - 1_000)),
+                now);
+
+        assertNotNull(current);
+        assertEquals("movie", current.type);
+        assertEquals("tt999", current.id);
+        assertNull(current.episode);
     }
 
     @Test

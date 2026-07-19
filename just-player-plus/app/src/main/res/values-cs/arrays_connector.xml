@@ -7,4 +7,10 @@
         <item>60 sekund</item>
         <item>90 sekund</item>
     </string-array>
+
+    <string-array name="plus_network_buffer_entries">
+        <item>Výchozí — současné chování Media3</item>
+        <item>Větší — až 90 s / 256 MiB</item>
+        <item>Maximální ⚠ — až 120 s / 384 MiB; vyšší riziko nedostatku paměti</item>
+    </string-array>
 </resources>

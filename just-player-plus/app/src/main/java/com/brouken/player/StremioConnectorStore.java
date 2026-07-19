@@ -12,7 +12,7 @@ import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Small bounded journal used to correlate Stremio's latest series request with player launch. */
+/** Small bounded journal used to correlate Stremio's latest content request with player launch. */
 final class StremioConnectorStore {
     private static final Object LOCK = new Object();
     private static final String PREFS_NAME = "justplayer_plus_stremio_connector";
@@ -22,7 +22,7 @@ final class StremioConnectorStore {
     private static final String KEY_EXPECTED_EPISODE = "expected_episode";
     private static final int MAX_EVENTS = 24;
     private static final long MAX_EVENT_AGE_MS = 15 * 60_000L;
-    private static final long MAX_EXPECTED_AGE_MS = 2 * 60_000L;
+    private static final long MAX_EXPECTED_AGE_MS = 30_000L;
     private static final long DEDUPLICATE_WINDOW_MS = 2_000L;
 
     private final SharedPreferences preferences;
@@ -32,7 +32,7 @@ final class StremioConnectorStore {
     }
 
     void record(String type, String id, long timestampMs) {
-        if (!"series".equals(type) || StremioEpisodeId.parse(id) == null) {
+        if (!isSupportedEvent(type, id)) {
             return;
         }
         synchronized (LOCK) {
@@ -40,7 +40,8 @@ final class StremioConnectorStore {
             if (!events.isEmpty()) {
                 Event last = events.get(events.size() - 1);
                 long sinceLast = timestampMs - last.timestampMs;
-                if (last.id.equals(id)
+                if (last.type.equals(type)
+                        && last.id.equals(id)
                         && sinceLast >= 0L
                         && sinceLast <= DEDUPLICATE_WINDOW_MS) {
                     return;
@@ -55,23 +56,24 @@ final class StremioConnectorStore {
     }
 
     /**
-     * Claims Stremio's latest current-episode request. Android TV normally asks stream addons
-     * only for the episode being launched, so Cinemeta derives the following episode from it.
+     * Claims Stremio's latest content request. A fresh movie request deliberately supersedes
+     * stale series state so a next-episode timer can never be armed for a movie.
      */
     @Nullable
-    StremioEpisodeId claimRecentEpisode(long nowMs) {
+    Content claimRecentContent(long nowMs) {
         synchronized (LOCK) {
             List<Event> events = readEvents();
             Event event = findRecentEvent(events, nowMs);
             if (event == null) {
-                return claimExpectedEpisode(nowMs);
+                StremioEpisodeId expected = claimExpectedEpisode(nowMs);
+                return expected == null ? null : Content.series(expected);
             }
-            String token = event.id + "\n" + event.timestampMs;
+            String token = event.type + "\n" + event.id + "\n" + event.timestampMs;
             if (token.equals(preferences.getString(KEY_CLAIMED_EPISODE, null))) {
                 return null;
             }
-            StremioEpisodeId episode = StremioEpisodeId.parse(event.id);
-            if (episode == null) {
+            Content content = Content.fromEvent(event);
+            if (content == null) {
                 return null;
             }
 
@@ -82,7 +84,7 @@ final class StremioConnectorStore {
                     .putString(KEY_CLAIMED_EPISODE, token)
                     .remove(KEY_EXPECTED_EPISODE)
                     .apply();
-            return episode;
+            return content;
         }
     }
 
@@ -126,9 +128,9 @@ final class StremioConnectorStore {
     }
 
     @Nullable
-    static StremioEpisodeId findRecentEpisode(List<Event> events, long nowMs) {
+    static Content findRecentContent(List<Event> events, long nowMs) {
         Event event = findRecentEvent(events, nowMs);
-        return event == null ? null : StremioEpisodeId.parse(event.id);
+        return event == null ? null : Content.fromEvent(event);
     }
 
     @Nullable
@@ -139,11 +141,18 @@ final class StremioConnectorStore {
                     || nowMs - event.timestampMs > MAX_EVENT_AGE_MS) {
                 continue;
             }
-            if ("series".equals(event.type) && StremioEpisodeId.parse(event.id) != null) {
+            if (isSupportedEvent(event.type, event.id)) {
                 return event;
             }
         }
         return null;
+    }
+
+    private static boolean isSupportedEvent(String type, String id) {
+        if ("series".equals(type)) {
+            return StremioEpisodeId.parse(id) != null;
+        }
+        return "movie".equals(type) && id != null && !id.trim().isEmpty();
     }
 
     void clear() {
@@ -208,6 +217,39 @@ final class StremioConnectorStore {
             this.type = type;
             this.id = id;
             this.timestampMs = timestampMs;
+        }
+    }
+
+    static final class Content {
+        final String type;
+        final String id;
+        @Nullable final StremioEpisodeId episode;
+
+        private Content(String type, String id, @Nullable StremioEpisodeId episode) {
+            this.type = type;
+            this.id = id;
+            this.episode = episode;
+        }
+
+        static Content series(StremioEpisodeId episode) {
+            return new Content("series", episode.raw, episode);
+        }
+
+        static Content movie(String id) {
+            return new Content("movie", id, null);
+        }
+
+        @Nullable
+        static Content fromEvent(Event event) {
+            if ("movie".equals(event.type) && isSupportedEvent(event.type, event.id)) {
+                return movie(event.id);
+            }
+            StremioEpisodeId episode = StremioEpisodeId.parse(event.id);
+            return episode == null ? null : series(episode);
+        }
+
+        boolean isSeries() {
+            return episode != null;
         }
     }
 }

@@ -29,7 +29,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** Loopback-only Stremio addon that observes series stream requests and returns no streams. */
+/** Loopback-only Stremio addon that observes content requests and returns no streams. */
 public final class StremioConnectorService extends Service {
     static final int PORT = 16745;
     static final String HTTP_MANIFEST_URL =
@@ -40,11 +40,11 @@ public final class StremioConnectorService extends Service {
     private static final int NOTIFICATION_ID = 16745;
     private static final String MANIFEST = "{"
             + "\"id\":\"com.justplayerplus.connector\","
-            + "\"version\":\"1.0.0\","
+            + "\"version\":\"1.1.0\","
             + "\"name\":\"JustPlayer Plus Connector\","
             + "\"description\":\"Local metadata bridge for JustPlayer Plus next-episode cards\","
-            + "\"resources\":[{\"name\":\"stream\",\"types\":[\"series\"]}],"
-            + "\"types\":[\"series\"],"
+            + "\"resources\":[{\"name\":\"stream\",\"types\":[\"series\",\"movie\"]}],"
+            + "\"types\":[\"series\",\"movie\"],"
             + "\"catalogs\":[],"
             + "\"behaviorHints\":{\"configurable\":false}"
             + "}";
@@ -181,11 +181,10 @@ public final class StremioConnectorService extends Service {
             } else if ("/manifest.json".equals(path) || "/".equals(path)) {
                 writeResponse(writer, 200, "application/json", MANIFEST);
             } else if (path.startsWith("/stream/series/") && path.endsWith(".json")) {
-                String encodedId = path.substring(
-                        "/stream/series/".length(), path.length() - ".json".length());
-                String id = URLDecoder.decode(encodedId, StandardCharsets.UTF_8.name());
-                store.record("series", id, System.currentTimeMillis());
-                diagnostics.recordStremioConnector("stream_request", "series/" + id);
+                recordStreamRequest(path, "series");
+                writeResponse(writer, 200, "application/json", "{\"streams\":[]}");
+            } else if (path.startsWith("/stream/movie/") && path.endsWith(".json")) {
+                recordStreamRequest(path, "movie");
                 writeResponse(writer, 200, "application/json", "{\"streams\":[]}");
             } else {
                 writeResponse(writer, 404, "application/json", "{\"error\":\"not found\"}");
@@ -193,6 +192,14 @@ public final class StremioConnectorService extends Service {
         } catch (IOException | RuntimeException ignored) {
             // The endpoint is advisory; connector failure must never affect playback.
         }
+    }
+
+    private void recordStreamRequest(String path, String type) throws IOException {
+        String prefix = "/stream/" + type + "/";
+        String encodedId = path.substring(prefix.length(), path.length() - ".json".length());
+        String id = URLDecoder.decode(encodedId, StandardCharsets.UTF_8.name());
+        store.record(type, id, System.currentTimeMillis());
+        diagnostics.recordStremioConnector("stream_request", type + "/" + id);
     }
 
     private static void writeResponse(BufferedWriter writer, int code, String type, String body)

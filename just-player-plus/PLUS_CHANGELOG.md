@@ -1,5 +1,18 @@
 # JustPlayer Plus changelog
 
+## Step 15 — Streaming resilience
+
+- Added Default, Larger (90 s / 256 MiB) and Maximum (120 s / 384 MiB) network-buffer profiles.
+- Increased HTTP connect/read timeouts to 25 seconds and retriable source-load attempts to six.
+- Keeps the Media3 default load control unchanged unless a larger network profile is selected.
+
+## Step 14 — Next-episode efficiency and strict opt-out
+
+- Replaced one-second playback-position polling with a single Media3 position message.
+- Distinguishes Stremio movie and series launches so movies never arm an episode card.
+- Creates metadata/card resources only while the connector is enabled and immediately cancels
+  pending metadata, artwork and popup work when it is disabled.
+
 ## Step 13 — Final audit and hardening
 
 - Added a permanent CI check that maps every Plus preference to its settings entry and runtime hook.
