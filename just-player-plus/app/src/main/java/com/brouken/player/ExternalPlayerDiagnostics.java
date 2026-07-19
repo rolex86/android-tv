@@ -190,18 +190,12 @@ final class ExternalPlayerDiagnostics {
         }
         String scheme = clean(uri.getScheme());
         String host = clean(uri.getHost());
-        String lastSegment = clean(uri.getLastPathSegment());
-        StringBuilder result = new StringBuilder();
-        if (!scheme.isEmpty()) {
-            result.append(scheme).append("://");
+        if (scheme.isEmpty() || host.isEmpty()) {
+            return "local-content";
         }
-        if (!host.isEmpty()) {
-            result.append(host);
-        }
-        if (!lastSegment.isEmpty()) {
-            result.append('/').append(lastSegment);
-        }
-        return result.length() == 0 ? "local-content" : result.toString();
+        // Paths frequently contain CDN signatures or bearer tokens. Host-level identity is
+        // sufficient for diagnostics and cannot leak query, user-info or path credentials.
+        return scheme + "://" + host;
     }
 
     private static String clean(@Nullable String value) {

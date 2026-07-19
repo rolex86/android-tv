@@ -312,4 +312,8 @@ class Prefs {
     public void setPersistent(boolean persistentMode) {
         this.persistentMode = persistentMode;
     }
+
+    public void resetNonPersistentPosition() {
+        nonPersitentPosition = -1L;
+    }
 }

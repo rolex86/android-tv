@@ -45,7 +45,10 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install Android platform
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+        run: sdkmanager "platforms;android-34" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Run smart-selection unit tests
+        run: ./gradlew testLatestUniversalDebugUnitTest --stacktrace --console=plain
 
       - name: Build release APK
         run: |

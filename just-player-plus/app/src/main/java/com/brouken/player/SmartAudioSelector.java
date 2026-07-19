@@ -23,15 +23,17 @@ final class SmartAudioSelector {
             boolean ignoreCommentary,
             boolean ignoreAudioDescription,
             boolean preferBestQuality,
-            String contentPreference) {
+            String contentPreference,
+            boolean allowMediaDefault) {
         Candidate best = findBest(
                 tracks, preferredLanguages, ignoreCommentary,
-                ignoreAudioDescription, preferBestQuality, contentPreference);
+                ignoreAudioDescription, preferBestQuality, contentPreference,
+                allowMediaDefault);
         if (best == null) {
             // Never leave the user without audio only because all labels are unusual.
             best = findBest(
                     tracks, preferredLanguages, false, false,
-                    preferBestQuality, contentPreference);
+                    preferBestQuality, contentPreference, allowMediaDefault);
         }
         if (best == null) {
             return null;
@@ -47,7 +49,8 @@ final class SmartAudioSelector {
             boolean ignoreCommentary,
             boolean ignoreAudioDescription,
             boolean preferBestQuality,
-            String contentPreference) {
+            String contentPreference,
+            boolean allowMediaDefault) {
         Candidate best = null;
         int sourceOrder = 0;
 
@@ -71,7 +74,8 @@ final class SmartAudioSelector {
                     continue;
                 }
 
-                int languageRank = languageRank(format.language, preferredLanguages);
+                int languageRank = languageRank(
+                        format, preferredLanguages, allowMediaDefault);
                 if (languageRank < 0) {
                     languageRank = preferredLanguages.length + 100;
                 }
@@ -108,11 +112,15 @@ final class SmartAudioSelector {
         return 0;
     }
 
-    private static boolean isDubbed(Format format) {
-        if ((format.roleFlags & C.ROLE_FLAG_DUB) != 0) {
+    static boolean isDubbed(Format format) {
+        return isDubbed(format.roleFlags, format.label);
+    }
+
+    static boolean isDubbed(int roleFlags, @Nullable String formatLabel) {
+        if ((roleFlags & C.ROLE_FLAG_DUB) != 0) {
             return true;
         }
-        String label = normalizeLabel(format.label);
+        String label = normalizeLabel(formatLabel);
         return containsToken(label, "dub")
                 || contains(label, "dubbed")
                 || contains(label, "dubbing")
@@ -120,7 +128,9 @@ final class SmartAudioSelector {
                 || contains(label, "czech dub")
                 || contains(label, "dabing")
                 || contains(label, "dabovany")
-                || contains(label, "cesky dabing");
+                || contains(label, "cesky dabing")
+                || contains(label, "synchronized")
+                || contains(label, "synchronised");
     }
 
     private static boolean isExplicitOriginal(Format format) {
@@ -159,8 +169,24 @@ final class SmartAudioSelector {
                 || contains(label, "audiodeskripce");
     }
 
-    private static int languageRank(@Nullable String language, String[] preferredLanguages) {
+    static int languageRank(Format format,
+                            String[] preferredLanguages,
+                            boolean allowMediaDefault) {
+        return languageRank(
+                format.language,
+                (format.selectionFlags & C.SELECTION_FLAG_DEFAULT) != 0,
+                preferredLanguages,
+                allowMediaDefault);
+    }
+
+    static int languageRank(@Nullable String language,
+                            boolean mediaDefault,
+                            String[] preferredLanguages,
+                            boolean allowMediaDefault) {
         if (language == null || language.isEmpty() || "und".equalsIgnoreCase(language)) {
+            if (allowMediaDefault && mediaDefault) {
+                return preferredLanguages.length;
+            }
             return -1;
         }
         String normalized = normalizeLanguage(language);
@@ -168,6 +194,9 @@ final class SmartAudioSelector {
             if (normalized.equals(normalizeLanguage(preferredLanguages[i]))) {
                 return i;
             }
+        }
+        if (allowMediaDefault && mediaDefault) {
+            return preferredLanguages.length;
         }
         return -1;
     }

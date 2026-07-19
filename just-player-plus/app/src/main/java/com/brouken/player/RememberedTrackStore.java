@@ -156,12 +156,24 @@ final class RememberedTrackStore {
     }
 
     static Selection capture(Tracks tracks, TrackSelectionParameters parameters) {
+        boolean subtitleDisabled = parameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)
+                || !tracks.isTypeSelected(C.TRACK_TYPE_TEXT);
+        return capture(
+                tracks,
+                parameters,
+                !hasOverride(parameters, C.TRACK_TYPE_AUDIO),
+                !subtitleDisabled && !hasOverride(parameters, C.TRACK_TYPE_TEXT));
+    }
+
+    static Selection capture(Tracks tracks,
+                             TrackSelectionParameters parameters,
+                             boolean audioAutomatic,
+                             boolean subtitleAutomatic) {
         Selection selection = new Selection();
-        selection.audioAutomatic = !hasOverride(parameters, C.TRACK_TYPE_AUDIO);
+        selection.audioAutomatic = audioAutomatic;
         selection.subtitleDisabled = parameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)
                 || !tracks.isTypeSelected(C.TRACK_TYPE_TEXT);
-        selection.subtitleAutomatic = !selection.subtitleDisabled
-                && !hasOverride(parameters, C.TRACK_TYPE_TEXT);
+        selection.subtitleAutomatic = subtitleAutomatic;
 
         Format audio = findSelectedFormat(tracks, C.TRACK_TYPE_AUDIO);
         if (audio != null) {
@@ -377,9 +389,16 @@ final class RememberedTrackStore {
         String subtitleLabel = "";
 
         String signature() {
+            return audioSignature() + "||" + subtitleSignature();
+        }
+
+        String audioSignature() {
             return audioAutomatic + "|" + audioLanguage + "|" + audioMime + "|"
-                    + audioChannels + "|" + audioRole + "|" + audioLabel + "||"
-                    + subtitleDisabled + "|" + subtitleAutomatic + "|"
+                    + audioChannels + "|" + audioRole + "|" + audioLabel;
+        }
+
+        String subtitleSignature() {
+            return subtitleDisabled + "|" + subtitleAutomatic + "|"
                     + subtitleLanguage + "|" + subtitleMime + "|"
                     + subtitleForced + "|" + subtitleLabel;
         }

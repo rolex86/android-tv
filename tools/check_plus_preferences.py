@@ -2,6 +2,7 @@
 """Fail CI when a JustPlayer Plus setting becomes UI-only or loses its runtime hook."""
 
 from pathlib import Path
+import hashlib
 import re
 import sys
 
@@ -11,6 +12,10 @@ PREFS_PATH = APP / "java" / "com" / "brouken" / "player" / "PlusPrefs.java"
 PLAYER_PATH = APP / "java" / "com" / "brouken" / "player" / "PlayerActivity.java"
 XML_PATH = APP / "res" / "xml" / "root_preferences.xml"
 OFFSET_PATH = APP / "java" / "com" / "brouken" / "player" / "OffsetSubtitleParserFactory.java"
+TEST_PATH = (
+    ROOT / "just-player-plus" / "app" / "src" / "test" / "java"
+    / "com" / "brouken" / "player" / "SmartSelectionPolicyTest.java"
+)
 
 plus_prefs = PREFS_PATH.read_text(encoding="utf-8")
 player = PLAYER_PATH.read_text(encoding="utf-8")
@@ -88,6 +93,7 @@ for constant, xml_key in sorted(keys.items()):
 protected_snippets = (
     ".setExtensionRendererMode(mPrefs.decoderPriority)",
     ".setMapDV7ToHevc(mPrefs.mapDV7ToHevc)",
+    ".setTunnelingEnabled(true)",
     "player.setAudioAttributes(audioAttributes, true);",
 )
 for snippet in protected_snippets:
@@ -105,6 +111,54 @@ if parser_injections != 3:
 for forbidden in ("Math.addExact", "Math.subtractExact"):
     if forbidden in offset_parser:
         errors.append(f"minSdk-unsafe timestamp helper remains: {forbidden}")
+
+runtime_regression_anchors = (
+    "mPlusPrefs.useMediaDefaultAudioFallback()",
+    "mPlusPrefs.getSubtitleSelectionOrder()",
+    "loadMediaFromIntent(intent, uri, type)",
+    "persistAudioSelectionPerFile",
+    "persistSubtitleSelectionPerFile",
+    "isExternalPlayerLaunch()",
+)
+for anchor in runtime_regression_anchors:
+    if anchor not in external_java:
+        errors.append(f"Missing regression fix runtime hook: {anchor}")
+
+if not TEST_PATH.exists():
+    errors.append("Smart-selection regression tests are missing")
+else:
+    tests = TEST_PATH.read_text(encoding="utf-8")
+    for test_name in (
+        "audioMediaDefaultRanksAfterExplicitLanguages",
+        "dubbedLabelsIncludeSynchronizedVariants",
+        "subtitleMediaDefaultKeepsItsConfiguredPosition",
+        "audioAndSubtitleMemoryProvenanceAreIndependent",
+    ):
+        if test_name not in tests:
+            errors.append(f"Missing smart-selection regression test: {test_name}")
+
+# These binaries contain the protected Media3 renderer/audio path and extension decoders.
+# An intentional upstream refresh must review the playback regression matrix and update hashes.
+protected_aar_hashes = {
+    "lib-decoder-av1-release.aar": "4a5143035adabc917211a54deaae45f2dfbc8aefcf60b7614e32afa5db08133c",
+    "lib-decoder-ffmpeg-release.aar": "0d8c7f957f8314627034129e1f536b7ca02fbe62907bae1f9bd35090e4c2d214",
+    "lib-decoder-iamf-release.aar": "7e589f4e8ff13e56b82f8dd0792525b8d135cd1708b14ac17e52720a86eaee07",
+    "lib-decoder-mpegh-release.aar": "fd675df8df5f39523fcab658ddd02d607665522392e299dff940bdcd38b23436",
+    "lib-exoplayer-release.aar": "2895e3f09aef4ca72edfffec6f682aea85a707d6ce4c8d4fc46048ac2b3ec565",
+    "lib-ui-release.aar": "726fbd10e34c6e35d414cdb99216bd511fb3d601ef1b3199ed652174a636e0b4",
+}
+libs_dir = ROOT / "just-player-plus" / "app" / "libs"
+for filename, expected_hash in protected_aar_hashes.items():
+    path = libs_dir / filename
+    if not path.exists():
+        errors.append(f"Protected playback binary is missing: {filename}")
+        continue
+    actual_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+    if actual_hash != expected_hash:
+        errors.append(
+            f"Protected playback binary changed without audit: {filename} "
+            f"({actual_hash} != {expected_hash})"
+        )
 
 leftover_helpers = sorted((ROOT / "tools").glob("apply_step*.py"))
 if leftover_helpers:

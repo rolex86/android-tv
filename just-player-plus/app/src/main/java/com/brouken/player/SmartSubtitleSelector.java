@@ -21,32 +21,30 @@ final class SmartSubtitleSelector {
     @Nullable
     static TrackSelectionOverride findFullSubtitle(
             Tracks tracks,
-            String[] preferredLanguages,
-            boolean allowMediaDefault,
+            String[] selectionOrder,
             boolean allowUnknownLanguage,
             boolean ignoreSdh,
             String sourcePreference) {
         TrackSelectionOverride regular = findBest(
-                tracks, preferredLanguages, allowMediaDefault, allowUnknownLanguage,
+                tracks, selectionOrder, allowUnknownLanguage,
                 ignoreSdh, sourcePreference, false, true);
         if (regular != null) {
             return regular;
         }
         return findBest(
-                tracks, preferredLanguages, allowMediaDefault, allowUnknownLanguage,
+                tracks, selectionOrder, allowUnknownLanguage,
                 ignoreSdh, sourcePreference, true, false);
     }
 
     @Nullable
     static TrackSelectionOverride findForcedSubtitle(
             Tracks tracks,
-            String[] preferredLanguages,
-            boolean allowMediaDefault,
+            String[] selectionOrder,
             boolean allowUnknownLanguage,
             boolean ignoreSdh,
             String sourcePreference) {
         return findBest(
-                tracks, preferredLanguages, allowMediaDefault, allowUnknownLanguage,
+                tracks, selectionOrder, allowUnknownLanguage,
                 ignoreSdh, sourcePreference, true, false);
     }
 
@@ -66,8 +64,7 @@ final class SmartSubtitleSelector {
     @Nullable
     private static TrackSelectionOverride findBest(
             Tracks tracks,
-            String[] preferredLanguages,
-            boolean allowMediaDefault,
+            String[] selectionOrder,
             boolean allowUnknownLanguage,
             boolean ignoreSdh,
             String sourcePreference,
@@ -101,17 +98,13 @@ final class SmartSubtitleSelector {
                     continue;
                 }
 
-                int languageRank = languageRank(format, preferredLanguages);
-                if (languageRank < 0 && allowMediaDefault
-                        && (format.selectionFlags & C.SELECTION_FLAG_DEFAULT) != 0) {
-                    languageRank = preferredLanguages.length + 50;
-                }
+                int languageRank = languageRank(format, selectionOrder);
                 if (languageRank < 0) {
                     if (!allowUnknownLanguage || !hasUnknownLanguage(format)) {
                         sourceOrder++;
                         continue;
                     }
-                    languageRank = preferredLanguages.length + 100;
+                    languageRank = selectionOrder.length + 100;
                 }
 
                 Candidate candidate = new Candidate(
@@ -128,7 +121,7 @@ final class SmartSubtitleSelector {
 
         if (best == null && ignoreSdh) {
             return findBest(
-                    tracks, preferredLanguages, allowMediaDefault, allowUnknownLanguage,
+                    tracks, selectionOrder, allowUnknownLanguage,
                     false, sourcePreference, requireForced, excludeForced);
         }
         if (best == null) {
@@ -149,23 +142,40 @@ final class SmartSubtitleSelector {
         return 0;
     }
 
-    private static int languageRank(Format format, String[] preferredLanguages) {
-        for (int i = 0; i < preferredLanguages.length; i++) {
-            if (matchesLanguage(format, preferredLanguages[i])) {
+    static int languageRank(Format format, String[] selectionOrder) {
+        return languageRank(
+                format.language,
+                format.label,
+                (format.selectionFlags & C.SELECTION_FLAG_DEFAULT) != 0,
+                selectionOrder);
+    }
+
+    static int languageRank(@Nullable String language,
+                            @Nullable String label,
+                            boolean mediaDefault,
+                            String[] selectionOrder) {
+        for (int i = 0; i < selectionOrder.length; i++) {
+            if (Prefs.TRACK_DEFAULT.equals(selectionOrder[i])) {
+                if (mediaDefault) {
+                    return i;
+                }
+            } else if (matchesLanguage(language, label, selectionOrder[i])) {
                 return i;
             }
         }
         return -1;
     }
 
-    private static boolean matchesLanguage(Format format, String preferredLanguage) {
+    private static boolean matchesLanguage(@Nullable String language,
+                                           @Nullable String formatLabel,
+                                           String preferredLanguage) {
         String preferred = normalizeLanguage(preferredLanguage);
-        if (!isUndetermined(format.language)
-                && preferred.equals(normalizeLanguage(format.language))) {
+        if (!isUndetermined(language)
+                && preferred.equals(normalizeLanguage(language))) {
             return true;
         }
 
-        String label = normalizeLabel(format.label);
+        String label = normalizeLabel(formatLabel);
         if (label.isEmpty()) {
             return false;
         }

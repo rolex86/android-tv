@@ -138,10 +138,29 @@ class PlusPrefs {
         return languages.toArray(new String[0]);
     }
 
+    boolean useMediaDefaultAudioFallback() {
+        String[] preferences = {
+                audioLanguagePrimary, audioLanguageSecondary, audioLanguageTertiary
+        };
+        for (String preference : preferences) {
+            if (Prefs.TRACK_DEFAULT.equals(preference)) {
+                return true;
+            }
+            if (TRACK_NONE.equals(preference)) {
+                return false;
+            }
+        }
+        return false;
+    }
+
     private boolean appendAudioLanguagePreference(LinkedHashSet<String> languages,
                                                    String preference) {
-        if (preference == null || TRACK_NONE.equals(preference)) {
+        if (preference == null) {
             return true;
+        }
+        if (TRACK_NONE.equals(preference)) {
+            // "No fallback" terminates the ordered list just like Media default.
+            return false;
         }
         if (Prefs.TRACK_DEFAULT.equals(preference)) {
             // Media default acts as the fallback point in the ordered list.
@@ -161,23 +180,35 @@ class PlusPrefs {
 
     String[] getPreferredSubtitleLanguages() {
         LinkedHashSet<String> languages = new LinkedHashSet<>();
-        appendSubtitleLanguagePreference(languages, subtitleLanguagePrimary);
-        appendSubtitleLanguagePreference(languages, subtitleLanguageSecondary);
+        if (!appendSubtitleLanguagePreference(languages, subtitleLanguagePrimary)) {
+            return languages.toArray(new String[0]);
+        }
+        if (!appendSubtitleLanguagePreference(languages, subtitleLanguageSecondary)) {
+            return languages.toArray(new String[0]);
+        }
         appendSubtitleLanguagePreference(languages, subtitleLanguageTertiary);
         return languages.toArray(new String[0]);
     }
 
-    boolean useMediaDefaultSubtitleFallback() {
-        return Prefs.TRACK_DEFAULT.equals(subtitleLanguagePrimary)
-                || Prefs.TRACK_DEFAULT.equals(subtitleLanguageSecondary)
-                || Prefs.TRACK_DEFAULT.equals(subtitleLanguageTertiary);
+    String[] getSubtitleSelectionOrder() {
+        LinkedHashSet<String> preferences = new LinkedHashSet<>();
+        if (!appendSubtitleSelectionPreference(preferences, subtitleLanguagePrimary)) {
+            return preferences.toArray(new String[0]);
+        }
+        if (!appendSubtitleSelectionPreference(preferences, subtitleLanguageSecondary)) {
+            return preferences.toArray(new String[0]);
+        }
+        appendSubtitleSelectionPreference(preferences, subtitleLanguageTertiary);
+        return preferences.toArray(new String[0]);
     }
 
-    private void appendSubtitleLanguagePreference(LinkedHashSet<String> languages,
-                                                   String preference) {
-        if (preference == null || preference.isEmpty()
-                || TRACK_NONE.equals(preference) || Prefs.TRACK_DEFAULT.equals(preference)) {
-            return;
+    private boolean appendSubtitleLanguagePreference(LinkedHashSet<String> languages,
+                                                      String preference) {
+        if (preference == null || preference.isEmpty()) {
+            return true;
+        }
+        if (TRACK_NONE.equals(preference) || Prefs.TRACK_DEFAULT.equals(preference)) {
+            return false;
         }
         if (Prefs.TRACK_DEVICE.equals(preference)) {
             for (String language : Utils.getDeviceLanguages()) {
@@ -188,6 +219,31 @@ class PlusPrefs {
         } else {
             languages.add(preference);
         }
+        return true;
+    }
+
+    private boolean appendSubtitleSelectionPreference(LinkedHashSet<String> preferences,
+                                                       String preference) {
+        if (preference == null || preference.isEmpty()) {
+            return true;
+        }
+        if (TRACK_NONE.equals(preference)) {
+            return false;
+        }
+        if (Prefs.TRACK_DEFAULT.equals(preference)) {
+            preferences.add(Prefs.TRACK_DEFAULT);
+            return false;
+        }
+        if (Prefs.TRACK_DEVICE.equals(preference)) {
+            for (String language : Utils.getDeviceLanguages()) {
+                if (language != null && !language.isEmpty()) {
+                    preferences.add(language);
+                }
+            }
+        } else {
+            preferences.add(preference);
+        }
+        return true;
     }
 
     private int parseInt(String key, int fallback) {

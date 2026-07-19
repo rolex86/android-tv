@@ -131,7 +131,12 @@ public class PlayerActivity extends Activity {
     private RememberedTrackStore rememberedTrackStore;
     private ExternalPlayerDiagnostics externalDiagnostics;
     private boolean trackMemoryArmed;
-    private String trackMemorySignature;
+    private String trackMemoryAudioSignature;
+    private String trackMemorySubtitleSignature;
+    private boolean audioSelectionExplicit;
+    private boolean subtitleSelectionExplicit;
+    private boolean persistAudioSelectionPerFile;
+    private boolean persistSubtitleSelectionPerFile;
     public BrightnessControl mBrightnessControl;
     public static boolean haveMedia;
     private boolean videoLoading;
@@ -269,79 +274,23 @@ public class PlayerActivity extends Activity {
             if (text != null) {
                 final Uri parsedUri = Uri.parse(text);
                 if (parsedUri.isAbsolute()) {
+                    resetApiAccess();
                     mPrefs.updateMedia(this, parsedUri, null);
                     focusPlay = true;
                 }
             }
         } else if (launchIntent.getData() != null) {
-            resetApiAccess();
             final Uri uri = launchIntent.getData();
             if (SubtitleUtils.isSubtitle(uri, type)) {
+                resetApiAccess();
                 handleSubtitles(uri);
             } else {
-                Bundle bundle = launchIntent.getExtras();
-                if (bundle != null) {
-                    apiAccess = bundle.containsKey(API_POSITION) || bundle.containsKey(API_RETURN_RESULT)
-                            || bundle.containsKey(API_SUBS) || bundle.containsKey(API_SUBS_ENABLE);
-                    if (apiAccess) {
-                        mPrefs.setPersistent(false);
-                    } else if (bundle.containsKey(API_TITLE)) {
-                        apiAccessPartial = true;
-                    }
-                    apiTitle = bundle.getString(API_TITLE);
-                }
-
-                mPrefs.updateMedia(this, uri, type);
-
-                if (bundle != null) {
-                    Uri defaultSub = null;
-                    Parcelable[] subsEnable = bundle.getParcelableArray(API_SUBS_ENABLE);
-                    if (subsEnable != null && subsEnable.length > 0) {
-                        defaultSub = (Uri) subsEnable[0];
-                    }
-
-                    Parcelable[] subs = bundle.getParcelableArray(API_SUBS);
-                    String[] subsName = bundle.getStringArray(API_SUBS_NAME);
-                    if (subs != null && subs.length > 0) {
-                        for (int i = 0; i < subs.length; i++) {
-                            Uri sub = (Uri) subs[i];
-                            String name = null;
-                            if (subsName != null && subsName.length > i) {
-                                name = subsName[i];
-                            }
-                            apiSubs.add(SubtitleUtils.buildSubtitle(this, sub, name, sub.equals(defaultSub)));
-                        }
-                    }
-                }
-
-                if (apiSubs.isEmpty()) {
-                    searchSubtitles();
-                }
-
-                if (bundle != null) {
-                    intentReturnResult = bundle.getBoolean(API_RETURN_RESULT);
-
-                    if (bundle.containsKey(API_POSITION)) {
-                        Object requestedPosition = bundle.get(API_POSITION);
-                        if (requestedPosition instanceof Number) {
-                            mPrefs.updatePosition(((Number) requestedPosition).longValue());
-                        }
-                    }
-                }
+                loadMediaFromIntent(launchIntent, uri, type);
             }
             focusPlay = true;
         }
 
-        long requestedPosition = mPrefs.mediaUri != null
-                ? mPrefs.getPosition() : C.TIME_UNSET;
-        externalDiagnostics.recordLaunch(
-                mPrefs.mediaUri,
-                apiTitle,
-                apiAccess,
-                apiAccessPartial,
-                intentReturnResult,
-                requestedPosition,
-                apiSubs.size());
+        recordExternalLaunch();
 
         coordinatorLayout = findViewById(R.id.coordinatorLayout);
         mAudioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
@@ -905,6 +854,7 @@ public class PlayerActivity extends Activity {
         super.onNewIntent(intent);
 
         if (intent != null) {
+            setIntent(intent);
             final String action = intent.getAction();
             final String type = intent.getType();
             final Uri uri = intent.getData();
@@ -913,8 +863,11 @@ public class PlayerActivity extends Activity {
                 if (SubtitleUtils.isSubtitle(uri, type)) {
                     handleSubtitles(uri);
                 } else {
-                    mPrefs.updateMedia(this, uri, type);
-                    searchSubtitles();
+                    // Persist the current item while Prefs still points at it. initializePlayer()
+                    // releases without saving, and loadMediaFromIntent() replaces the URI.
+                    releasePlayer();
+                    loadMediaFromIntent(intent, uri, type);
+                    recordExternalLaunch();
                 }
                 focusPlay = true;
                 initializePlayer();
@@ -923,6 +876,8 @@ public class PlayerActivity extends Activity {
                 if (text != null) {
                     final Uri parsedUri = Uri.parse(text);
                     if (parsedUri.isAbsolute()) {
+                        releasePlayer();
+                        resetApiAccess();
                         mPrefs.updateMedia(this, parsedUri, null);
                         focusPlay = true;
                         initializePlayer();
@@ -1173,7 +1128,88 @@ public class PlayerActivity extends Activity {
         apiAccessPartial = false;
         apiTitle = null;
         apiSubs.clear();
+        intentReturnResult = false;
+        playbackFinished = false;
+        resultPosition = C.TIME_UNSET;
+        resultDuration = C.TIME_UNSET;
         mPrefs.setPersistent(true);
+        mPrefs.resetNonPersistentPosition();
+    }
+
+    private boolean isExternalPlayerLaunch() {
+        return apiAccess || apiAccessPartial || intentReturnResult;
+    }
+
+    private void loadMediaFromIntent(Intent intent, Uri uri, String type) {
+        resetApiAccess();
+        Bundle bundle = intent.getExtras();
+        if (bundle != null) {
+            apiAccess = bundle.containsKey(API_POSITION)
+                    || bundle.containsKey(API_RETURN_RESULT)
+                    || bundle.containsKey(API_SUBS)
+                    || bundle.containsKey(API_SUBS_ENABLE);
+            apiAccessPartial = !apiAccess && bundle.containsKey(API_TITLE);
+            apiTitle = bundle.getString(API_TITLE);
+            intentReturnResult = bundle.getBoolean(API_RETURN_RESULT, false);
+        }
+
+        if (apiAccess) {
+            mPrefs.setPersistent(false);
+        }
+        mPrefs.updateMedia(this, uri, type);
+        if (apiAccess) {
+            // A reused singleTask activity must never carry the previous external position.
+            mPrefs.updatePosition(0L);
+        }
+
+        if (bundle != null) {
+            Uri defaultSub = null;
+            Parcelable[] enabledSubtitles = bundle.getParcelableArray(API_SUBS_ENABLE);
+            if (enabledSubtitles != null && enabledSubtitles.length > 0
+                    && enabledSubtitles[0] instanceof Uri) {
+                defaultSub = (Uri) enabledSubtitles[0];
+            }
+
+            Parcelable[] subtitles = bundle.getParcelableArray(API_SUBS);
+            String[] subtitleNames = bundle.getStringArray(API_SUBS_NAME);
+            if (subtitles != null) {
+                for (int i = 0; i < subtitles.length; i++) {
+                    if (!(subtitles[i] instanceof Uri)) {
+                        continue;
+                    }
+                    Uri subtitle = (Uri) subtitles[i];
+                    String name = subtitleNames != null && subtitleNames.length > i
+                            ? subtitleNames[i] : null;
+                    apiSubs.add(SubtitleUtils.buildSubtitle(
+                            this, subtitle, name, subtitle.equals(defaultSub)));
+                }
+            }
+
+            if (bundle.containsKey(API_POSITION)) {
+                Object requestedPosition = bundle.get(API_POSITION);
+                if (requestedPosition instanceof Number) {
+                    mPrefs.updatePosition(Math.max(
+                            0L, ((Number) requestedPosition).longValue()));
+                }
+            }
+        }
+
+        if (apiSubs.isEmpty()) {
+            searchSubtitles();
+        }
+    }
+
+    private void recordExternalLaunch() {
+        long requestedPosition = mPrefs.mediaUri != null
+                ? mPrefs.getPosition() : C.TIME_UNSET;
+        externalDiagnostics.recordLaunch(
+                mPrefs.mediaUri,
+                apiTitle,
+                apiAccess,
+                apiAccessPartial,
+                intentReturnResult,
+                requestedPosition,
+                apiSubs.size());
     }
 
     @Override
@@ -1320,7 +1356,12 @@ public class PlayerActivity extends Activity {
         boolean isNetworkUri = Utils.isSupportedNetworkUri(mPrefs.mediaUri);
         haveMedia = mPrefs.mediaUri != null;
         trackMemoryArmed = false;
-        trackMemorySignature = null;
+        trackMemoryAudioSignature = null;
+        trackMemorySubtitleSignature = null;
+        audioSelectionExplicit = false;
+        subtitleSelectionExplicit = false;
+        persistAudioSelectionPerFile = false;
+        persistSubtitleSelectionPerFile = false;
 
         if (player != null) {
             player.removeListener(playerListener);
@@ -1532,8 +1573,11 @@ public class PlayerActivity extends Activity {
                 if (player.isCurrentMediaItemSeekable()) {
                     mPrefs.updatePosition(player.getCurrentPosition());
                 }
-                mPrefs.updateMeta(getSelectedTrack(C.TRACK_TYPE_AUDIO),
-                        getSelectedTrack(C.TRACK_TYPE_TEXT),
+                mPrefs.updateMeta(
+                        persistAudioSelectionPerFile
+                                ? getSelectedTrack(C.TRACK_TYPE_AUDIO) : null,
+                        persistSubtitleSelectionPerFile
+                                ? getSelectedTrack(C.TRACK_TYPE_TEXT) : null,
                         playerView.getResizeMode(),
                         playerView.getVideoSurfaceView().getScaleX(),
                         player.getPlaybackParameters().speed);
@@ -1723,9 +1767,13 @@ public class PlayerActivity extends Activity {
                                 C.TRACK_TYPE_AUDIO, mPrefs.audioTrackId) != null;
                         setSelectedTracks(mPrefs.subtitleTrackId, mPrefs.audioTrackId);
                         if (restoredAudioSelection) {
+                            audioSelectionExplicit = true;
+                            persistAudioSelectionPerFile = true;
                             audioSelectionReason = "saved_file_selection";
                         }
                         if (restoredSubtitleSelection) {
+                            subtitleSelectionExplicit = true;
+                            persistSubtitleSelectionPerFile = true;
                             subtitleSelectionReason = "saved_file_selection";
                         }
                     }
@@ -1738,6 +1786,7 @@ public class PlayerActivity extends Activity {
                         restoredAudioSelection =
                                 applyRememberedAudioSelection(rememberedSelection);
                         if (restoredAudioSelection) {
+                            audioSelectionExplicit = true;
                             audioSelectionReason = "remembered_" + mPlusPrefs.rememberTrackScope;
                         }
                     }
@@ -1745,6 +1794,7 @@ public class PlayerActivity extends Activity {
                         restoredSubtitleSelection =
                                 applyRememberedSubtitleSelection(rememberedSelection);
                         if (restoredSubtitleSelection) {
+                            subtitleSelectionExplicit = true;
                             subtitleSelectionReason = "remembered_" + mPlusPrefs.rememberTrackScope;
                         }
                     }
@@ -1759,8 +1809,10 @@ public class PlayerActivity extends Activity {
                     armTrackMemory();
                     final String diagnosticAudioReason = audioSelectionReason;
                     final String diagnosticSubtitleReason = subtitleSelectionReason;
-                    playerView.postDelayed(() -> externalDiagnostics.recordTracks(
-                            player, diagnosticAudioReason, diagnosticSubtitleReason), 300L);
+                    if (isExternalPlayerLaunch()) {
+                        playerView.postDelayed(() -> externalDiagnostics.recordTracks(
+                                player, diagnosticAudioReason, diagnosticSubtitleReason), 300L);
+                    }
                 }
             } else if (state == Player.STATE_ENDED) {
                 playbackFinished = true;
@@ -1778,7 +1830,9 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onPlayerError(PlaybackException error) {
-            externalDiagnostics.recordError(error);
+            if (isExternalPlayerLaunch()) {
+                externalDiagnostics.recordError(error);
+            }
             updateLoading(false);
             if (error instanceof ExoPlaybackException) {
                 final ExoPlaybackException exoPlaybackException = (ExoPlaybackException) error;
@@ -1996,7 +2050,8 @@ public class PlayerActivity extends Activity {
             }
             RememberedTrackStore.Selection selection = RememberedTrackStore.capture(
                     player.getCurrentTracks(), player.getTrackSelectionParameters());
-            trackMemorySignature = selection.signature();
+            trackMemoryAudioSignature = selection.audioSignature();
+            trackMemorySubtitleSignature = selection.subtitleSignature();
             trackMemoryArmed = true;
         }, 500L);
     }
@@ -2005,14 +2060,39 @@ public class PlayerActivity extends Activity {
         if (!trackMemoryArmed || player == null) {
             return;
         }
-        RememberedTrackStore.Selection selection = RememberedTrackStore.capture(
+        RememberedTrackStore.Selection observed = RememberedTrackStore.capture(
                 tracks, player.getTrackSelectionParameters());
-        String signature = selection.signature();
-        if (signature.equals(trackMemorySignature)) {
+        String audioSignature = observed.audioSignature();
+        String subtitleSignature = observed.subtitleSignature();
+        boolean audioChanged = !audioSignature.equals(trackMemoryAudioSignature);
+        boolean subtitleChanged = !subtitleSignature.equals(trackMemorySubtitleSignature);
+        if (!audioChanged && !subtitleChanged) {
             return;
         }
-        trackMemorySignature = signature;
-        externalDiagnostics.recordTracks(player, "manual_selection", "manual_selection");
+        trackMemoryAudioSignature = audioSignature;
+        trackMemorySubtitleSignature = subtitleSignature;
+
+        if (audioChanged) {
+            audioSelectionExplicit = !observed.audioAutomatic;
+            persistAudioSelectionPerFile = audioSelectionExplicit;
+        }
+        if (subtitleChanged) {
+            subtitleSelectionExplicit = observed.subtitleDisabled
+                    || !observed.subtitleAutomatic;
+            persistSubtitleSelectionPerFile = subtitleSelectionExplicit;
+        }
+
+        RememberedTrackStore.Selection selection = RememberedTrackStore.capture(
+                tracks,
+                player.getTrackSelectionParameters(),
+                !audioSelectionExplicit,
+                !subtitleSelectionExplicit);
+        if (isExternalPlayerLaunch()) {
+            externalDiagnostics.recordTracks(
+                    player,
+                    audioChanged ? "manual_selection" : "unchanged",
+                    subtitleChanged ? "manual_selection" : "unchanged");
+        }
 
         mPlusPrefs.reload();
         if ("off".equals(mPlusPrefs.rememberTrackScope)) {
@@ -2035,7 +2115,8 @@ public class PlayerActivity extends Activity {
                 mPlusPrefs.ignoreCommentaryAudio,
                 mPlusPrefs.ignoreAudioDescription,
                 "best".equals(mPlusPrefs.audioQualityPreference),
-                mPlusPrefs.audioContentPreference);
+                mPlusPrefs.audioContentPreference,
+                mPlusPrefs.useMediaDefaultAudioFallback());
         if (audioOverride != null) {
             player.setTrackSelectionParameters(
                     player.getTrackSelectionParameters().buildUpon()
@@ -2051,13 +2132,12 @@ public class PlayerActivity extends Activity {
 
         mPlusPrefs.reload();
         final String mode = mPlusPrefs.subtitleMode;
-        final String[] languages = mPlusPrefs.getPreferredSubtitleLanguages();
-        final boolean allowMediaDefault = mPlusPrefs.useMediaDefaultSubtitleFallback();
+        final String[] selectionOrder = mPlusPrefs.getSubtitleSelectionOrder();
         TrackSelectionOverride subtitleOverride = null;
 
         if ("forced".equals(mode)) {
             subtitleOverride = SmartSubtitleSelector.findForcedSubtitle(
-                    player.getCurrentTracks(), languages, allowMediaDefault,
+                    player.getCurrentTracks(), selectionOrder,
                     mPlusPrefs.allowUnknownSubtitles,
                     mPlusPrefs.ignoreSdhSubtitles,
                     mPlusPrefs.subtitleSourcePreference);
@@ -2067,21 +2147,21 @@ public class PlayerActivity extends Activity {
             if (nativeAudio) {
                 if (mPlusPrefs.preferForcedSubtitles) {
                     subtitleOverride = SmartSubtitleSelector.findForcedSubtitle(
-                            player.getCurrentTracks(), languages, allowMediaDefault,
+                            player.getCurrentTracks(), selectionOrder,
                             mPlusPrefs.allowUnknownSubtitles,
-                    mPlusPrefs.ignoreSdhSubtitles,
-                    mPlusPrefs.subtitleSourcePreference);
+                            mPlusPrefs.ignoreSdhSubtitles,
+                            mPlusPrefs.subtitleSourcePreference);
                 }
             } else {
                 subtitleOverride = SmartSubtitleSelector.findFullSubtitle(
-                        player.getCurrentTracks(), languages, allowMediaDefault,
+                        player.getCurrentTracks(), selectionOrder,
                         mPlusPrefs.allowUnknownSubtitles,
-                    mPlusPrefs.ignoreSdhSubtitles,
-                    mPlusPrefs.subtitleSourcePreference);
+                        mPlusPrefs.ignoreSdhSubtitles,
+                        mPlusPrefs.subtitleSourcePreference);
             }
         } else if ("always".equals(mode)) {
             subtitleOverride = SmartSubtitleSelector.findFullSubtitle(
-                    player.getCurrentTracks(), languages, allowMediaDefault,
+                    player.getCurrentTracks(), selectionOrder,
                     mPlusPrefs.allowUnknownSubtitles,
                     mPlusPrefs.ignoreSdhSubtitles,
                     mPlusPrefs.subtitleSourcePreference);
