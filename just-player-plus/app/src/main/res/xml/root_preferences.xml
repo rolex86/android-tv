@@ -238,6 +238,28 @@
 
     <PreferenceCategory app:title="@string/pref_external_player_header">
 
+        <SwitchPreferenceCompat
+            app:key="stremioConnectorEnabled"
+            app:defaultValue="false"
+            app:summaryOn="@string/pref_stremio_connector_on"
+            app:summaryOff="@string/pref_stremio_connector_off"
+            app:title="@string/pref_stremio_connector" />
+
+        <Preference
+            app:key="stremioConnectorInstall"
+            app:dependency="stremioConnectorEnabled"
+            app:summary="@string/pref_stremio_connector_install_summary"
+            app:title="@string/pref_stremio_connector_install" />
+
+        <ListPreference
+            app:key="nextEpisodeNoticeSeconds"
+            app:dependency="stremioConnectorEnabled"
+            app:defaultValue="30"
+            app:entries="@array/plus_next_episode_notice_entries"
+            app:entryValues="@array/plus_next_episode_notice_values"
+            app:title="@string/pref_next_episode_notice"
+            app:useSimpleSummaryProvider="true" />
+
         <ListPreference
             app:key="backButtonBehavior"
             app:defaultValue="controls_then_exit"

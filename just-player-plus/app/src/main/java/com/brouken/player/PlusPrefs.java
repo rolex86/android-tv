@@ -45,6 +45,8 @@ class PlusPrefs {
     static final String KEY_BACK_BUTTON_BEHAVIOR = "backButtonBehavior";
     static final String KEY_COMPLETION_RULE = "completionRule";
     static final String KEY_EXTERNAL_PLAYER_DIAGNOSTICS = "externalPlayerDiagnostics";
+    static final String KEY_STREMIO_CONNECTOR_ENABLED = "stremioConnectorEnabled";
+    static final String KEY_NEXT_EPISODE_NOTICE_SECONDS = "nextEpisodeNoticeSeconds";
 
     private final SharedPreferences preferences;
 
@@ -77,6 +79,8 @@ class PlusPrefs {
     String backButtonBehavior;
     String completionRule;
     boolean externalPlayerDiagnostics;
+    boolean stremioConnectorEnabled;
+    int nextEpisodeNoticeSeconds;
 
     PlusPrefs(Context context) {
         preferences = PreferenceManager.getDefaultSharedPreferences(context);
@@ -122,6 +126,10 @@ class PlusPrefs {
         completionRule = preferences.getString(KEY_COMPLETION_RULE, "percent_95");
         externalPlayerDiagnostics = preferences.getBoolean(
                 KEY_EXTERNAL_PLAYER_DIAGNOSTICS, false);
+        stremioConnectorEnabled = preferences.getBoolean(
+                KEY_STREMIO_CONNECTOR_ENABLED, false);
+        nextEpisodeNoticeSeconds = Math.max(5, Math.min(90,
+                parseInt(KEY_NEXT_EPISODE_NOTICE_SECONDS, 30)));
     }
 
     String[] getPreferredAudioLanguages() {

@@ -125,6 +125,30 @@ final class ExternalPlayerDiagnostics {
                 error.getClass().getSimpleName() + ": " + clean(error.getMessage()));
     }
 
+    void recordNextEpisode(String currentId,
+                           String nextId,
+                           boolean hasTitle,
+                           boolean hasArtwork,
+                           String state) {
+        if (!isEnabled()) {
+            return;
+        }
+        append("NEXT_EPISODE",
+                "current=" + clean(currentId)
+                        + " next=" + clean(nextId)
+                        + " title=" + hasTitle
+                        + " artwork=" + hasArtwork
+                        + " state=" + clean(state));
+    }
+
+    void recordStremioConnector(String state, String detail) {
+        if (!isEnabled()) {
+            return;
+        }
+        append("STREMIO_CONNECTOR",
+                "state=" + clean(state) + " detail=" + clean(detail));
+    }
+
     static String read(Context context) {
         synchronized (LOCK) {
             return readUnlocked(context.getApplicationContext());

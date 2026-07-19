@@ -1,13 +1,19 @@
 package com.brouken.player;
 
+import android.Manifest;
 import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.InputType;
 import android.view.View;
 import android.widget.LinearLayout;
@@ -146,6 +152,60 @@ public class SettingsActivity extends AppCompatActivity {
                     showDiagnostics();
                     return true;
                 });
+            }
+
+            Preference connector = findPreference(PlusPrefs.KEY_STREMIO_CONNECTOR_ENABLED);
+            if (connector != null) {
+                connector.setOnPreferenceChangeListener((preference, newValue) -> {
+                    boolean enabled = Boolean.TRUE.equals(newValue);
+                    new Handler(Looper.getMainLooper()).post(() -> {
+                        if (enabled) {
+                            requestConnectorNotificationPermission();
+                            StremioConnectorService.start(requireContext());
+                        } else {
+                            StremioConnectorService.stop(requireContext());
+                            new StremioConnectorStore(requireContext()).clear();
+                        }
+                    });
+                    return true;
+                });
+            }
+
+            Preference installConnector = findPreference("stremioConnectorInstall");
+            if (installConnector != null) {
+                installConnector.setOnPreferenceClickListener(preference -> {
+                    Context context = requireContext();
+                    if (!StremioConnectorService.start(context)) {
+                        Toast.makeText(context,
+                                R.string.pref_stremio_connector_install_failed,
+                                Toast.LENGTH_LONG).show();
+                        return true;
+                    }
+                    new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                        try {
+                            Intent intent = new Intent(Intent.ACTION_VIEW,
+                                    Uri.parse(StremioConnectorService.INSTALL_URL));
+                            startActivity(intent);
+                        } catch (RuntimeException error) {
+                            Toast.makeText(context,
+                                    R.string.pref_stremio_connector_install_failed,
+                                    Toast.LENGTH_LONG).show();
+                        }
+                    }, 350L);
+                    return true;
+                });
+            }
+
+            if (new PlusPrefs(requireContext()).stremioConnectorEnabled) {
+                StremioConnectorService.start(requireContext());
+            }
+        }
+
+        private void requestConnectorNotificationPermission() {
+            if (Build.VERSION.SDK_INT >= 33
+                    && requireContext().checkSelfPermission(
+                    Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 16745);
             }
         }
 

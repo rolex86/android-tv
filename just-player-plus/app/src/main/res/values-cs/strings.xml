@@ -1,5 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="pref_external_player_header">Stremio a externí přehrávače</string>
+    <string name="pref_stremio_connector">Propojení s další epizodou ve Stremiu</string>
+    <string name="pref_stremio_connector_on">Místně přijímat metadata epizod ze Stremia</string>
+    <string name="pref_stremio_connector_off">Zapněte pro přesné karty další epizody</string>
+    <string name="pref_stremio_connector_install">Nainstalovat propojení do Stremia</string>
+    <string name="pref_stremio_connector_install_summary">Otevře Stremio a nabídne instalaci místního metadatového doplňku</string>
+    <string name="pref_stremio_connector_install_failed">Stremio se nepodařilo otevřít. Ověřte jeho instalaci a zkuste to znovu.</string>
+    <string name="pref_next_episode_notice">Zobrazit další epizodu před koncem</string>
+    <string name="stremio_connector_notification_channel">Propojení se Stremiem</string>
+    <string name="stremio_connector_notification_channel_summary">Udržuje dostupný místní most pro metadata další epizody</string>
+    <string name="stremio_connector_notification_title">Propojení JustPlayer Plus</string>
+    <string name="stremio_connector_notification_text">Připraveno na metadata epizod ze Stremia</string>
+    <string name="next_episode_heading">Další epizoda</string>
+    <string name="next_episode_play_now">Přehrát nyní</string>
+    <string name="next_episode_dismiss">Zavřít</string>
     <string name="video_resize_fit">Přizpůsobení</string>
     <string name="video_resize_crop">Oříznutí</string>
     <string name="video_orientation_video">Orientace videa</string>

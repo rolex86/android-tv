@@ -1,5 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string-array name="plus_next_episode_notice_entries">
+        <item>15 seconds</item>
+        <item>30 seconds</item>
+        <item>45 seconds</item>
+        <item>60 seconds</item>
+        <item>90 seconds</item>
+    </string-array>
+    <string-array name="plus_next_episode_notice_values" translatable="false">
+        <item>15</item>
+        <item>30</item>
+        <item>45</item>
+        <item>60</item>
+        <item>90</item>
+    </string-array>
+
     <string-array name="plus_subtitle_mode_entries">
         <item>Off</item>
         <item>Forced subtitles only</item>
