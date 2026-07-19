@@ -24,11 +24,6 @@ jobs:
     defaults:
       run:
         working-directory: just-player-plus
-    env:
-      JPP_SIGNING_STORE_FILE: ${{ github.workspace }}/.ci-signing/justplayer-plus-test.jks
-      JPP_SIGNING_STORE_PASSWORD: JustPlayerPlusTest2026
-      JPP_SIGNING_KEY_ALIAS: justplayer-plus-test
-      JPP_SIGNING_KEY_PASSWORD: JustPlayerPlusTest2026
 
     steps:
       - name: Check out repository
@@ -46,29 +41,25 @@ jobs:
           cache: gradle
           cache-dependency-path: just-player-plus/**/*.gradle*
 
-      - name: Restore test signing key
-        uses: actions/cache@v4
-        with:
-          path: .ci-signing/justplayer-plus-test.jks
-          key: justplayer-plus-test-signing-v1
-
-      - name: Create test signing key when missing
+      - name: Restore release signing key from secrets
+        if: github.event_name != 'pull_request'
         working-directory: .
+        env:
+          JPP_SIGNING_STORE_BASE64: ${{ secrets.JPP_SIGNING_STORE_BASE64 }}
+          JPP_SIGNING_STORE_PASSWORD: ${{ secrets.JPP_SIGNING_STORE_PASSWORD }}
+          JPP_SIGNING_KEY_ALIAS: ${{ secrets.JPP_SIGNING_KEY_ALIAS }}
         run: |
-          mkdir -p .ci-signing
-          if [ ! -f "$JPP_SIGNING_STORE_FILE" ]; then
-            keytool -genkeypair -v \
-              -keystore "$JPP_SIGNING_STORE_FILE" \
-              -storepass "$JPP_SIGNING_STORE_PASSWORD" \
-              -keypass "$JPP_SIGNING_KEY_PASSWORD" \
-              -alias "$JPP_SIGNING_KEY_ALIAS" \
-              -keyalg RSA \
-              -keysize 4096 \
-              -validity 10000 \
-              -dname "CN=JustPlayer Plus Test, OU=Testing, O=rolex86, L=Prague, C=CZ"
-          fi
+          set -euo pipefail
+          umask 077
+          : "${JPP_SIGNING_STORE_BASE64:?Missing JPP_SIGNING_STORE_BASE64 secret}"
+          : "${JPP_SIGNING_STORE_PASSWORD:?Missing JPP_SIGNING_STORE_PASSWORD secret}"
+          : "${JPP_SIGNING_KEY_ALIAS:?Missing JPP_SIGNING_KEY_ALIAS secret}"
+          mkdir -p "$RUNNER_TEMP/justplayer-plus-signing"
+          printf '%s' "$JPP_SIGNING_STORE_BASE64" \
+            | base64 --decode \
+            > "$RUNNER_TEMP/justplayer-plus-signing/release.p12"
           keytool -list -v \
-            -keystore "$JPP_SIGNING_STORE_FILE" \
+            -keystore "$RUNNER_TEMP/justplayer-plus-signing/release.p12" \
             -storepass "$JPP_SIGNING_STORE_PASSWORD" \
             -alias "$JPP_SIGNING_KEY_ALIAS" | grep -E 'Alias name:|SHA256:'
 
@@ -82,6 +73,12 @@ jobs:
         run: ./gradlew testLatestUniversalDebugUnitTest --stacktrace --console=plain
 
       - name: Build signed release APK
+        if: github.event_name != 'pull_request'
+        env:
+          JPP_SIGNING_STORE_FILE: ${{ runner.temp }}/justplayer-plus-signing/release.p12
+          JPP_SIGNING_STORE_PASSWORD: ${{ secrets.JPP_SIGNING_STORE_PASSWORD }}
+          JPP_SIGNING_KEY_ALIAS: ${{ secrets.JPP_SIGNING_KEY_ALIAS }}
+          JPP_SIGNING_KEY_PASSWORD: ${{ secrets.JPP_SIGNING_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
           set +e
@@ -90,11 +87,26 @@ jobs:
           tail -n 200 ../gradle-build.log
           exit $status
 
+      - name: Build debug APK for pull request
+        if: github.event_name == 'pull_request'
+        run: |
+          chmod +x gradlew
+          set +e
+          ./gradlew assembleLatestUniversalDebug --stacktrace --console=plain > ../gradle-build.log 2>&1
+          status=$?
+          tail -n 200 ../gradle-build.log
+          exit $status
+
       - name: Verify APK signature
+        if: github.event_name != 'pull_request'
         run: |
           APK=$(find app/build/outputs/apk -type f -name '*.apk' | head -n 1)
           test -n "$APK"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+          EXPECTED_CERT_SHA256="2ed454eb2e649b18c3b8c7e6fa3fb66f380812ad57496665f75acba767c62802"
+          ACTUAL_CERT_SHA256=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" \
+            verify --print-certs "$APK" \
+            | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+          test "$ACTUAL_CERT_SHA256" = "$EXPECTED_CERT_SHA256"
 
       - name: Upload Gradle build log
         if: always()
@@ -111,15 +123,17 @@ jobs:
           ls -lah ../artifacts
 
       - name: Upload APK
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: justplayer-plus-signed-apk
           path: artifacts/*.apk
           if-no-files-found: error
 
-      - name: Back up test signing key
+      - name: Upload pull request APK
+        if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: justplayer-plus-test-signing-key
-          path: .ci-signing/justplayer-plus-test.jks
+          name: justplayer-plus-debug-apk
+          path: artifacts/*.apk
           if-no-files-found: error
