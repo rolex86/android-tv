@@ -24,6 +24,11 @@ jobs:
     defaults:
       run:
         working-directory: just-player-plus
+    env:
+      JPP_SIGNING_STORE_FILE: ${{ github.workspace }}/.ci-signing/justplayer-plus-test.jks
+      JPP_SIGNING_STORE_PASSWORD: JustPlayerPlusTest2026
+      JPP_SIGNING_KEY_ALIAS: justplayer-plus-test
+      JPP_SIGNING_KEY_PASSWORD: JustPlayerPlusTest2026
 
     steps:
       - name: Check out repository
@@ -41,6 +46,32 @@ jobs:
           cache: gradle
           cache-dependency-path: just-player-plus/**/*.gradle*
 
+      - name: Restore test signing key
+        uses: actions/cache@v4
+        with:
+          path: .ci-signing/justplayer-plus-test.jks
+          key: justplayer-plus-test-signing-v1
+
+      - name: Create test signing key when missing
+        working-directory: .
+        run: |
+          mkdir -p .ci-signing
+          if [ ! -f "$JPP_SIGNING_STORE_FILE" ]; then
+            keytool -genkeypair -v \
+              -keystore "$JPP_SIGNING_STORE_FILE" \
+              -storepass "$JPP_SIGNING_STORE_PASSWORD" \
+              -keypass "$JPP_SIGNING_KEY_PASSWORD" \
+              -alias "$JPP_SIGNING_KEY_ALIAS" \
+              -keyalg RSA \
+              -keysize 4096 \
+              -validity 10000 \
+              -dname "CN=JustPlayer Plus Test, OU=Testing, O=rolex86, L=Prague, C=CZ"
+          fi
+          keytool -list -v \
+            -keystore "$JPP_SIGNING_STORE_FILE" \
+            -storepass "$JPP_SIGNING_STORE_PASSWORD" \
+            -alias "$JPP_SIGNING_KEY_ALIAS" | grep -E 'Alias name:|SHA256:'
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
@@ -50,7 +81,7 @@ jobs:
       - name: Run smart-selection unit tests
         run: ./gradlew testLatestUniversalDebugUnitTest --stacktrace --console=plain
 
-      - name: Build release APK
+      - name: Build signed release APK
         run: |
           chmod +x gradlew
           set +e
@@ -58,6 +89,12 @@ jobs:
           status=$?
           tail -n 200 ../gradle-build.log
           exit $status
+
+      - name: Verify APK signature
+        run: |
+          APK=$(find app/build/outputs/apk -type f -name '*.apk' | head -n 1)
+          test -n "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
 
       - name: Upload Gradle build log
         if: always()
@@ -76,6 +113,13 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: justplayer-plus-apk
+          name: justplayer-plus-signed-apk
           path: artifacts/*.apk
+          if-no-files-found: error
+
+      - name: Back up test signing key
+        uses: actions/upload-artifact@v4
+        with:
+          name: justplayer-plus-test-signing-key
+          path: .ci-signing/justplayer-plus-test.jks
           if-no-files-found: error
