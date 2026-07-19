@@ -17,6 +17,7 @@ TEST_PATH = (
     / "com" / "brouken" / "player" / "SmartSelectionPolicyTest.java"
 )
 OFFSET_TEST_PATH = TEST_PATH.with_name("OffsetSubtitleParserFactoryTest.java")
+END_TIME_TEST_PATH = TEST_PATH.with_name("PlaybackEndTimeTest.java")
 
 plus_prefs = PREFS_PATH.read_text(encoding="utf-8")
 player = PLAYER_PATH.read_text(encoding="utf-8")
@@ -56,6 +57,7 @@ runtime_anchors = {
     "KEY_SEEK_INCREMENT_MS": "mPlusPrefs.seekIncrementMs",
     "KEY_FRAME_RATE_POLICY": "mPlusPrefs.frameRatePolicy",
     "KEY_NETWORK_BUFFER_PROFILE": "mPlusPrefs.networkBufferProfile",
+    "KEY_SHOW_END_TIME": "mPlusPrefs.showEndTime",
     "KEY_BACK_BUTTON_BEHAVIOR": "mPlusPrefs.backButtonBehavior",
     "KEY_COMPLETION_RULE": "mPlusPrefs.completionRule",
     "KEY_EXTERNAL_PLAYER_DIAGNOSTICS": "PlusPrefs.KEY_EXTERNAL_PLAYER_DIAGNOSTICS",
@@ -136,6 +138,9 @@ runtime_regression_anchors = (
     "releaseNextEpisodeFeature();",
     "nextEpisodeHttpClient.dispatcher().cancelAll();",
     "!isNextEpisodeFeatureEnabled()",
+    "updateExpectedEndTime(newPosition.positionMs)",
+    "onPlaybackParametersChanged",
+    "getTimeFormat(this)",
 )
 for anchor in runtime_regression_anchors:
     if anchor not in external_java:
@@ -166,6 +171,19 @@ else:
     ):
         if test_name not in offset_tests:
             errors.append(f"Missing subtitle-delay regression test: {test_name}")
+
+if not END_TIME_TEST_PATH.exists():
+    errors.append("Projected-end-time regression tests are missing")
+else:
+    end_time_tests = END_TIME_TEST_PATH.read_text(encoding="utf-8")
+    for test_name in (
+        "normalSpeedAddsRemainingMediaTime",
+        "fasterPlaybackShortensWallClockRemainder",
+        "invalidOrUnknownMediaCannotProduceEstimate",
+        "hugeEstimateSaturatesInsteadOfOverflowing",
+    ):
+        if test_name not in end_time_tests:
+            errors.append(f"Missing projected-end-time regression test: {test_name}")
 
 # These binaries contain the protected Media3 renderer/audio path and extension decoders.
 # An intentional upstream refresh must review the playback regression matrix and update hashes.

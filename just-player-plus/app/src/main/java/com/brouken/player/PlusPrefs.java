@@ -42,6 +42,7 @@ class PlusPrefs {
     static final String KEY_SEEK_INCREMENT_MS = "seekIncrementMs";
     static final String KEY_FRAME_RATE_POLICY = "frameRatePolicy";
     static final String KEY_NETWORK_BUFFER_PROFILE = "networkBufferProfile";
+    static final String KEY_SHOW_END_TIME = "showEndTime";
 
     static final String KEY_BACK_BUTTON_BEHAVIOR = "backButtonBehavior";
     static final String KEY_COMPLETION_RULE = "completionRule";
@@ -77,6 +78,7 @@ class PlusPrefs {
     long seekIncrementMs;
     String frameRatePolicy;
     String networkBufferProfile;
+    boolean showEndTime;
 
     String backButtonBehavior;
     String completionRule;
@@ -124,6 +126,7 @@ class PlusPrefs {
         frameRatePolicy = preferences.getString(KEY_FRAME_RATE_POLICY, "legacy");
         networkBufferProfile = preferences.getString(
                 KEY_NETWORK_BUFFER_PROFILE, NetworkBufferConfig.PROFILE_DEFAULT);
+        showEndTime = preferences.getBoolean(KEY_SHOW_END_TIME, true);
 
         backButtonBehavior = preferences.getString(
                 KEY_BACK_BUTTON_BEHAVIOR, "controls_then_exit");

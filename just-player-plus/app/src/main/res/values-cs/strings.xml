@@ -12,6 +12,10 @@
     <string name="pref_stremio_connector_copy_failed">Adresu doplňku se nepodařilo zkopírovat.</string>
     <string name="pref_next_episode_notice">Zobrazit další epizodu před koncem</string>
     <string name="pref_network_buffer">Síťový buffer</string>
+    <string name="pref_show_end_time">Očekávaný čas konce</string>
+    <string name="pref_show_end_time_on">Zobrazovat odhad konce v ovládání přehrávače</string>
+    <string name="pref_show_end_time_off">Nezobrazovat odhad času konce</string>
+    <string name="playback_ends_at">• Konec %1$s</string>
     <string name="stremio_connector_notification_channel">Propojení se Stremiem</string>
     <string name="stremio_connector_notification_channel_summary">Udržuje dostupný místní most pro metadata další epizody</string>
     <string name="stremio_connector_notification_title">Propojení JustPlayer Plus</string>

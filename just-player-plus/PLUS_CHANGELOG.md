@@ -1,5 +1,12 @@
 # JustPlayer Plus changelog
 
+## Step 16 — Projected playback end time
+
+- Shows the projected wall-clock end beside the current position and media duration.
+- Honors the device's 12/24-hour clock format and the active playback speed.
+- Updates only on controller and player events, with no background polling.
+- Added an enabled-by-default setting to hide or show the estimate.
+
 ## Step 15 — Streaming resilience
 
 - Added Default, Larger (90 s / 256 MiB) and Maximum (120 s / 384 MiB) network-buffer profiles.

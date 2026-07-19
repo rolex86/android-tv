@@ -70,6 +70,7 @@ import androidx.media3.common.Format;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MediaMetadata;
 import androidx.media3.common.MimeTypes;
+import androidx.media3.common.PlaybackParameters;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.common.TrackGroup;
@@ -110,6 +111,7 @@ import java.io.File;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -192,6 +194,7 @@ public class PlayerActivity extends Activity {
     private ProgressBar loadingProgressBar;
     private PlayerControlView controlView;
     private CustomDefaultTimeBar timeBar;
+    private TextView endTimeView;
 
     private boolean restoreOrientationLock;
     private boolean restorePlayState;
@@ -358,6 +361,7 @@ public class PlayerActivity extends Activity {
         ((DoubleTapPlayerView)playerView).setDoubleTapEnabled(false);
 
         timeBar = playerView.findViewById(R.id.exo_progress);
+        endTimeView = playerView.findViewById(R.id.exo_end_time);
         timeBar.addListener(new TimeBar.OnScrubListener() {
             @Override
             public void onScrubStart(TimeBar timeBar, long position) {
@@ -386,6 +390,7 @@ public class PlayerActivity extends Activity {
             public void onScrubStop(TimeBar timeBar, long position, boolean canceled) {
                 playerView.setCustomErrorMessage(null);
                 isScrubbing = false;
+                updateExpectedEndTime(canceled ? C.TIME_UNSET : position);
                 if (restorePlayState) {
                     restorePlayState = false;
                     playerView.setControllerShowTimeoutMs(PlayerActivity.CONTROLLER_TIMEOUT);
@@ -675,6 +680,7 @@ public class PlayerActivity extends Activity {
                 // https://developer.android.com/training/system-ui/immersive
                 Utils.toggleSystemUi(PlayerActivity.this, playerView, visibility == View.VISIBLE);
                 if (visibility == View.VISIBLE) {
+                    updateExpectedEndTime();
                     // Because when using dpad controls, focus resets to first item in bottom controls bar
                     findViewById(R.id.exo_play_pause).requestFocus();
                 }
@@ -1672,6 +1678,7 @@ public class PlayerActivity extends Activity {
             mPrefs.loadUserPreferences();
             mPlusPrefs.reload();
             updateSubtitleStyle(this);
+            updateExpectedEndTime();
         } else {
             super.onActivityResult(requestCode, resultCode, data);
         }
@@ -2037,7 +2044,49 @@ public class PlayerActivity extends Activity {
         }
         play = false;
         titleView.setVisibility(View.GONE);
+        hideExpectedEndTime();
         updateButtons(false);
+    }
+
+    private void updateExpectedEndTime() {
+        updateExpectedEndTime(C.TIME_UNSET);
+    }
+
+    private void updateExpectedEndTime(long positionOverrideMs) {
+        if (endTimeView == null) {
+            return;
+        }
+        if (!mPlusPrefs.showEndTime || player == null
+                || player.isCurrentMediaItemLive()
+                || player.getPlaybackState() == Player.STATE_ENDED
+                || (!player.isPlaying() && !isScrubbing)) {
+            hideExpectedEndTime();
+            return;
+        }
+        long durationMs = player.getDuration();
+        long positionMs = positionOverrideMs == C.TIME_UNSET
+                ? player.getCurrentPosition() : positionOverrideMs;
+        long endEpochMs = PlaybackEndTime.estimateEpochMs(
+                System.currentTimeMillis(),
+                durationMs,
+                positionMs,
+                player.getPlaybackParameters().speed);
+        if (endEpochMs == PlaybackEndTime.INVALID) {
+            hideExpectedEndTime();
+            return;
+        }
+        String formattedTime = android.text.format.DateFormat
+                .getTimeFormat(this)
+                .format(new Date(endEpochMs));
+        endTimeView.setText(getString(R.string.playback_ends_at, formattedTime));
+        endTimeView.setVisibility(View.VISIBLE);
+    }
+
+    private void hideExpectedEndTime() {
+        if (endTimeView != null) {
+            endTimeView.setText(null);
+            endTimeView.setVisibility(View.GONE);
+        }
     }
 
     int getPlayerGeneration() {
@@ -2068,6 +2117,7 @@ public class PlayerActivity extends Activity {
         @Override
         public void onIsPlayingChanged(boolean isPlaying) {
             playerView.setKeepScreenOn(isPlaying);
+            updateExpectedEndTime();
 
             if (Utils.isPiPSupported(PlayerActivity.this)) {
                 if (isPlaying) {
@@ -2102,14 +2152,21 @@ public class PlayerActivity extends Activity {
         public void onPositionDiscontinuity(@NonNull Player.PositionInfo oldPosition,
                                             @NonNull Player.PositionInfo newPosition,
                                             int reason) {
+            updateExpectedEndTime(newPosition.positionMs);
             if (nextEpisodeInfo != null && !nextEpisodeDismissed && !nextEpisodeShown) {
                 scheduleNextEpisodePopup();
             }
         }
 
+        @Override
+        public void onPlaybackParametersChanged(@NonNull PlaybackParameters playbackParameters) {
+            updateExpectedEndTime();
+        }
+
         @SuppressLint("SourceLockedOrientationActivity")
         @Override
         public void onPlaybackStateChanged(int state) {
+            updateExpectedEndTime();
             boolean isNearEnd = false;
             final long duration = player.getDuration();
             if (duration != C.TIME_UNSET) {
@@ -2843,6 +2900,7 @@ public class PlayerActivity extends Activity {
     }
 
     void reportScrubbing(long position) {
+        updateExpectedEndTime(position);
         final long diff = position - scrubbingStart;
         if (Math.abs(diff) > 1000) {
             scrubbingNoticeable = true;

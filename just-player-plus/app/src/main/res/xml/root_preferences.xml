@@ -228,6 +228,13 @@
             app:useSimpleSummaryProvider="true" />
 
         <SwitchPreferenceCompat
+            app:key="showEndTime"
+            app:defaultValue="true"
+            app:summaryOn="@string/pref_show_end_time_on"
+            app:summaryOff="@string/pref_show_end_time_off"
+            app:title="@string/pref_show_end_time" />
+
+        <SwitchPreferenceCompat
             app:key="frameRateMatching"
             app:defaultValue="false"
             app:summaryOn="@string/pref_framerate_matching_on"
