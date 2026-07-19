@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Fail CI when a JustPlayer Plus setting becomes UI-only or loses its runtime hook."""
-
 from pathlib import Path
 import hashlib
 import re
@@ -58,6 +57,8 @@ runtime_anchors = {
     "KEY_BACK_BUTTON_BEHAVIOR": "mPlusPrefs.backButtonBehavior",
     "KEY_COMPLETION_RULE": "mPlusPrefs.completionRule",
     "KEY_EXTERNAL_PLAYER_DIAGNOSTICS": "PlusPrefs.KEY_EXTERNAL_PLAYER_DIAGNOSTICS",
+    "KEY_STREMIO_CONNECTOR_ENABLED": "mPlusPrefs.stremioConnectorEnabled",
+    "KEY_NEXT_EPISODE_NOTICE_SECONDS": "mPlusPrefs.nextEpisodeNoticeSeconds",
 }
 
 errors = []
@@ -158,8 +159,6 @@ else:
         if test_name not in offset_tests:
             errors.append(f"Missing subtitle-delay regression test: {test_name}")
 
-# These binaries contain the protected Media3 renderer/audio path and extension decoders.
-# An intentional upstream refresh must review the playback regression matrix and update hashes.
 protected_aar_hashes = {
     "lib-decoder-av1-release.aar": "4a5143035adabc917211a54deaae45f2dfbc8aefcf60b7614e32afa5db08133c",
     "lib-decoder-ffmpeg-release.aar": "0d8c7f957f8314627034129e1f536b7ca02fbe62907bae1f9bd35090e4c2d214",
