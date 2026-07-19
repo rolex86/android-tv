@@ -58,6 +58,8 @@ runtime_anchors = {
     "KEY_BACK_BUTTON_BEHAVIOR": "mPlusPrefs.backButtonBehavior",
     "KEY_COMPLETION_RULE": "mPlusPrefs.completionRule",
     "KEY_EXTERNAL_PLAYER_DIAGNOSTICS": "PlusPrefs.KEY_EXTERNAL_PLAYER_DIAGNOSTICS",
+    "KEY_STREMIO_CONNECTOR_ENABLED": "mPlusPrefs.stremioConnectorEnabled",
+    "KEY_NEXT_EPISODE_NOTICE_SECONDS": "mPlusPrefs.nextEpisodeNoticeSeconds",
 }
 
 errors = []
