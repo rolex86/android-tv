@@ -1,6 +1,7 @@
 package com.brouken.player;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 
@@ -62,6 +63,33 @@ public class StremioNextEpisodeTest {
         assertEquals("movie", current.type);
         assertEquals("tt999", current.id);
         assertNull(current.episode);
+    }
+
+    @Test
+    public void launchIdentityIsStableAndDoesNotStoreTheRawTitle() {
+        String first = StremioConnectorStore.hashIdentity(" file_a9bbacce74d64874 ");
+        String second = StremioConnectorStore.hashIdentity("file_a9bbacce74d64874");
+
+        assertNotNull(first);
+        assertEquals(first, second);
+        assertNotEquals("file_a9bbacce74d64874", first);
+        assertNull(StremioConnectorStore.hashIdentity("   "));
+    }
+
+    @Test
+    public void rememberedContentRejectsMalformedTypesAndIds() {
+        StremioConnectorStore.Content movie =
+                StremioConnectorStore.Content.fromValues("movie", "tt999");
+        StremioConnectorStore.Content series =
+                StremioConnectorStore.Content.fromValues("series", "tt123:2:4");
+
+        assertNotNull(movie);
+        assertEquals("tt999", movie.id);
+        assertNotNull(series);
+        assertNotNull(series.episode);
+        assertEquals("tt123:2:4", series.episode.raw);
+        assertNull(StremioConnectorStore.Content.fromValues("series", "tt123"));
+        assertNull(StremioConnectorStore.Content.fromValues("channel", "tt999"));
     }
 
     @Test

@@ -18,6 +18,7 @@ TEST_PATH = (
 )
 OFFSET_TEST_PATH = TEST_PATH.with_name("OffsetSubtitleParserFactoryTest.java")
 END_TIME_TEST_PATH = TEST_PATH.with_name("PlaybackEndTimeTest.java")
+STREMIO_TEST_PATH = TEST_PATH.with_name("StremioNextEpisodeTest.java")
 
 plus_prefs = PREFS_PATH.read_text(encoding="utf-8")
 player = PLAYER_PATH.read_text(encoding="utf-8")
@@ -141,6 +142,9 @@ runtime_regression_anchors = (
     "updateExpectedEndTime(newPosition.positionMs)",
     "onPlaybackParametersChanged",
     "getTimeFormat(this)",
+    "now, getStremioLaunchIdentity())",
+    "metadata_resolution_started",
+    "setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS)",
 )
 for anchor in runtime_regression_anchors:
     if anchor not in external_java:
@@ -184,6 +188,19 @@ else:
     ):
         if test_name not in end_time_tests:
             errors.append(f"Missing projected-end-time regression test: {test_name}")
+
+if not STREMIO_TEST_PATH.exists():
+    errors.append("Stremio metadata regression tests are missing")
+else:
+    stremio_tests = STREMIO_TEST_PATH.read_text(encoding="utf-8")
+    for test_name in (
+        "freshMovieRequestSupersedesStaleSeriesRequest",
+        "launchIdentityIsStableAndDoesNotStoreTheRawTitle",
+        "rememberedContentRejectsMalformedTypesAndIds",
+        "movieMetadataUsesCinemetaName",
+    ):
+        if test_name not in stremio_tests:
+            errors.append(f"Missing Stremio metadata regression test: {test_name}")
 
 # These binaries contain the protected Media3 renderer/audio path and extension decoders.
 # An intentional upstream refresh must review the playback regression matrix and update hashes.

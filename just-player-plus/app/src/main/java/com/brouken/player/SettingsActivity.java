@@ -9,6 +9,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -16,7 +17,10 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
@@ -228,11 +232,30 @@ public class SettingsActivity extends AppCompatActivity {
             String log = ExternalPlayerDiagnostics.read(context);
             String visibleLog = log.isEmpty()
                     ? getString(R.string.pref_external_player_diagnostics_empty) : log;
-            new AlertDialog.Builder(context)
+
+            int padding = Math.round(16f * getResources().getDisplayMetrics().density);
+            TextView logView = new TextView(context);
+            logView.setText(visibleLog);
+            logView.setTextSize(12f);
+            logView.setTypeface(Typeface.MONOSPACE);
+            logView.setPadding(padding, padding, padding, padding);
+            logView.setFocusable(false);
+
+            ScrollView scrollView = new ScrollView(context);
+            scrollView.setFillViewport(true);
+            scrollView.setFocusable(true);
+            scrollView.setFocusableInTouchMode(true);
+            scrollView.setVerticalScrollBarEnabled(true);
+            scrollView.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+            scrollView.addView(logView, new ScrollView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT));
+
+            AlertDialog alertDialog = new AlertDialog.Builder(context)
                     .setTitle(R.string.pref_external_player_diagnostics_view)
-                    .setMessage(visibleLog)
+                    .setView(scrollView)
                     .setPositiveButton(R.string.pref_external_player_diagnostics_copy,
-                            (dialog, which) -> {
+                            (dialogInterface, which) -> {
                                 ClipboardManager clipboard = (ClipboardManager)
                                         context.getSystemService(Context.CLIPBOARD_SERVICE);
                                 if (clipboard != null) {
@@ -244,9 +267,14 @@ public class SettingsActivity extends AppCompatActivity {
                                 }
                             })
                     .setNeutralButton(R.string.pref_external_player_diagnostics_clear,
-                            (dialog, which) -> ExternalPlayerDiagnostics.clear(context))
+                            (dialogInterface, which) -> ExternalPlayerDiagnostics.clear(context))
                     .setNegativeButton(android.R.string.cancel, null)
-                    .show();
+                    .create();
+            alertDialog.setOnShowListener(ignored -> scrollView.post(() -> {
+                scrollView.fullScroll(View.FOCUS_UP);
+                scrollView.requestFocus();
+            }));
+            alertDialog.show();
         }
 
         private void setupLanguagePreference(String key, boolean includeDefault,

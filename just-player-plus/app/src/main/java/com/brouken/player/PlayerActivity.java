@@ -849,18 +849,21 @@ public class PlayerActivity extends Activity {
             return;
         }
         initializeNextEpisodeFeature();
-        if (!intentReturnResult || !isStremioCaller() || playerView == null
-                || nextEpisodeMetadataResolver == null || nextEpisodeOverlay == null) {
+        if (!isExternalPlayerLaunch()) {
+            externalDiagnostics.recordStremioConnector(
+                    "metadata_resolution_skipped", "not_external_launch");
             return;
         }
+        if (playerView == null
+                || nextEpisodeMetadataResolver == null || nextEpisodeOverlay == null) {
+            externalDiagnostics.recordStremioConnector(
+                    "metadata_resolution_skipped", "feature_not_ready");
+            return;
+        }
+        externalDiagnostics.recordStremioConnector(
+                "metadata_resolution_started", "returnResult=" + intentReturnResult);
         final int session = nextEpisodeSession;
         resolveNextEpisode(session, 0);
-    }
-
-    private boolean isStremioCaller() {
-        String callingPackage = getCallingPackage();
-        return callingPackage == null
-                || callingPackage.toLowerCase(Locale.US).contains("stremio");
     }
 
     private void resolveNextEpisode(int session, int attempt) {
@@ -872,16 +875,19 @@ public class PlayerActivity extends Activity {
             }
             StremioConnectorStore store = new StremioConnectorStore(this);
             long now = System.currentTimeMillis();
-            StremioConnectorStore.Content content = store.claimRecentContent(now);
+            StremioConnectorStore.Content content = store.claimRecentContent(
+                    now, getStremioLaunchIdentity());
             if (content == null) {
                 if (attempt < 3) {
                     resolveNextEpisode(session, attempt + 1);
                 } else {
                     externalDiagnostics.recordStremioConnector(
-                            "next_episode_no_request", "no recent series stream request");
+                            "metadata_no_request", "no recent or remembered content request");
                 }
                 return;
             }
+            externalDiagnostics.recordStremioConnector(
+                    "metadata_content", content.type + "/" + content.id);
             if (!content.isSeries()) {
                 NextEpisodeMetadataResolver resolver = nextEpisodeMetadataResolver;
                 if (resolver != null && isNextEpisodeFeatureEnabled()) {
@@ -897,6 +903,15 @@ public class PlayerActivity extends Activity {
                         session, current.raw, result));
             }
         }, delay);
+    }
+
+    @Nullable
+    private String getStremioLaunchIdentity() {
+        if (apiTitle != null && !apiTitle.trim().isEmpty()) {
+            return apiTitle;
+        }
+        return mPrefs.mediaUri == null
+                ? null : Utils.getFileName(this, mPrefs.mediaUri);
     }
 
     private void acceptMovieTitle(int session, String movieId, @Nullable String title) {
@@ -940,6 +955,12 @@ public class PlayerActivity extends Activity {
             if (info == null) {
                 externalDiagnostics.recordNextEpisode(
                         currentId, "", result.seriesTitle != null, false, "no_next_episode");
+                return;
+            }
+            if (!intentReturnResult) {
+                externalDiagnostics.recordNextEpisode(
+                        currentId, info.next.raw, result.seriesTitle != null,
+                        info.artworkUrl != null, "title_only_no_return_result");
                 return;
             }
             nextEpisodeInfo = info;

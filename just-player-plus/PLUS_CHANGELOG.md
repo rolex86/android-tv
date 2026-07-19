@@ -1,5 +1,15 @@
 # JustPlayer Plus changelog
 
+## Step 18 — Reliable Stremio title correlation and scrollable diagnostics
+
+- Stremio title lookup no longer depends on the caller package or `return_result`; those
+  constraints remain only on next-episode continuation.
+- Content IDs are remembered against a private SHA-256 hash of Stremio's launch/file title, so
+  replaying a cached source can still restore movie or episode metadata without stale guessing.
+- Connector diagnostics now report metadata startup, correlation and missing-request states.
+- The diagnostics viewer uses a focusable, vertically scrollable monospace panel for touch and
+  Android TV D-pad navigation.
+
 ## Step 17 — Stremio movie titles
 
 - Stremio movie launches now resolve their display title from Cinemeta once at startup.

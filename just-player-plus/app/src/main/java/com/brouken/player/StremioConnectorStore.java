@@ -9,6 +9,9 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -20,9 +23,12 @@ final class StremioConnectorStore {
     private static final String LEGACY_KEY_CLAIMED_PAIR = "claimed_pair";
     private static final String KEY_CLAIMED_EPISODE = "claimed_episode";
     private static final String KEY_EXPECTED_EPISODE = "expected_episode";
+    private static final String KEY_CONTENT_ASSOCIATIONS = "content_associations";
     private static final int MAX_EVENTS = 24;
+    private static final int MAX_ASSOCIATIONS = 48;
     private static final long MAX_EVENT_AGE_MS = 15 * 60_000L;
     private static final long MAX_EXPECTED_AGE_MS = 30_000L;
+    private static final long MAX_ASSOCIATION_AGE_MS = 90L * 24L * 60L * 60_000L;
     private static final long DEDUPLICATE_WINDOW_MS = 2_000L;
 
     private final SharedPreferences preferences;
@@ -60,17 +66,22 @@ final class StremioConnectorStore {
      * stale series state so a next-episode timer can never be armed for a movie.
      */
     @Nullable
-    Content claimRecentContent(long nowMs) {
+    Content claimRecentContent(long nowMs, @Nullable String launchIdentity) {
         synchronized (LOCK) {
             List<Event> events = readEvents();
             Event event = findRecentEvent(events, nowMs);
             if (event == null) {
                 StremioEpisodeId expected = claimExpectedEpisode(nowMs);
-                return expected == null ? null : Content.series(expected);
+                if (expected != null) {
+                    Content content = Content.series(expected);
+                    rememberAssociation(launchIdentity, content, nowMs);
+                    return content;
+                }
+                return findAssociation(launchIdentity, nowMs);
             }
             String token = event.type + "\n" + event.id + "\n" + event.timestampMs;
             if (token.equals(preferences.getString(KEY_CLAIMED_EPISODE, null))) {
-                return null;
+                return findAssociation(launchIdentity, nowMs);
             }
             Content content = Content.fromEvent(event);
             if (content == null) {
@@ -84,7 +95,99 @@ final class StremioConnectorStore {
                     .putString(KEY_CLAIMED_EPISODE, token)
                     .remove(KEY_EXPECTED_EPISODE)
                     .apply();
+            rememberAssociation(launchIdentity, content, nowMs);
             return content;
+        }
+    }
+
+    private void rememberAssociation(@Nullable String launchIdentity,
+                                     Content content,
+                                     long nowMs) {
+        String identity = hashIdentity(launchIdentity);
+        if (identity == null) {
+            return;
+        }
+        JSONArray previous = readAssociations();
+        JSONArray updated = new JSONArray();
+        try {
+            JSONObject current = new JSONObject();
+            current.put("identity", identity);
+            current.put("type", content.type);
+            current.put("id", content.id);
+            current.put("timestamp", nowMs);
+            updated.put(current);
+
+            for (int index = 0;
+                 index < previous.length() && updated.length() < MAX_ASSOCIATIONS;
+                 index++) {
+                JSONObject item = previous.optJSONObject(index);
+                if (item == null || identity.equals(item.optString("identity", ""))) {
+                    continue;
+                }
+                long timestamp = item.optLong("timestamp", 0L);
+                if (timestamp <= nowMs + 10_000L
+                        && nowMs - timestamp <= MAX_ASSOCIATION_AGE_MS) {
+                    updated.put(item);
+                }
+            }
+            preferences.edit().putString(
+                    KEY_CONTENT_ASSOCIATIONS, updated.toString()).apply();
+        } catch (JSONException ignored) {
+            // Only primitive values are written, so this is defensive.
+        }
+    }
+
+    @Nullable
+    private Content findAssociation(@Nullable String launchIdentity, long nowMs) {
+        String identity = hashIdentity(launchIdentity);
+        if (identity == null) {
+            return null;
+        }
+        JSONArray associations = readAssociations();
+        for (int index = 0; index < associations.length(); index++) {
+            JSONObject item = associations.optJSONObject(index);
+            if (item == null || !identity.equals(item.optString("identity", ""))) {
+                continue;
+            }
+            long timestamp = item.optLong("timestamp", 0L);
+            if (timestamp > nowMs + 10_000L
+                    || nowMs - timestamp > MAX_ASSOCIATION_AGE_MS) {
+                return null;
+            }
+            return Content.fromValues(
+                    item.optString("type", ""), item.optString("id", ""));
+        }
+        return null;
+    }
+
+    private JSONArray readAssociations() {
+        String encoded = preferences.getString(KEY_CONTENT_ASSOCIATIONS, null);
+        if (encoded == null) {
+            return new JSONArray();
+        }
+        try {
+            return new JSONArray(encoded);
+        } catch (JSONException ignored) {
+            preferences.edit().remove(KEY_CONTENT_ASSOCIATIONS).apply();
+            return new JSONArray();
+        }
+    }
+
+    @Nullable
+    static String hashIdentity(@Nullable String launchIdentity) {
+        if (launchIdentity == null || launchIdentity.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(
+                    launchIdentity.trim().getBytes(StandardCharsets.UTF_8));
+            StringBuilder encoded = new StringBuilder(digest.length * 2);
+            for (byte value : digest) {
+                encoded.append(String.format(java.util.Locale.US, "%02x", value & 0xff));
+            }
+            return encoded.toString();
+        } catch (NoSuchAlgorithmException ignored) {
+            return null;
         }
     }
 
@@ -162,6 +265,7 @@ final class StremioConnectorStore {
                     .remove(LEGACY_KEY_CLAIMED_PAIR)
                     .remove(KEY_CLAIMED_EPISODE)
                     .remove(KEY_EXPECTED_EPISODE)
+                    .remove(KEY_CONTENT_ASSOCIATIONS)
                     .apply();
         }
     }
@@ -240,12 +344,20 @@ final class StremioConnectorStore {
         }
 
         @Nullable
-        static Content fromEvent(Event event) {
-            if ("movie".equals(event.type) && isSupportedEvent(event.type, event.id)) {
-                return movie(event.id);
+        static Content fromValues(String type, String id) {
+            if (!isSupportedEvent(type, id)) {
+                return null;
             }
-            StremioEpisodeId episode = StremioEpisodeId.parse(event.id);
+            if ("movie".equals(type)) {
+                return movie(id);
+            }
+            StremioEpisodeId episode = StremioEpisodeId.parse(id);
             return episode == null ? null : series(episode);
+        }
+
+        @Nullable
+        static Content fromEvent(Event event) {
+            return fromValues(event.type, event.id);
         }
 
         boolean isSeries() {

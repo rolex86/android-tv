@@ -48,7 +48,7 @@ final class ExternalPlayerDiagnostics {
                       boolean returnResult,
                       long requestedPosition,
                       int suppliedSubtitleCount) {
-        if (!isEnabled() || (!fullApiAccess && !partialApiAccess)) {
+        if (!isEnabled() || (!fullApiAccess && !partialApiAccess && !returnResult)) {
             return;
         }
         append("LAUNCH",
