@@ -76,16 +76,12 @@ selector = replace_once(
             boolean ignoreAudioDescription,
             boolean preferBestQuality) {
         Candidate best = null;
-        int sourceOrder = 0;
 """,
     """            boolean ignoreCommentary,
             boolean ignoreAudioDescription,
             boolean preferBestQuality,
             String contentPreference) {
         Candidate best = null;
-        int sourceOrder = 0;
-        ContentSignals contentSignals = inspectContentSignals(
-                tracks, ignoreCommentary, ignoreAudioDescription);
 """,
     "selector private signature",
 )
@@ -97,7 +93,7 @@ selector = replace_once(
 """,
     """                Candidate candidate = new Candidate(
                         trackGroup, trackIndex, format, languageRank,
-                        contentRank(format, contentPreference, contentSignals),
+                        contentRank(format, contentPreference),
                         sourceOrder++, preferBestQuality);
 """,
     "candidate content rank",
@@ -106,43 +102,12 @@ selector = replace_once(
     selector,
     """    private static boolean isCommentary(Format format) {
 """,
-    """    private static ContentSignals inspectContentSignals(
-            Tracks tracks,
-            boolean ignoreCommentary,
-            boolean ignoreAudioDescription) {
-        boolean hasDubbed = false;
-        boolean hasOriginal = false;
-        for (Tracks.Group group : tracks.getGroups()) {
-            if (group.getType() != C.TRACK_TYPE_AUDIO) {
-                continue;
-            }
-            TrackGroup trackGroup = group.getMediaTrackGroup();
-            for (int trackIndex = 0; trackIndex < trackGroup.length; trackIndex++) {
-                if (!group.isTrackSupported(trackIndex)) {
-                    continue;
-                }
-                Format format = trackGroup.getFormat(trackIndex);
-                if (ignoreCommentary && isCommentary(format)) {
-                    continue;
-                }
-                if (ignoreAudioDescription && isAudioDescription(format)) {
-                    continue;
-                }
-                hasDubbed |= isDubbed(format);
-                hasOriginal |= isExplicitOriginal(format);
-            }
-        }
-        return new ContentSignals(hasDubbed, hasOriginal);
-    }
-
-    private static int contentRank(
-            Format format, String preference, ContentSignals signals) {
+    """    private static int contentRank(Format format, String preference) {
         if (preference == null || "language".equals(preference)) {
             return 0;
         }
         boolean dubbed = isDubbed(format);
-        boolean original = isExplicitOriginal(format)
-                || (signals.hasDubbed && !dubbed);
+        boolean original = isExplicitOriginal(format);
         if ("original".equals(preference)) {
             if (original) {
                 return 0;
@@ -163,13 +128,14 @@ selector = replace_once(
             return true;
         }
         String label = normalizeLabel(format.label);
-        return contains(label, "dub")
+        return containsToken(label, "dub")
                 || contains(label, "dubbed")
                 || contains(label, "dubbing")
+                || contains(label, "cz dub")
+                || contains(label, "czech dub")
                 || contains(label, "dabing")
                 || contains(label, "dabovany")
-                || contains(label, "synchronized")
-                || contains(label, "synchronised");
+                || contains(label, "cesky dabing");
     }
 
     private static boolean isExplicitOriginal(Format format) {
@@ -178,7 +144,9 @@ selector = replace_once(
                 || contains(label, "original")
                 || contains(label, "original audio")
                 || contains(label, "original language")
-                || contains(label, "original version");
+                || contains(label, "original version")
+                || contains(label, "puvodni zneni")
+                || contains(label, "puvodni audio");
     }
 
     private static boolean isCommentary(Format format) {
@@ -187,21 +155,23 @@ selector = replace_once(
 )
 selector = replace_once(
     selector,
-    """    private static final class Candidate {
+    """    private static boolean contains(String label, String phrase) {
+        String normalizedPhrase = normalizeLabel(phrase);
+        return !normalizedPhrase.isEmpty() && label.contains(normalizedPhrase);
+    }
 """,
-    """    private static final class ContentSignals {
-        final boolean hasDubbed;
-        final boolean hasOriginal;
-
-        ContentSignals(boolean hasDubbed, boolean hasOriginal) {
-            this.hasDubbed = hasDubbed;
-            this.hasOriginal = hasOriginal;
-        }
+    """    private static boolean contains(String label, String phrase) {
+        String normalizedPhrase = normalizeLabel(phrase);
+        return !normalizedPhrase.isEmpty() && label.contains(normalizedPhrase);
     }
 
-    private static final class Candidate {
+    private static boolean containsToken(String label, String token) {
+        String normalizedToken = normalizeLabel(token);
+        return !normalizedToken.isEmpty()
+                && (" " + label + " ").contains(" " + normalizedToken + " ");
+    }
 """,
-    "content signals class",
+    "audio label token helper",
 )
 selector = replace_once(
     selector,
@@ -233,15 +203,28 @@ selector = replace_once(
 )
 selector = replace_once(
     selector,
-    """            this.score = languageScore + qualityScore + sourceOrder;
-""",
-    """            this.score = contentScore + languageScore + qualityScore + sourceOrder;
-""",
+    "            this.score = languageScore + qualityScore + sourceOrder;\n",
+    "            this.score = contentScore + languageScore + qualityScore + sourceOrder;\n",
     "candidate final score",
 )
 SELECTOR.write_text(selector, encoding="utf-8")
 
 player = PLAYER.read_text(encoding="utf-8")
+player = replace_once(
+    player,
+    """        mPlusPrefs.reload();
+        if (!mPlusPrefs.ignoreCommentaryAudio && !mPlusPrefs.ignoreAudioDescription) {
+            return;
+        }
+
+        TrackSelectionOverride audioOverride = SmartAudioSelector.findPreferredAudio(
+""",
+    """        mPlusPrefs.reload();
+
+        TrackSelectionOverride audioOverride = SmartAudioSelector.findPreferredAudio(
+""",
+    "remove obsolete selector guard",
+)
 player = replace_once(
     player,
     """                mPlusPrefs.ignoreAudioDescription,
@@ -280,8 +263,8 @@ strings = STRINGS.read_text(encoding="utf-8")
 marker = "</resources>"
 addition = """    <string name="pref_audio_content_preference">Original audio or dubbing</string>
     <string name="pref_audio_content_language_order">Follow language order</string>
-    <string name="pref_audio_content_original">Prefer original audio</string>
-    <string name="pref_audio_content_dubbed">Prefer dubbed audio</string>
+    <string name="pref_audio_content_original">Prefer explicitly marked original audio</string>
+    <string name="pref_audio_content_dubbed">Prefer explicitly marked dubbed audio</string>
 </resources>"""
 if strings.count(marker) != 1:
     raise RuntimeError(f"strings closing tag: expected one match, found {strings.count(marker)}")
