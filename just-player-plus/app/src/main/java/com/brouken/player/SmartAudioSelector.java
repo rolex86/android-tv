@@ -22,14 +22,16 @@ final class SmartAudioSelector {
             String[] preferredLanguages,
             boolean ignoreCommentary,
             boolean ignoreAudioDescription,
-            boolean preferBestQuality) {
+            boolean preferBestQuality,
+            String contentPreference) {
         Candidate best = findBest(
                 tracks, preferredLanguages, ignoreCommentary,
-                ignoreAudioDescription, preferBestQuality);
+                ignoreAudioDescription, preferBestQuality, contentPreference);
         if (best == null) {
             // Never leave the user without audio only because all labels are unusual.
             best = findBest(
-                    tracks, preferredLanguages, false, false, preferBestQuality);
+                    tracks, preferredLanguages, false, false,
+                    preferBestQuality, contentPreference);
         }
         if (best == null) {
             return null;
@@ -44,7 +46,8 @@ final class SmartAudioSelector {
             String[] preferredLanguages,
             boolean ignoreCommentary,
             boolean ignoreAudioDescription,
-            boolean preferBestQuality) {
+            boolean preferBestQuality,
+            String contentPreference) {
         Candidate best = null;
         int sourceOrder = 0;
 
@@ -74,6 +77,7 @@ final class SmartAudioSelector {
                 }
                 Candidate candidate = new Candidate(
                         trackGroup, trackIndex, format, languageRank,
+                        contentRank(format, contentPreference),
                         sourceOrder++, preferBestQuality);
                 if (best == null || candidate.score < best.score) {
                     best = candidate;
@@ -81,6 +85,53 @@ final class SmartAudioSelector {
             }
         }
         return best;
+    }
+
+    private static int contentRank(Format format, String preference) {
+        if (preference == null || "language".equals(preference)) {
+            return 0;
+        }
+        boolean dubbed = isDubbed(format);
+        boolean original = isExplicitOriginal(format);
+        if ("original".equals(preference)) {
+            if (original) {
+                return 0;
+            }
+            return dubbed ? 2 : 1;
+        }
+        if ("dubbed".equals(preference)) {
+            if (dubbed) {
+                return 0;
+            }
+            return original ? 2 : 1;
+        }
+        return 0;
+    }
+
+    private static boolean isDubbed(Format format) {
+        if ((format.roleFlags & C.ROLE_FLAG_DUB) != 0) {
+            return true;
+        }
+        String label = normalizeLabel(format.label);
+        return containsToken(label, "dub")
+                || contains(label, "dubbed")
+                || contains(label, "dubbing")
+                || contains(label, "cz dub")
+                || contains(label, "czech dub")
+                || contains(label, "dabing")
+                || contains(label, "dabovany")
+                || contains(label, "cesky dabing");
+    }
+
+    private static boolean isExplicitOriginal(Format format) {
+        String label = normalizeLabel(format.label);
+        return label.equals("ov")
+                || contains(label, "original")
+                || contains(label, "original audio")
+                || contains(label, "original language")
+                || contains(label, "original version")
+                || contains(label, "puvodni zneni")
+                || contains(label, "puvodni audio");
     }
 
     private static boolean isCommentary(Format format) {
@@ -178,6 +229,12 @@ final class SmartAudioSelector {
         return !normalizedPhrase.isEmpty() && label.contains(normalizedPhrase);
     }
 
+    private static boolean containsToken(String label, String token) {
+        String normalizedToken = normalizeLabel(token);
+        return !normalizedToken.isEmpty()
+                && (" " + label + " ").contains(" " + normalizedToken + " ");
+    }
+
     private static final class Candidate {
         final TrackGroup trackGroup;
         final int trackIndex;
@@ -187,14 +244,16 @@ final class SmartAudioSelector {
                   int trackIndex,
                   Format format,
                   int languageRank,
+                  int contentRank,
                   int sourceOrder,
                   boolean preferBestQuality) {
             this.trackGroup = trackGroup;
             this.trackIndex = trackIndex;
 
+            long contentScore = (long) contentRank * 10_000_000_000_000L;
             long languageScore = (long) languageRank * 1_000_000_000L;
             if (!preferBestQuality) {
-                this.score = languageScore + sourceOrder;
+                this.score = contentScore + languageScore + sourceOrder;
                 return;
             }
 
@@ -203,7 +262,7 @@ final class SmartAudioSelector {
             long qualityScore = (long) formatRank(format.sampleMimeType) * 10_000_000L
                     + (long) (32 - Math.min(32, channels)) * 100_000L
                     + (100_000L - Math.min(100_000L, bitrate / 100));
-            this.score = languageScore + qualityScore + sourceOrder;
+            this.score = contentScore + languageScore + qualityScore + sourceOrder;
         }
     }
 }

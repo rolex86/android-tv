@@ -54,6 +54,14 @@
             app:useSimpleSummaryProvider="true" />
 
         <ListPreference
+            app:key="audioContentPreference"
+            app:defaultValue="language"
+            app:entries="@array/plus_audio_content_preference_entries"
+            app:entryValues="@array/plus_audio_content_preference_values"
+            app:title="@string/pref_audio_content_preference"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
             app:key="audioQualityPreference"
             app:defaultValue="best"
             app:entries="@array/plus_audio_quality_entries"
