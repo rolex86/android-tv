@@ -1351,8 +1351,14 @@ public class PlayerActivity extends Activity {
                 .setSelectTextByDefault(false)
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true);
         trackSelector.setParameters(subtitleParameters.build());
+        // Shift subtitle cue timestamps during Media3 extraction. The standard parsers,
+        // text renderer and the complete audio/video renderer pipeline remain unchanged.
+        OffsetSubtitleParserFactory subtitleParserFactory = new OffsetSubtitleParserFactory(
+                () -> (long) mPlusPrefs.subtitleDelayMs * 1_000L);
+
         // https://github.com/google/ExoPlayer/issues/8571
         DefaultExtractorsFactory extractorsFactory = new DefaultExtractorsFactory()
+                .setSubtitleParserFactory(subtitleParserFactory)
                 .setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ENABLE_HDMV_DTS_AUDIO_STREAMS)
                 .setTsExtractorTimestampSearchBytes(1500 * TsExtractor.TS_PACKET_SIZE);
         @SuppressLint("WrongConstant") RenderersFactory renderersFactory = new DefaultRenderersFactory(this)
@@ -1361,7 +1367,8 @@ public class PlayerActivity extends Activity {
 
         ExoPlayer.Builder playerBuilder = new ExoPlayer.Builder(this, renderersFactory)
                 .setTrackSelector(trackSelector)
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(this, extractorsFactory));
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(this, extractorsFactory)
+                        .setSubtitleParserFactory(subtitleParserFactory));
 
         if (haveMedia && isNetworkUri) {
             if (mPrefs.mediaUri.getScheme().toLowerCase().startsWith("http")) {
@@ -1371,7 +1378,10 @@ public class PlayerActivity extends Activity {
                     headers.put("Authorization", "Basic " + Base64.encodeToString(userInfo.getBytes(), Base64.NO_WRAP));
                     DefaultHttpDataSource.Factory defaultHttpDataSourceFactory = new DefaultHttpDataSource.Factory();
                     defaultHttpDataSourceFactory.setDefaultRequestProperties(headers);
-                    playerBuilder.setMediaSourceFactory(new DefaultMediaSourceFactory(defaultHttpDataSourceFactory, extractorsFactory));
+                    playerBuilder.setMediaSourceFactory(
+                            new DefaultMediaSourceFactory(
+                                    defaultHttpDataSourceFactory, extractorsFactory)
+                                    .setSubtitleParserFactory(subtitleParserFactory));
                 }
             }
         }
