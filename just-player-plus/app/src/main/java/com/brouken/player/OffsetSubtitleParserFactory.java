@@ -5,6 +5,7 @@ import androidx.media3.common.Format;
 import androidx.media3.extractor.text.CuesWithTiming;
 import androidx.media3.extractor.text.DefaultSubtitleParserFactory;
 import androidx.media3.extractor.text.SubtitleParser;
+import androidx.media3.extractor.text.SubtitleParser.OutputOptions;
 
 /**
  * Delegates subtitle parsing to Media3 and shifts only the resulting cue timestamps.
