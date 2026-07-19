@@ -2,6 +2,7 @@ package com.brouken.player;
 
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
@@ -56,6 +57,35 @@ final class NextEpisodeOverlay {
 
     boolean isVisible() {
         return card.getVisibility() == View.VISIBLE;
+    }
+
+    /** Handles TV navigation explicitly so no hidden player control can consume it first. */
+    boolean dispatchKeyEvent(KeyEvent event) {
+        int keyCode = event.getKeyCode();
+        boolean navigationKey = keyCode == KeyEvent.KEYCODE_DPAD_LEFT
+                || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT
+                || keyCode == KeyEvent.KEYCODE_DPAD_UP
+                || keyCode == KeyEvent.KEYCODE_DPAD_DOWN;
+        boolean confirmKey = keyCode == KeyEvent.KEYCODE_DPAD_CENTER
+                || keyCode == KeyEvent.KEYCODE_ENTER
+                || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
+                || keyCode == KeyEvent.KEYCODE_BUTTON_A
+                || keyCode == KeyEvent.KEYCODE_BUTTON_SELECT
+                || keyCode == KeyEvent.KEYCODE_SPACE;
+        if (!navigationKey && !confirmKey) {
+            return false;
+        }
+        if (event.getAction() != KeyEvent.ACTION_DOWN) {
+            return true;
+        }
+        if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+            dismiss.requestFocus();
+        } else if (navigationKey) {
+            playNow.requestFocus();
+        } else {
+            (dismiss.hasFocus() ? dismiss : playNow).performClick();
+        }
+        return true;
     }
 
     void show(NextEpisodeInfo info) {

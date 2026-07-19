@@ -224,6 +224,7 @@ public class PlayerActivity extends Activity {
     List<MediaItem.SubtitleConfiguration> apiSubs = new ArrayList<>();
     boolean intentReturnResult;
     boolean playbackFinished;
+    private boolean userInitiatedExit;
     private long resultPosition = C.TIME_UNSET;
     private long resultDuration = C.TIME_UNSET;
     private AlertDialog exitDialog;
@@ -844,21 +845,31 @@ public class PlayerActivity extends Activity {
                 }
                 return;
             }
-            nextEpisodeMetadataResolver.resolve(current, info -> acceptNextEpisodeInfo(
-                    session, current.raw, info));
+            nextEpisodeMetadataResolver.resolve(current, result -> acceptEpisodeMetadata(
+                    session, current.raw, result));
         }, delay);
     }
 
-    private void acceptNextEpisodeInfo(int session,
+    private void acceptEpisodeMetadata(int session,
                                        String currentId,
-                                       NextEpisodeInfo info) {
+                                       NextEpisodeMetadataResolver.Result result) {
         playerView.post(() -> {
             if (session != nextEpisodeSession || isFinishing()) {
                 return;
             }
-            if (info == null) {
+            if (result == null) {
                 externalDiagnostics.recordNextEpisode(
                         currentId, "", false, false, "unavailable");
+                return;
+            }
+            apiTitle = buildEpisodeTitle(result);
+            if (titleView != null) {
+                titleView.setText(apiTitle);
+            }
+            NextEpisodeInfo info = result.nextEpisode;
+            if (info == null) {
+                externalDiagnostics.recordNextEpisode(
+                        currentId, "", result.seriesTitle != null, false, "no_next_episode");
                 return;
             }
             nextEpisodeInfo = info;
@@ -871,6 +882,18 @@ public class PlayerActivity extends Activity {
             playerView.removeCallbacks(nextEpisodeProgressRunnable);
             playerView.post(nextEpisodeProgressRunnable);
         });
+    }
+
+    private static String buildEpisodeTitle(NextEpisodeMetadataResolver.Result result) {
+        StringBuilder title = new StringBuilder();
+        if (result.seriesTitle != null) {
+            title.append(result.seriesTitle).append("  ·  ");
+        }
+        title.append(result.current.displayCode());
+        if (result.currentEpisodeTitle != null) {
+            title.append("  ·  ").append(result.currentEpisodeTitle);
+        }
+        return title.toString();
     }
 
     private void resetNextEpisodeSession() {
@@ -911,10 +934,15 @@ public class PlayerActivity extends Activity {
                 nextEpisodeInfo.seriesTitle != null,
                 nextEpisodeInfo.artworkUrl != null,
                 "play_now");
-        snapshotPlaybackResult();
-        playbackFinished = true;
+        long duration = player != null ? player.getDuration() : C.TIME_UNSET;
+        if (player == null || duration == C.TIME_UNSET || duration <= 0L) {
+            dismissNextEpisode();
+            return;
+        }
+        nextEpisodeDismissed = true;
         nextEpisodeOverlay.hide(false);
-        finish();
+        player.seekTo(Math.max(0L, duration - 750L));
+        player.play();
     }
 
     private void snapshotPlaybackResult() {
@@ -963,7 +991,9 @@ public class PlayerActivity extends Activity {
 
     private void finishFromBack() {
         restorePlayStateAllowed = false;
-        super.onBackPressed();
+        userInitiatedExit = true;
+        new StremioConnectorStore(this).clearExpectedEpisode();
+        finish();
     }
 
     private void showExitConfirmation() {
@@ -1019,7 +1049,11 @@ public class PlayerActivity extends Activity {
     @Override
     public void finish() {
         snapshotPlaybackResult();
-        String resultEndBy = playbackFinished ? "playback_completion" : "user";
+        // Crossing the configured watched threshold must never turn an explicit Back action
+        // into automatic continuation in the calling app. Only a natural player end (or the
+        // explicit "play now" path, which seeks to it) may report playback completion.
+        String resultEndBy = playbackFinished && !userInitiatedExit
+                ? "playback_completion" : "user";
         if (apiAccess || apiAccessPartial || intentReturnResult) {
             externalDiagnostics.recordResult(resultPosition, resultDuration, resultEndBy);
         }
@@ -1210,6 +1244,9 @@ public class PlayerActivity extends Activity {
         // The next-episode card is modal. Let Android dispatch D-pad/confirm events to its
         // focused buttons instead of the TV shortcut handler seeking or pausing underneath.
         if (nextEpisodeOverlay != null && nextEpisodeOverlay.isVisible()) {
+            if (nextEpisodeOverlay.dispatchKeyEvent(event)) {
+                return true;
+            }
             return super.dispatchKeyEvent(event);
         }
 
@@ -1331,6 +1368,7 @@ public class PlayerActivity extends Activity {
         apiSubs.clear();
         intentReturnResult = false;
         playbackFinished = false;
+        userInitiatedExit = false;
         resultPosition = C.TIME_UNSET;
         resultDuration = C.TIME_UNSET;
         mPrefs.setPersistent(true);
@@ -2071,6 +2109,10 @@ public class PlayerActivity extends Activity {
                     }
                 }
             } else if (state == Player.STATE_ENDED) {
+                if (nextEpisodeInfo != null) {
+                    new StremioConnectorStore(PlayerActivity.this).expectEpisode(
+                            nextEpisodeInfo.next, System.currentTimeMillis());
+                }
                 if (nextEpisodeOverlay != null) {
                     nextEpisodeOverlay.hide(false);
                 }

@@ -19,8 +19,10 @@ final class StremioConnectorStore {
     private static final String KEY_EVENTS = "stream_requests";
     private static final String LEGACY_KEY_CLAIMED_PAIR = "claimed_pair";
     private static final String KEY_CLAIMED_EPISODE = "claimed_episode";
+    private static final String KEY_EXPECTED_EPISODE = "expected_episode";
     private static final int MAX_EVENTS = 24;
     private static final long MAX_EVENT_AGE_MS = 15 * 60_000L;
+    private static final long MAX_EXPECTED_AGE_MS = 2 * 60_000L;
     private static final long DEDUPLICATE_WINDOW_MS = 2_000L;
 
     private final SharedPreferences preferences;
@@ -62,7 +64,7 @@ final class StremioConnectorStore {
             List<Event> events = readEvents();
             Event event = findRecentEvent(events, nowMs);
             if (event == null) {
-                return null;
+                return claimExpectedEpisode(nowMs);
             }
             String token = event.id + "\n" + event.timestampMs;
             if (token.equals(preferences.getString(KEY_CLAIMED_EPISODE, null))) {
@@ -76,8 +78,50 @@ final class StremioConnectorStore {
             // A single current request supersedes all older observations. A later Stremio
             // launch will record a fresh event (including when it automatically continues).
             writeEvents(new ArrayList<>());
-            preferences.edit().putString(KEY_CLAIMED_EPISODE, token).apply();
+            preferences.edit()
+                    .putString(KEY_CLAIMED_EPISODE, token)
+                    .remove(KEY_EXPECTED_EPISODE)
+                    .apply();
             return episode;
+        }
+    }
+
+    void expectEpisode(StremioEpisodeId episode, long nowMs) {
+        if (episode == null) {
+            return;
+        }
+        synchronized (LOCK) {
+            preferences.edit().putString(
+                    KEY_EXPECTED_EPISODE, episode.raw + "\n" + nowMs).apply();
+        }
+    }
+
+    /** Cancels only the automatic-continuation hint while preserving fresh helper metadata. */
+    void clearExpectedEpisode() {
+        synchronized (LOCK) {
+            preferences.edit().remove(KEY_EXPECTED_EPISODE).apply();
+        }
+    }
+
+    @Nullable
+    private StremioEpisodeId claimExpectedEpisode(long nowMs) {
+        String encoded = preferences.getString(KEY_EXPECTED_EPISODE, null);
+        preferences.edit().remove(KEY_EXPECTED_EPISODE).apply();
+        if (encoded == null) {
+            return null;
+        }
+        int separator = encoded.lastIndexOf('\n');
+        if (separator <= 0 || separator == encoded.length() - 1) {
+            return null;
+        }
+        try {
+            long timestamp = Long.parseLong(encoded.substring(separator + 1));
+            if (timestamp > nowMs + 10_000L || nowMs - timestamp > MAX_EXPECTED_AGE_MS) {
+                return null;
+            }
+            return StremioEpisodeId.parse(encoded.substring(0, separator));
+        } catch (NumberFormatException ignored) {
+            return null;
         }
     }
 
@@ -108,6 +152,7 @@ final class StremioConnectorStore {
                     .remove(KEY_EVENTS)
                     .remove(LEGACY_KEY_CLAIMED_PAIR)
                     .remove(KEY_CLAIMED_EPISODE)
+                    .remove(KEY_EXPECTED_EPISODE)
                     .apply();
         }
     }

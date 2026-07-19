@@ -55,17 +55,20 @@ public class StremioNextEpisodeTest {
                 + "\"videos\":["
                 + "{\"id\":\"tt123:1:3\",\"title\":\"Later\","
                 + "\"released\":\"2024-01-03T00:00:00.000Z\"},"
-                + "{\"id\":\"tt123:1:1\",\"title\":\"Current\","
+                + "{\"id\":\"tt123:1:1\",\"name\":\"Current\","
                 + "\"released\":\"2024-01-01T00:00:00.000Z\"},"
                 + "{\"id\":\"tt123:1:2\",\"name\":\"BBQ\","
                 + "\"thumbnail\":\"https://example.test/episode.jpg\","
                 + "\"released\":\"2024-01-02T00:00:00.000Z\"}]}}";
 
-        NextEpisodeInfo info = NextEpisodeMetadataResolver.parse(
+        NextEpisodeMetadataResolver.Result result = NextEpisodeMetadataResolver.parse(
                 current, json, 1_800_000_000_000L);
 
+        assertNotNull(result);
+        NextEpisodeInfo info = result.nextEpisode;
         assertNotNull(info);
         assertEquals("tt123:1:2", info.next.raw);
+        assertEquals("Current", result.currentEpisodeTitle);
         assertEquals("BBQ", info.episodeTitle);
         assertEquals("https://example.test/episode.jpg", info.artworkUrl);
     }
@@ -74,11 +77,16 @@ public class StremioNextEpisodeTest {
     public void metadataDoesNotSkipAnUnreleasedNextEpisode() throws JSONException {
         StremioEpisodeId current = StremioEpisodeId.parse("tt123:1:1");
         String json = "{\"meta\":{\"videos\":["
+                + "{\"id\":\"tt123:1:1\",\"name\":\"Current\"},"
                 + "{\"id\":\"tt123:1:2\",\"released\":\"2030-01-01\"},"
                 + "{\"id\":\"tt123:1:3\",\"released\":\"2024-01-01\"}]}}";
 
-        assertNull(NextEpisodeMetadataResolver.parse(
-                current, json, 1_800_000_000_000L));
+        NextEpisodeMetadataResolver.Result result = NextEpisodeMetadataResolver.parse(
+                current, json, 1_800_000_000_000L);
+
+        assertNotNull(result);
+        assertEquals("Current", result.currentEpisodeTitle);
+        assertNull(result.nextEpisode);
     }
 
     private static StremioConnectorStore.Event event(String id, long timestamp) {

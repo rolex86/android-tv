@@ -29,7 +29,24 @@ final class NextEpisodeMetadataResolver {
             "https://v3-cinemeta.strem.io/meta/series/%s.json";
 
     interface Listener {
-        void onResolved(@Nullable NextEpisodeInfo info);
+        void onResolved(@Nullable Result result);
+    }
+
+    static final class Result {
+        final StremioEpisodeId current;
+        @Nullable final String seriesTitle;
+        @Nullable final String currentEpisodeTitle;
+        @Nullable final NextEpisodeInfo nextEpisode;
+
+        Result(StremioEpisodeId current,
+               @Nullable String seriesTitle,
+               @Nullable String currentEpisodeTitle,
+               @Nullable NextEpisodeInfo nextEpisode) {
+            this.current = current;
+            this.seriesTitle = emptyToNull(seriesTitle);
+            this.currentEpisodeTitle = emptyToNull(currentEpisodeTitle);
+            this.nextEpisode = nextEpisode;
+        }
     }
 
     private final OkHttpClient client;
@@ -71,7 +88,7 @@ final class NextEpisodeMetadataResolver {
 
     /** Derives the next released episode when Stremio observed only the current stream. */
     @Nullable
-    static NextEpisodeInfo parse(StremioEpisodeId current, String json, long nowMs)
+    static Result parse(StremioEpisodeId current, String json, long nowMs)
             throws JSONException {
         JSONObject root = new JSONObject(json);
         JSONObject meta = root.optJSONObject("meta");
@@ -85,12 +102,18 @@ final class NextEpisodeMetadataResolver {
 
         StremioEpisodeId next = null;
         JSONObject nextVideo = null;
+        String currentEpisodeTitle = null;
         for (int index = 0; index < videos.length(); index++) {
             JSONObject video = videos.optJSONObject(index);
             if (video == null) {
                 continue;
             }
             StremioEpisodeId candidate = StremioEpisodeId.parse(video.optString("id", null));
+            if (current.equals(candidate)) {
+                currentEpisodeTitle = firstNonEmpty(
+                        video.optString("title", null), video.optString("name", null));
+                continue;
+            }
             if (candidate == null
                     || !current.belongsToSameSeries(candidate)
                     || !isAfter(current, candidate)
@@ -100,23 +123,24 @@ final class NextEpisodeMetadataResolver {
             next = candidate;
             nextVideo = video;
         }
-        if (next == null || nextVideo == null
-                || isUpcoming(nextVideo.optString("released", null), nowMs)) {
-            return null;
+        String seriesTitle = meta.optString("name", null);
+        NextEpisodeInfo nextEpisode = null;
+        if (next != null && nextVideo != null
+                && !isUpcoming(nextVideo.optString("released", null), nowMs)) {
+            String fallbackArtwork = firstNonEmpty(
+                    meta.optString("background", null), meta.optString("poster", null));
+            String artwork = firstNonEmpty(
+                    nextVideo.optString("thumbnail", null), fallbackArtwork);
+            nextEpisode = new NextEpisodeInfo(
+                    current,
+                    next,
+                    seriesTitle,
+                    firstNonEmpty(
+                            nextVideo.optString("title", null),
+                            nextVideo.optString("name", null)),
+                    artwork);
         }
-
-        String fallbackArtwork = firstNonEmpty(
-                meta.optString("background", null), meta.optString("poster", null));
-        String artwork = firstNonEmpty(
-                nextVideo.optString("thumbnail", null), fallbackArtwork);
-        return new NextEpisodeInfo(
-                current,
-                next,
-                meta.optString("name", null),
-                firstNonEmpty(
-                        nextVideo.optString("title", null),
-                        nextVideo.optString("name", null)),
-                artwork);
+        return new Result(current, seriesTitle, currentEpisodeTitle, nextEpisode);
     }
 
     private static boolean isAfter(StremioEpisodeId current, StremioEpisodeId candidate) {
@@ -148,5 +172,9 @@ final class NextEpisodeMetadataResolver {
 
     private static String firstNonEmpty(String first, String second) {
         return first != null && !first.trim().isEmpty() ? first : second;
+    }
+
+    private static String emptyToNull(@Nullable String value) {
+        return value == null || value.trim().isEmpty() ? null : value.trim();
     }
 }
