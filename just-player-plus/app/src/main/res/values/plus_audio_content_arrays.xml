@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="plus_audio_content_preference_entries">
+        <item>@string/pref_audio_content_language_order</item>
+        <item>@string/pref_audio_content_original</item>
+        <item>@string/pref_audio_content_dubbed</item>
+    </string-array>
+
+    <string-array name="plus_audio_content_preference_values">
+        <item>language</item>
+        <item>original</item>
+        <item>dubbed</item>
+    </string-array>
+</resources>
