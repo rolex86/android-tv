@@ -1207,6 +1207,12 @@ public class PlayerActivity extends Activity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        // The next-episode card is modal. Let Android dispatch D-pad/confirm events to its
+        // focused buttons instead of the TV shortcut handler seeking or pausing underneath.
+        if (nextEpisodeOverlay != null && nextEpisodeOverlay.isVisible()) {
+            return super.dispatchKeyEvent(event);
+        }
+
         if (isScaling) {
             final int keyCode = event.getKeyCode();
             if (event.getAction() == KeyEvent.ACTION_DOWN) {

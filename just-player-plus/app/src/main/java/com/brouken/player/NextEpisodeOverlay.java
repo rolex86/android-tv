@@ -67,9 +67,13 @@ final class NextEpisodeOverlay {
         loadArtwork(info.artworkUrl);
 
         card.animate().cancel();
+        card.bringToFront();
         card.setVisibility(View.VISIBLE);
         card.setAlpha(0f);
         card.setTranslationX(dp(36));
+        // Focus before the animation as well as after it. On Android TV the hidden player
+        // controller can otherwise retain focus until its own exit animation finishes.
+        playNow.requestFocus();
         card.animate()
                 .alpha(1f)
                 .translationX(0f)
@@ -82,6 +86,7 @@ final class NextEpisodeOverlay {
         cancelArtwork();
         card.animate().cancel();
         if (!animate || card.getVisibility() != View.VISIBLE) {
+            clearButtonFocus();
             card.setVisibility(View.GONE);
             card.setAlpha(1f);
             card.setTranslationX(0f);
@@ -92,11 +97,17 @@ final class NextEpisodeOverlay {
                 .translationX(dp(24))
                 .setDuration(180L)
                 .withEndAction(() -> {
+                    clearButtonFocus();
                     card.setVisibility(View.GONE);
                     card.setAlpha(1f);
                     card.setTranslationX(0f);
                 })
                 .start();
+    }
+
+    private void clearButtonFocus() {
+        playNow.clearFocus();
+        dismiss.clearFocus();
     }
 
     void release() {
