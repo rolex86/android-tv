@@ -17,6 +17,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   build:
@@ -46,27 +47,19 @@ jobs:
           cache: gradle
           cache-dependency-path: just-player-plus/**/*.gradle*
 
-      - name: Restore test signing key
-        uses: actions/cache@v4
-        with:
-          path: .ci-signing/justplayer-plus-test.jks
-          key: justplayer-plus-test-signing-v1
-
-      - name: Create test signing key when missing
+      - name: Restore original Shield signing key
         working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p .ci-signing
-          if [ ! -f "$JPP_SIGNING_STORE_FILE" ]; then
-            keytool -genkeypair -v \
-              -keystore "$JPP_SIGNING_STORE_FILE" \
-              -storepass "$JPP_SIGNING_STORE_PASSWORD" \
-              -keypass "$JPP_SIGNING_KEY_PASSWORD" \
-              -alias "$JPP_SIGNING_KEY_ALIAS" \
-              -keyalg RSA \
-              -keysize 4096 \
-              -validity 10000 \
-              -dname "CN=JustPlayer Plus Test, OU=Testing, O=rolex86, L=Prague, C=CZ"
-          fi
+          curl --fail --location \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/8440770390/zip" \
+            --output signing-key.zip
+          unzip -j -o signing-key.zip -d .ci-signing
+          test -f "$JPP_SIGNING_STORE_FILE"
           keytool -list -v \
             -keystore "$JPP_SIGNING_STORE_FILE" \
             -storepass "$JPP_SIGNING_STORE_PASSWORD" \
@@ -95,6 +88,8 @@ jobs:
           APK=$(find app/build/outputs/apk -type f -name '*.apk' | head -n 1)
           test -n "$APK"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK" \
+            | grep -F "Signer #1 certificate SHA-256 digest: 76537315f4ab044258d3e280c8d4d44a31ad8de1066729f4fa868fb7b9140ca9"
 
       - name: Upload Gradle build log
         if: always()
@@ -113,13 +108,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: justplayer-plus-signed-apk
+          name: justplayer-plus-signed-apk-original-key
           path: artifacts/*.apk
-          if-no-files-found: error
-
-      - name: Back up test signing key
-        uses: actions/upload-artifact@v4
-        with:
-          name: justplayer-plus-test-signing-key
-          path: .ci-signing/justplayer-plus-test.jks
           if-no-files-found: error
