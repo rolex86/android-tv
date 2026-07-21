@@ -69,20 +69,24 @@ public final class SelectedSubtitleResolver {
                 }
                 Format format = trackGroup.getFormat(index);
                 String id = format.id;
-                String mime = normalizeMime(format.sampleMimeType);
-                if (isImageBased(mime)) {
-                    return Resolution.failed(Issue.IMAGE_BASED);
-                }
                 if (id == null || !id.startsWith(EXTERNAL_ID_PREFIX)) {
                     return Resolution.failed(Issue.EMBEDDED);
-                }
-                if (!isSupportedMime(mime)) {
-                    return Resolution.failed(Issue.UNSUPPORTED_FORMAT);
                 }
                 MediaItem.SubtitleConfiguration configuration = findConfiguration(
                         configurations, id);
                 if (configuration == null || !hasReadableScheme(configuration.uri)) {
                     return Resolution.failed(Issue.URI_UNREADABLE);
+                }
+
+                String trackMime = normalizeMime(format.sampleMimeType);
+                String configuredMime = normalizeMime(configuration.mimeType);
+                String mime = isSupportedMime(configuredMime) || isImageBased(configuredMime)
+                        ? configuredMime : trackMime;
+                if (isImageBased(mime)) {
+                    return Resolution.failed(Issue.IMAGE_BASED);
+                }
+                if (!isSupportedMime(mime)) {
+                    return Resolution.failed(Issue.UNSUPPORTED_FORMAT);
                 }
                 return Resolution.ready(new AiSubtitleSource(
                         id,
