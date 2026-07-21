@@ -13,8 +13,9 @@ import androidx.media3.common.Tracks;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 
-/** Resolves the exact selected text-track index and maps its stable ID back to a source URI. */
+/** Resolves the selected text track and maps it back to its external source URI. */
 public final class SelectedSubtitleResolver {
     public static final String EXTERNAL_ID_PREFIX = "plus-external:";
     public static final String AI_ID_PREFIX = "plus-ai:";
@@ -58,6 +59,9 @@ public final class SelectedSubtitleResolver {
         }
         List<MediaItem.SubtitleConfiguration> configurations = subtitleConfigurations(
                 player.getCurrentMediaItem());
+        boolean selectedEmbeddedTrackSeen = false;
+        Issue externalFailure = null;
+
         for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
             if (group.getType() != C.TRACK_TYPE_TEXT) {
                 continue;
@@ -68,36 +72,89 @@ public final class SelectedSubtitleResolver {
                     continue;
                 }
                 Format format = trackGroup.getFormat(index);
-                String id = format.id;
-                if (id == null || !id.startsWith(EXTERNAL_ID_PREFIX)) {
-                    return Resolution.failed(Issue.EMBEDDED);
+                MediaItem.SubtitleConfiguration configuration =
+                        findExternalConfiguration(configurations, format);
+                if (configuration == null) {
+                    selectedEmbeddedTrackSeen = true;
+                    continue;
                 }
-                MediaItem.SubtitleConfiguration configuration = findConfiguration(
-                        configurations, id);
-                if (configuration == null || !hasReadableScheme(configuration.uri)) {
-                    return Resolution.failed(Issue.URI_UNREADABLE);
+                Resolution resolution = resolveConfiguration(
+                        configuration,
+                        configuration.id,
+                        format.label != null ? format.label : configuration.label,
+                        format.language != null ? format.language : configuration.language);
+                if (resolution.isReady()) {
+                    return resolution;
                 }
-
-                String trackMime = normalizeMime(format.sampleMimeType);
-                String configuredMime = normalizeMime(configuration.mimeType);
-                String mime = isSupportedMime(configuredMime) || isImageBased(configuredMime)
-                        ? configuredMime : trackMime;
-                if (isImageBased(mime)) {
-                    return Resolution.failed(Issue.IMAGE_BASED);
-                }
-                if (!isSupportedMime(mime)) {
-                    return Resolution.failed(Issue.UNSUPPORTED_FORMAT);
-                }
-                return Resolution.ready(new AiSubtitleSource(
-                        id,
-                        format.label,
-                        format.language,
-                        mime,
-                        "application/x-subrip".equals(mime) ? "srt" : "vtt",
-                        configuration.uri));
+                externalFailure = resolution.issue;
             }
         }
+
+        if (externalFailure != null) {
+            return Resolution.failed(externalFailure);
+        }
+        if (selectedEmbeddedTrackSeen) {
+            return Resolution.failed(Issue.EMBEDDED);
+        }
         return Resolution.failed(Issue.NONE_SELECTED);
+    }
+
+    @Nullable
+    static MediaItem.SubtitleConfiguration findExternalConfiguration(
+            List<MediaItem.SubtitleConfiguration> configurations,
+            Format selectedFormat) {
+        String selectedId = selectedFormat.id;
+        if (selectedId != null && selectedId.startsWith(EXTERNAL_ID_PREFIX)) {
+            for (MediaItem.SubtitleConfiguration configuration : configurations) {
+                if (selectedId.equals(configuration.id)) {
+                    return configuration;
+                }
+            }
+        }
+
+        String selectedLabel = normalizeText(selectedFormat.label);
+        String selectedLanguage = normalizeLanguage(selectedFormat.language);
+        MediaItem.SubtitleConfiguration labelMatch = null;
+        for (MediaItem.SubtitleConfiguration configuration : configurations) {
+            String id = configuration.id;
+            if (id == null || !id.startsWith(EXTERNAL_ID_PREFIX)) {
+                continue;
+            }
+            if (!selectedLabel.isEmpty()
+                    && selectedLabel.equals(normalizeText(configuration.label))
+                    && languagesMatch(selectedLanguage,
+                    normalizeLanguage(configuration.language))) {
+                if (labelMatch != null) {
+                    return null;
+                }
+                labelMatch = configuration;
+            }
+        }
+        return labelMatch;
+    }
+
+    private static Resolution resolveConfiguration(
+            @Nullable MediaItem.SubtitleConfiguration configuration,
+            @Nullable String id,
+            @Nullable String label,
+            @Nullable String language) {
+        if (configuration == null || id == null || !hasReadableScheme(configuration.uri)) {
+            return Resolution.failed(Issue.URI_UNREADABLE);
+        }
+        String mime = normalizeMime(configuration.mimeType);
+        if (isImageBased(mime)) {
+            return Resolution.failed(Issue.IMAGE_BASED);
+        }
+        if (!isSupportedMime(mime)) {
+            return Resolution.failed(Issue.UNSUPPORTED_FORMAT);
+        }
+        return Resolution.ready(new AiSubtitleSource(
+                id,
+                label,
+                language,
+                mime,
+                "application/x-subrip".equals(mime) ? "srt" : "vtt",
+                configuration.uri));
     }
 
     public static boolean isSupportedMime(@Nullable String mimeType) {
@@ -133,15 +190,22 @@ public final class SelectedSubtitleResolver {
         return mimeType == null ? "" : mimeType.trim().toLowerCase(Locale.ROOT);
     }
 
-    @Nullable
-    private static MediaItem.SubtitleConfiguration findConfiguration(
-            List<MediaItem.SubtitleConfiguration> configurations, String id) {
-        for (MediaItem.SubtitleConfiguration configuration : configurations) {
-            if (id.equals(configuration.id)) {
-                return configuration;
-            }
+    private static String normalizeText(@Nullable String value) {
+        return value == null ? "" : value.trim().replaceAll("\\s+", " ")
+                .toLowerCase(Locale.ROOT);
+    }
+
+    private static String normalizeLanguage(@Nullable String value) {
+        if (value == null) {
+            return "";
         }
-        return null;
+        String language = value.trim().toLowerCase(Locale.ROOT).replace('_', '-');
+        int separator = language.indexOf('-');
+        return separator > 0 ? language.substring(0, separator) : language;
+    }
+
+    private static boolean languagesMatch(String first, String second) {
+        return first.isEmpty() || second.isEmpty() || Objects.equals(first, second);
     }
 
     static List<MediaItem.SubtitleConfiguration> subtitleConfigurations(MediaItem mediaItem) {
