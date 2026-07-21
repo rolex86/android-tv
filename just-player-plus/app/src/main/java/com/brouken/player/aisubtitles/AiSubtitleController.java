@@ -121,8 +121,7 @@ public final class AiSubtitleController {
         }
         for (MediaItem.SubtitleConfiguration configuration
                 : SelectedSubtitleResolver.subtitleConfigurations(player.getCurrentMediaItem())) {
-            if (configuration.id != null
-                    && configuration.id.startsWith(SelectedSubtitleResolver.EXTERNAL_ID_PREFIX)
+            if (SubtitleTrackIdentity.isExternal(configuration.id)
                     && SelectedSubtitleResolver.isSupportedMime(configuration.mimeType)
                     && SelectedSubtitleResolver.hasReadableScheme(configuration.uri)) {
                 return true;
@@ -374,7 +373,7 @@ public final class AiSubtitleController {
                 SelectedSubtitleResolver.subtitleConfigurations(mediaItem);
         boolean duplicate = false;
         for (MediaItem.SubtitleConfiguration item : existing) {
-            if (configuration.id.equals(item.id)) {
+            if (SubtitleTrackIdentity.sameStableId(configuration.id, item.id)) {
                 duplicate = true;
                 break;
             }
@@ -392,6 +391,9 @@ public final class AiSubtitleController {
         activeSession = null;
         updateProgressDialog(100);
         selectPendingTrack();
+        mainHandler.postDelayed(this::selectPendingTrack, 150L);
+        mainHandler.postDelayed(this::selectPendingTrack, 400L);
+        mainHandler.postDelayed(this::selectPendingTrack, 900L);
     }
 
     private void selectPendingTrack() {
@@ -408,7 +410,7 @@ public final class AiSubtitleController {
             TrackGroup trackGroup = group.getMediaTrackGroup();
             for (int index = 0; index < trackGroup.length; index++) {
                 Format format = trackGroup.getFormat(index);
-                if (!pendingId.equals(format.id)) {
+                if (!AiSubtitleCompletionPolicy.matchesPendingTrack(pendingId, format.id)) {
                     continue;
                 }
                 pendingAiSubtitleId = null;
