@@ -108,6 +108,7 @@
     <string name="ai_subtitle_backend_invalid">Zadejte platnou HTTP nebo HTTPS adresu překladové služby.</string>
     <string name="ai_subtitle_translating">Překládám titulky…</string>
     <string name="ai_subtitle_progress">Překlad %1$d %%</string>
+    <string name="ai_subtitle_cancelled">Překlad byl zrušen.</string>
     <string name="ai_subtitle_ready">České titulky jsou připravené</string>
     <string name="ai_subtitle_service_unavailable">Překladová služba není dostupná.</string>
     <string name="ai_subtitle_timeout">Překlad trvá příliš dlouho.</string>
