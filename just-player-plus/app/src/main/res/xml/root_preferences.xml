@@ -322,6 +322,15 @@
             app:title="@string/pref_ai_subtitle_backend_url"
             android:inputType="textUri" />
 
+        <EditTextPreference
+            app:key="aiSubtitleApiToken"
+            app:defaultValue=""
+            app:dependency="aiSubtitlesEnabled"
+            app:dialogTitle="@string/pref_ai_subtitle_api_token"
+            app:summary="@string/pref_ai_subtitle_api_token_summary"
+            app:title="@string/pref_ai_subtitle_api_token"
+            android:inputType="textPassword" />
+
         <ListPreference
             app:key="aiSubtitleTargetLanguage"
             app:defaultValue="ces"
