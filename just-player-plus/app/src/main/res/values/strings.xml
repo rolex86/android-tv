@@ -156,6 +156,7 @@
     <string name="ai_subtitle_backend_invalid">Use a valid HTTP or HTTPS translation service address.</string>
     <string name="ai_subtitle_translating">Translating subtitles…</string>
     <string name="ai_subtitle_progress">Translation %1$d%%</string>
+    <string name="ai_subtitle_cancelled">Translation cancelled.</string>
     <string name="ai_subtitle_ready">Czech subtitles are ready</string>
     <string name="ai_subtitle_service_unavailable">The translation service is unavailable.</string>
     <string name="ai_subtitle_timeout">Translation is taking too long.</string>
