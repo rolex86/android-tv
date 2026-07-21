@@ -86,6 +86,11 @@
     <string name="pref_ai_subtitles_enabled_on">Umožní ručně přeložit vybranou externí titulkovou stopu.</string>
     <string name="pref_ai_subtitle_backend_url">Adresa překladové služby</string>
     <string name="pref_ai_subtitle_backend_not_set">Nenastaveno</string>
+    <string name="pref_ai_subtitle_api_token">Přístupový token (volitelné)</string>
+    <string name="pref_ai_subtitle_api_token_summary">Nechte prázdné, dokud v doplňku nezapnete přístupový token. Hodnota se v nastavení nezobrazuje.</string>
+    <string name="pref_ai_subtitle_token_invalid">Přístupový token obsahuje neplatné znaky.</string>
+    <string name="ai_subtitle_unauthorized">Překladová služba odmítla přístupový token.</string>
+    <string name="ai_subtitle_invalid_request">Překladová služba odmítla požadavek na titulky.</string>
     <string name="pref_ai_subtitle_target_language">Cílový jazyk</string>
     <string name="pref_ai_subtitle_http_warning">Nešifrované HTTP používejte pouze s důvěryhodnou službou v domácí síti. API klíče poskytovatele patří na server a aplikace je nikdy neukládá.</string>
     <string name="ai_subtitle_button">Přeložit titulky pomocí AI</string>
