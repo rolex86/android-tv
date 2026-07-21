@@ -1051,22 +1051,24 @@ public class PlayerActivity extends Activity {
         }
 
         boolean preserveSelections = currentPlayer.getPlaybackState() == Player.STATE_READY
-                || trackMemoryArmed;
+                || trackMemoryArmed
+                || audioSelectionExplicit
+                || subtitleSelectionExplicit;
+        openSubtitlesAudioExplicitBeforeAttach = audioSelectionExplicit;
+        openSubtitlesSubtitleExplicitBeforeAttach = subtitleSelectionExplicit;
+        openSubtitlesPersistAudioBeforeAttach = persistAudioSelectionPerFile;
+        openSubtitlesPersistSubtitleBeforeAttach = persistSubtitleSelectionPerFile;
+        openSubtitlesAttachPending = true;
+        trackMemoryArmed = false;
+        trackSelectionChangePending = false;
         if (preserveSelections) {
             openSubtitlesSelectionBeforeAttach = RememberedTrackStore.capture(
                     currentPlayer.getCurrentTracks(),
                     currentPlayer.getTrackSelectionParameters(),
                     !audioSelectionExplicit,
                     !subtitleSelectionExplicit);
-            openSubtitlesAudioExplicitBeforeAttach = audioSelectionExplicit;
-            openSubtitlesSubtitleExplicitBeforeAttach = subtitleSelectionExplicit;
-            openSubtitlesPersistAudioBeforeAttach = persistAudioSelectionPerFile;
-            openSubtitlesPersistSubtitleBeforeAttach = persistSubtitleSelectionPerFile;
-            openSubtitlesAttachPending = true;
-            trackMemoryArmed = false;
-            trackSelectionChangePending = false;
         } else {
-            clearOpenSubtitlesAttachState();
+            openSubtitlesSelectionBeforeAttach = null;
         }
 
         MediaItem updatedItem = mediaItem.buildUpon()
@@ -1115,7 +1117,6 @@ public class PlayerActivity extends Activity {
                 }
             }
         } else {
-            applySmartAudioSelection();
             applySmartSubtitleSelection();
         }
 
