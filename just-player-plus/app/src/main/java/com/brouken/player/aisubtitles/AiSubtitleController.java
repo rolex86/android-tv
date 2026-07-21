@@ -112,7 +112,23 @@ public final class AiSubtitleController {
     }
 
     public static boolean isTranslationAvailable(@Nullable Player player) {
-        return SelectedSubtitleResolver.resolve(player).isReady();
+        SelectedSubtitleResolver.Resolution selected = SelectedSubtitleResolver.resolve(player);
+        if (selected.isReady()) {
+            return true;
+        }
+        if (player == null || player.getCurrentMediaItem() == null) {
+            return false;
+        }
+        for (MediaItem.SubtitleConfiguration configuration
+                : SelectedSubtitleResolver.subtitleConfigurations(player.getCurrentMediaItem())) {
+            if (configuration.id != null
+                    && configuration.id.startsWith(SelectedSubtitleResolver.EXTERNAL_ID_PREFIX)
+                    && SelectedSubtitleResolver.isSupportedMime(configuration.mimeType)
+                    && SelectedSubtitleResolver.hasReadableScheme(configuration.uri)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public void startTranslation() {
