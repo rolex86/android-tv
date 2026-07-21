@@ -12,7 +12,7 @@ android {
         applicationId "com.rolex86.justplayerplus"
         minSdkVersion 23
         targetSdkVersion 36
-        versionCode 220
+        versionCode 221
         versionName "0.${versionCode}-plus.1"
         if (abiFilter) {
             def abiCodeMap = ["x86": 1, "x86_64": 2, "armeabi-v7a": 3, "arm64-v8a": 4]
@@ -123,7 +123,7 @@ dependencies {
         exclude group: "androidx.media3", module: "media3-exoplayer"
     }
     implementation 'androidx.recyclerview:recyclerview:1.4.0'
-    implementation 'com.getkeepsafe.taptargetview:taptargetview:1.13.3'
+    implementation 'com.getkeepsafe:taptargetview:1.13.3'
     implementation 'com.google.android.material:material:1.12.0'
     implementation 'androidx.coordinatorlayout:coordinatorlayout:1.3.0'
     implementation "androidx.core:core:$androidxCoreVersion"
