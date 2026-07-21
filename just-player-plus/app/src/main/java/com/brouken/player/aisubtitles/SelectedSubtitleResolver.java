@@ -103,34 +103,49 @@ public final class SelectedSubtitleResolver {
     static MediaItem.SubtitleConfiguration findExternalConfiguration(
             List<MediaItem.SubtitleConfiguration> configurations,
             Format selectedFormat) {
-        String selectedId = selectedFormat.id;
-        if (selectedId != null && selectedId.startsWith(EXTERNAL_ID_PREFIX)) {
-            for (MediaItem.SubtitleConfiguration configuration : configurations) {
-                if (selectedId.equals(configuration.id)) {
-                    return configuration;
-                }
-            }
-        }
-
-        String selectedLabel = normalizeText(selectedFormat.label);
-        String selectedLanguage = normalizeLanguage(selectedFormat.language);
         MediaItem.SubtitleConfiguration labelMatch = null;
         for (MediaItem.SubtitleConfiguration configuration : configurations) {
-            String id = configuration.id;
-            if (id == null || !id.startsWith(EXTERNAL_ID_PREFIX)) {
+            if (!matchesExternalConfiguration(
+                    configuration.id,
+                    configuration.label,
+                    configuration.language,
+                    selectedFormat.id,
+                    selectedFormat.label,
+                    selectedFormat.language)) {
                 continue;
             }
-            if (!selectedLabel.isEmpty()
-                    && selectedLabel.equals(normalizeText(configuration.label))
-                    && languagesMatch(selectedLanguage,
-                    normalizeLanguage(configuration.language))) {
-                if (labelMatch != null) {
-                    return null;
-                }
-                labelMatch = configuration;
+            if (selectedFormat.id != null && selectedFormat.id.equals(configuration.id)) {
+                return configuration;
             }
+            if (labelMatch != null) {
+                return null;
+            }
+            labelMatch = configuration;
         }
         return labelMatch;
+    }
+
+    static boolean matchesExternalConfiguration(
+            @Nullable String configurationId,
+            @Nullable String configurationLabel,
+            @Nullable String configurationLanguage,
+            @Nullable String selectedId,
+            @Nullable String selectedLabel,
+            @Nullable String selectedLanguage) {
+        if (configurationId == null || !configurationId.startsWith(EXTERNAL_ID_PREFIX)) {
+            return false;
+        }
+        if (selectedId != null && selectedId.equals(configurationId)) {
+            return true;
+        }
+        String normalizedSelectedLabel = normalizeText(selectedLabel);
+        if (normalizedSelectedLabel.isEmpty()
+                || !normalizedSelectedLabel.equals(normalizeText(configurationLabel))) {
+            return false;
+        }
+        return languagesMatch(
+                normalizeLanguage(selectedLanguage),
+                normalizeLanguage(configurationLanguage));
     }
 
     private static Resolution resolveConfiguration(
