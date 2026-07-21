@@ -20,3 +20,9 @@ GitHub Actions builds the release APK after relevant changes. Locally:
 cd just-player-plus
 ./gradlew assembleLatestUniversalRelease
 ```
+
+## AI subtitle backend
+
+`ai-subtitle-backend/` is the optional self-hosted Gemini translation service used by the
+disabled-by-default AI subtitle feature. It requires Node.js 20+ and keeps the provider key only
+on the server. See its README for local and container deployment.

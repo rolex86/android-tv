@@ -15,6 +15,7 @@ The work was delivered as independently reviewable and revertible squash commits
 - [x] 11. Original-audio versus dubbed-audio preference
 - [x] 12. True positive and negative subtitle delay for embedded and external subtitles
 - [x] 13. Final preference-wiring audit and minSdk hardening
+- [x] 19. Optional on-demand AI subtitle translation and standalone Gemini backend
 
 Protected playback components kept unchanged throughout the implementation:
 

@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string-array name="plus_ai_subtitle_language_entries">
+        <item>Czech</item>
+    </string-array>
+    <string-array name="plus_ai_subtitle_language_values" translatable="false">
+        <item>ces</item>
+    </string-array>
+
     <string-array name="plus_next_episode_notice_entries">
         <item>15 seconds</item>
         <item>30 seconds</item>

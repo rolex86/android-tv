@@ -19,6 +19,10 @@ TEST_PATH = (
 OFFSET_TEST_PATH = TEST_PATH.with_name("OffsetSubtitleParserFactoryTest.java")
 END_TIME_TEST_PATH = TEST_PATH.with_name("PlaybackEndTimeTest.java")
 STREMIO_TEST_PATH = TEST_PATH.with_name("StremioNextEpisodeTest.java")
+AI_TEST_PATH = (
+    ROOT / "just-player-plus" / "app" / "src" / "test" / "java"
+    / "com" / "brouken" / "player" / "aisubtitles" / "AiSubtitlePolicyTest.java"
+)
 
 plus_prefs = PREFS_PATH.read_text(encoding="utf-8")
 player = PLAYER_PATH.read_text(encoding="utf-8")
@@ -64,6 +68,9 @@ runtime_anchors = {
     "KEY_EXTERNAL_PLAYER_DIAGNOSTICS": "PlusPrefs.KEY_EXTERNAL_PLAYER_DIAGNOSTICS",
     "KEY_STREMIO_CONNECTOR_ENABLED": "mPlusPrefs.stremioConnectorEnabled",
     "KEY_NEXT_EPISODE_NOTICE_SECONDS": "mPlusPrefs.nextEpisodeNoticeSeconds",
+    "KEY_AI_SUBTITLES_ENABLED": "mPlusPrefs.aiSubtitlesEnabled",
+    "KEY_AI_SUBTITLE_BACKEND_URL": "mPlusPrefs.aiSubtitleBackendUrl",
+    "KEY_AI_SUBTITLE_TARGET_LANGUAGE": "mPlusPrefs.aiSubtitleTargetLanguage",
 }
 
 errors = []
@@ -145,6 +152,11 @@ runtime_regression_anchors = (
     "now, getStremioLaunchIdentity())",
     "metadata_resolution_started",
     "setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS)",
+    "if (mPlusPrefs.aiSubtitlesEnabled)",
+    "releaseAiSubtitleController();",
+    "aiSubtitleController.onTracksChanged();",
+    "SelectedSubtitleResolver.AI_ID_PREFIX",
+    "httpClient.dispatcher().cancelAll();",
 )
 for anchor in runtime_regression_anchors:
     if anchor not in external_java:
@@ -201,6 +213,20 @@ else:
     ):
         if test_name not in stremio_tests:
             errors.append(f"Missing Stremio metadata regression test: {test_name}")
+
+if not AI_TEST_PATH.exists():
+    errors.append("AI subtitle policy regression tests are missing")
+else:
+    ai_tests = AI_TEST_PATH.read_text(encoding="utf-8")
+    for test_name in (
+        "supportsOnlyExternalFirstVersionTextMimeTypes",
+        "localCacheFingerprintNormalizesLineEndingsAndIncludesLanguage",
+        "readyBackendResponseIsStrictlyValidated",
+        "backendAddressAllowsOnlyCredentialFreeHttpOrHttps",
+        "lateResultIsRejectedAfterDisableMovieChangeOrSourceChange",
+    ):
+        if test_name not in ai_tests:
+            errors.append(f"Missing AI subtitle regression test: {test_name}")
 
 # These binaries contain the protected Media3 renderer/audio path and extension decoders.
 # An intentional upstream refresh must review the playback regression matrix and update hashes.

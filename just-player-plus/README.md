@@ -28,6 +28,14 @@ Actual format support depends on the Android device, installed system decoders, 
 
 Stremio and other external players may supply subtitle tracks with the playback intent. JustPlayer Plus treats those tracks as candidates together with embedded subtitle tracks. The final track is chosen by the user's JustPlayer Plus language, forced-subtitle and source-preference rules.
 
+## Optional AI subtitle translation
+
+The disabled-by-default **AI subtitles** setting can manually translate the currently selected
+external SRT or WebVTT track into Czech. The app sends subtitle text only after confirmation to a
+user-operated backend, stores no provider API key, keeps all original tracks, and attaches the
+result as `Čeština (AI)` without changing the renderer path. The companion service and deployment
+instructions are in [`../ai-subtitle-backend`](../ai-subtitle-backend/README.md).
+
 ## Protected playback components
 
 Feature work in this fork must not modify these components as part of ordinary preference or track-selection changes:

@@ -104,6 +104,7 @@ import androidx.media3.ui.TimeBar;
 
 import com.brouken.player.dtpv.DoubleTapPlayerView;
 import com.brouken.player.dtpv.youtube.YouTubeOverlay;
+import com.brouken.player.aisubtitles.AiSubtitleController;
 import com.getkeepsafe.taptargetview.TapTarget;
 import com.getkeepsafe.taptargetview.TapTargetView;
 import com.google.android.material.snackbar.Snackbar;
@@ -191,6 +192,10 @@ public class PlayerActivity extends Activity {
     private ImageButton buttonAspectRatio;
     private ImageButton buttonRotation;
     private ImageButton exoSettings;
+    private ImageButton exoSubtitle;
+    private ImageButton aiSubtitleButton;
+    private LinearLayout dynamicControls;
+    private AiSubtitleController aiSubtitleController;
     private ImageButton exoPlayPause;
     private ProgressBar loadingProgressBar;
     private PlayerControlView controlView;
@@ -616,7 +621,7 @@ public class PlayerActivity extends Activity {
         playerView.setBrightnessControl(mBrightnessControl);
 
         final LinearLayout exoBasicControls = playerView.findViewById(R.id.exo_basic_controls);
-        final ImageButton exoSubtitle = exoBasicControls.findViewById(R.id.exo_subtitle);
+        exoSubtitle = exoBasicControls.findViewById(R.id.exo_subtitle);
         exoBasicControls.removeView(exoSubtitle);
 
         exoSettings = exoBasicControls.findViewById(R.id.exo_settings);
@@ -642,9 +647,13 @@ public class PlayerActivity extends Activity {
 
         final HorizontalScrollView horizontalScrollView = (HorizontalScrollView) getLayoutInflater().inflate(R.layout.controls, null);
         final LinearLayout controls = horizontalScrollView.findViewById(R.id.controls);
+        dynamicControls = controls;
 
         controls.addView(buttonOpen);
         controls.addView(exoSubtitle);
+        if (mPlusPrefs.aiSubtitlesEnabled) {
+            initializeAiSubtitleFeature();
+        }
         controls.addView(buttonAspectRatio);
         if (Utils.isPiPSupported(this) && buttonPiP != null) {
             controls.addView(buttonPiP);
@@ -788,6 +797,7 @@ public class PlayerActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        releaseAiSubtitleFeature(true);
         if (plusPreferences != null) {
             plusPreferences.unregisterOnSharedPreferenceChangeListener(plusPreferenceListener);
             plusPreferences = null;
@@ -1722,6 +1732,11 @@ public class PlayerActivity extends Activity {
         } else if (requestCode == REQUEST_SETTINGS) {
             mPrefs.loadUserPreferences();
             mPlusPrefs.reload();
+            if (mPlusPrefs.aiSubtitlesEnabled) {
+                initializeAiSubtitleFeature();
+            } else {
+                releaseAiSubtitleFeature(true);
+            }
             updateSubtitleStyle(this);
             updateExpectedEndTime();
         } else {
@@ -1778,6 +1793,7 @@ public class PlayerActivity extends Activity {
     }
 
     public void initializePlayer() {
+        releaseAiSubtitleController();
         if (frameRateSwitchThread != null) {
             frameRateSwitchThread.interrupt();
             frameRateSwitchThread = null;
@@ -2051,6 +2067,7 @@ public class PlayerActivity extends Activity {
     }
 
     public void releasePlayer(boolean save) {
+        releaseAiSubtitleController();
         cancelNextEpisodePopupMessage();
         trackMemoryArmed = false;
         trackSelectionChangePending = false;
@@ -2375,6 +2392,7 @@ public class PlayerActivity extends Activity {
                     }
                 }
             } else if (state == Player.STATE_ENDED) {
+                releaseAiSubtitleController();
                 if (nextEpisodeInfo != null) {
                     new StremioConnectorStore(PlayerActivity.this).expectEpisode(
                             nextEpisodeInfo.next, System.currentTimeMillis());
@@ -2392,6 +2410,11 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onTracksChanged(Tracks tracks) {
+            if (aiSubtitleController != null) {
+                aiSubtitleController.onTracksChanged();
+            } else {
+                updateAiSubtitleButtonState();
+            }
             if (trackSelectionChangePending) {
                 trackSelectionChangePending = false;
                 rememberManualTrackSelection(tracks);
@@ -3275,6 +3298,116 @@ public class PlayerActivity extends Activity {
             Utils.setButtonEnabled(this, exoSettings, true);
         } else {
             Utils.setButtonEnabled(this, exoSettings, enable);
+        }
+        updateAiSubtitleButtonState();
+    }
+
+    private void initializeAiSubtitleFeature() {
+        if (!mPlusPrefs.aiSubtitlesEnabled || dynamicControls == null
+                || exoSubtitle == null || aiSubtitleButton != null) {
+            return;
+        }
+        aiSubtitleButton = new ImageButton(
+                this, null, 0, R.style.ExoStyledControls_Button_Bottom);
+        aiSubtitleButton.setId(View.generateViewId());
+        aiSubtitleButton.setImageResource(R.drawable.ic_translate_24dp);
+        aiSubtitleButton.setContentDescription(getString(R.string.ai_subtitle_button));
+        aiSubtitleButton.setOnClickListener(view -> {
+            mPlusPrefs.reload();
+            if (!mPlusPrefs.aiSubtitlesEnabled) {
+                releaseAiSubtitleFeature(true);
+                return;
+            }
+            if (aiSubtitleController == null) {
+                aiSubtitleController = createAiSubtitleController();
+            }
+            aiSubtitleController.startTranslation();
+        });
+        int subtitleIndex = dynamicControls.indexOfChild(exoSubtitle);
+        dynamicControls.addView(aiSubtitleButton, Math.max(0, subtitleIndex + 1));
+        updateAiSubtitleButtonState();
+    }
+
+    private AiSubtitleController createAiSubtitleController() {
+        return new AiSubtitleController(new AiSubtitleController.Host() {
+            @Override
+            public Activity activity() {
+                return PlayerActivity.this;
+            }
+
+            @Override
+            public Player player() {
+                return PlayerActivity.player;
+            }
+
+            @Override
+            public int playerGeneration() {
+                return getPlayerGeneration();
+            }
+
+            @Override
+            public Uri mediaUri() {
+                return mPrefs.mediaUri;
+            }
+
+            @Override
+            public String mediaTitle() {
+                return apiTitle != null ? apiTitle
+                        : Utils.getFileName(PlayerActivity.this, mPrefs.mediaUri);
+            }
+
+            @Override
+            public boolean aiSubtitlesEnabled() {
+                mPlusPrefs.reload();
+                return mPlusPrefs.aiSubtitlesEnabled;
+            }
+
+            @Override
+            public String backendUrl() {
+                mPlusPrefs.reload();
+                return mPlusPrefs.aiSubtitleBackendUrl == null
+                        ? "" : mPlusPrefs.aiSubtitleBackendUrl;
+            }
+
+            @Override
+            public String targetLanguage() {
+                mPlusPrefs.reload();
+                return mPlusPrefs.aiSubtitleTargetLanguage == null
+                        || mPlusPrefs.aiSubtitleTargetLanguage.isEmpty()
+                        ? "ces" : mPlusPrefs.aiSubtitleTargetLanguage;
+            }
+        }, aiSubtitleButton);
+    }
+
+    private void updateAiSubtitleButtonState() {
+        if (aiSubtitleButton == null) {
+            return;
+        }
+        if (aiSubtitleController != null) {
+            aiSubtitleController.updateButtonState();
+            return;
+        }
+        boolean enabled = AiSubtitleController.isTranslationAvailable(player);
+        Utils.setButtonEnabled(this, aiSubtitleButton, enabled);
+        aiSubtitleButton.setAlpha(enabled ? 1f : 0.45f);
+    }
+
+    private void releaseAiSubtitleController() {
+        if (aiSubtitleController != null) {
+            aiSubtitleController.release();
+            aiSubtitleController = null;
+        }
+        updateAiSubtitleButtonState();
+    }
+
+    private void releaseAiSubtitleFeature(boolean removeButton) {
+        releaseAiSubtitleController();
+        if (removeButton && aiSubtitleButton != null) {
+            aiSubtitleButton.setOnClickListener(null);
+            if (dynamicControls != null) {
+                dynamicControls.removeView(aiSubtitleButton);
+            }
+            aiSubtitleButton = null;
         }
     }
 

@@ -1,5 +1,18 @@
 # JustPlayer Plus changelog
 
+## Step 19 — On-demand AI subtitle translation
+
+- Added a disabled-by-default, manually triggered AI translation branch for selected external
+  SRT and WebVTT tracks.
+- Added an isolated controller with lazy networking, strict player-session validation, immediate
+  cancellation and a private `cacheDir/ai_subtitles` cache.
+- Preserves every original subtitle configuration and selects the stable `plus-ai:<cacheKey>`
+  Czech SRT track after Media3 exposes it.
+- Added a standalone Gemini backend with cue parsing, stable IDs, bounded batches, response
+  validation, retries, asynchronous polling and disk caching.
+- Kept renderers, decoder priority, audio passthrough, tunneling, buffering and Dolby Vision
+  handling unchanged.
+
 ## Step 18 — Reliable Stremio title correlation and scrollable diagnostics
 
 - Stremio title lookup no longer depends on the caller package or `return_result`; those

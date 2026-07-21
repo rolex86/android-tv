@@ -50,6 +50,10 @@ class PlusPrefs {
     static final String KEY_STREMIO_CONNECTOR_ENABLED = "stremioConnectorEnabled";
     static final String KEY_NEXT_EPISODE_NOTICE_SECONDS = "nextEpisodeNoticeSeconds";
 
+    static final String KEY_AI_SUBTITLES_ENABLED = "aiSubtitlesEnabled";
+    static final String KEY_AI_SUBTITLE_BACKEND_URL = "aiSubtitleBackendUrl";
+    static final String KEY_AI_SUBTITLE_TARGET_LANGUAGE = "aiSubtitleTargetLanguage";
+
     private final SharedPreferences preferences;
 
     String audioLanguagePrimary;
@@ -85,6 +89,10 @@ class PlusPrefs {
     boolean externalPlayerDiagnostics;
     boolean stremioConnectorEnabled;
     int nextEpisodeNoticeSeconds;
+
+    boolean aiSubtitlesEnabled;
+    String aiSubtitleBackendUrl;
+    String aiSubtitleTargetLanguage;
 
     PlusPrefs(Context context) {
         preferences = PreferenceManager.getDefaultSharedPreferences(context);
@@ -137,6 +145,11 @@ class PlusPrefs {
                 KEY_STREMIO_CONNECTOR_ENABLED, false);
         nextEpisodeNoticeSeconds = Math.max(5, Math.min(90,
                 parseInt(KEY_NEXT_EPISODE_NOTICE_SECONDS, 30)));
+
+        aiSubtitlesEnabled = preferences.getBoolean(KEY_AI_SUBTITLES_ENABLED, false);
+        aiSubtitleBackendUrl = preferences.getString(KEY_AI_SUBTITLE_BACKEND_URL, "");
+        aiSubtitleTargetLanguage = preferences.getString(
+                KEY_AI_SUBTITLE_TARGET_LANGUAGE, "ces");
     }
 
     String[] getPreferredAudioLanguages() {

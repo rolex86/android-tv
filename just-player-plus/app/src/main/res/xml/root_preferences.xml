@@ -305,6 +305,40 @@
 
     </PreferenceCategory>
 
+    <PreferenceCategory app:title="@string/pref_ai_subtitles_header">
+
+        <SwitchPreferenceCompat
+            app:key="aiSubtitlesEnabled"
+            app:defaultValue="false"
+            app:summaryOn="@string/pref_ai_subtitles_enabled_on"
+            app:summaryOff="@string/pref_ai_subtitles_enabled_off"
+            app:title="@string/pref_ai_subtitles_enabled" />
+
+        <EditTextPreference
+            app:key="aiSubtitleBackendUrl"
+            app:defaultValue=""
+            app:dependency="aiSubtitlesEnabled"
+            app:dialogTitle="@string/pref_ai_subtitle_backend_url"
+            app:title="@string/pref_ai_subtitle_backend_url"
+            android:inputType="textUri" />
+
+        <ListPreference
+            app:key="aiSubtitleTargetLanguage"
+            app:defaultValue="ces"
+            app:dependency="aiSubtitlesEnabled"
+            app:entries="@array/plus_ai_subtitle_language_entries"
+            app:entryValues="@array/plus_ai_subtitle_language_values"
+            app:title="@string/pref_ai_subtitle_target_language"
+            app:useSimpleSummaryProvider="true" />
+
+        <Preference
+            app:key="aiSubtitleHttpWarning"
+            app:dependency="aiSubtitlesEnabled"
+            app:selectable="false"
+            app:summary="@string/pref_ai_subtitle_http_warning" />
+
+    </PreferenceCategory>
+
     <PreferenceCategory app:title="@string/pref_dangerous_header">
 
         <Preference
