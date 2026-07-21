@@ -138,6 +138,9 @@ public final class SelectedSubtitleResolver {
         if (selectedId != null && selectedId.equals(configurationId)) {
             return true;
         }
+        if (selectedId != null && selectedId.startsWith(EXTERNAL_ID_PREFIX)) {
+            return false;
+        }
         String normalizedSelectedLabel = normalizeText(selectedLabel);
         if (normalizedSelectedLabel.isEmpty()
                 || !normalizedSelectedLabel.equals(normalizeText(configurationLabel))) {
