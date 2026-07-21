@@ -23,6 +23,7 @@ AI_TEST_PATH = (
     ROOT / "just-player-plus" / "app" / "src" / "test" / "java"
     / "com" / "brouken" / "player" / "aisubtitles" / "AiSubtitlePolicyTest.java"
 )
+OPEN_SUBTITLES_TEST_PATH = TEST_PATH.with_name("OpenSubtitlesV3ClientTest.java")
 
 plus_prefs = PREFS_PATH.read_text(encoding="utf-8")
 player = PLAYER_PATH.read_text(encoding="utf-8")
@@ -157,6 +158,9 @@ runtime_regression_anchors = (
     "aiSubtitleController.onTracksChanged();",
     "SelectedSubtitleResolver.AI_ID_PREFIX",
     "cancelRemoteJob(jobId)",
+    "requestOpenSubtitlesV3(session, content);",
+    "finishOpenSubtitlesAttach(tracks);",
+    "OpenSubtitlesV3Client.TRACK_ID_PREFIX",
 )
 for anchor in runtime_regression_anchors:
     if anchor not in external_java:
@@ -228,6 +232,19 @@ else:
     ):
         if test_name not in ai_tests:
             errors.append(f"Missing AI subtitle regression test: {test_name}")
+
+if not OPEN_SUBTITLES_TEST_PATH.exists():
+    errors.append("OpenSubtitles v3 regression tests are missing")
+else:
+    opensubtitles_tests = OPEN_SUBTITLES_TEST_PATH.read_text(encoding="utf-8")
+    for test_name in (
+        "acceptsOnlyImdbMovieAndEpisodeIds",
+        "normalizesStremioAndIsoLanguageVariants",
+        "filtersDeduplicatesAndCapsPreferredLanguages",
+        "preservesForcedAndSdhHintsForSmartSelection",
+    ):
+        if test_name not in opensubtitles_tests:
+            errors.append(f"Missing OpenSubtitles v3 regression test: {test_name}")
 
 if preferences_xml.count('app:key="aiSubtitleApiToken"') != 1:
     errors.append("AI subtitle access token must occur exactly once in root_preferences.xml")

@@ -146,6 +146,13 @@ public class PlayerActivity extends Activity {
     private NextEpisodeMetadataResolver nextEpisodeMetadataResolver;
     private NextEpisodeOverlay nextEpisodeOverlay;
     private NextEpisodeInfo nextEpisodeInfo;
+    private OpenSubtitlesV3Client openSubtitlesV3Client;
+    private RememberedTrackStore.Selection openSubtitlesSelectionBeforeAttach;
+    private boolean openSubtitlesAttachPending;
+    private boolean openSubtitlesAudioExplicitBeforeAttach;
+    private boolean openSubtitlesSubtitleExplicitBeforeAttach;
+    private boolean openSubtitlesPersistAudioBeforeAttach;
+    private boolean openSubtitlesPersistSubtitleBeforeAttach;
     private int nextEpisodeSession;
     private boolean nextEpisodeDismissed;
     private boolean nextEpisodeShown;
@@ -809,7 +816,8 @@ public class PlayerActivity extends Activity {
     private void initializeNextEpisodeFeature() {
         if (nextEpisodeHttpClient != null
                 && nextEpisodeMetadataResolver != null
-                && nextEpisodeOverlay != null) {
+                && nextEpisodeOverlay != null
+                && openSubtitlesV3Client != null) {
             return;
         }
         mPlusPrefs.reload();
@@ -821,6 +829,7 @@ public class PlayerActivity extends Activity {
                 .readTimeout(10, TimeUnit.SECONDS)
                 .build();
         nextEpisodeMetadataResolver = new NextEpisodeMetadataResolver(nextEpisodeHttpClient);
+        openSubtitlesV3Client = new OpenSubtitlesV3Client(nextEpisodeHttpClient);
         nextEpisodeOverlay = new NextEpisodeOverlay(
                 coordinatorLayout, nextEpisodeHttpClient, new NextEpisodeOverlay.Listener() {
             @Override
@@ -841,6 +850,11 @@ public class PlayerActivity extends Activity {
             nextEpisodeOverlay.release();
             nextEpisodeOverlay = null;
         }
+        if (openSubtitlesV3Client != null) {
+            openSubtitlesV3Client.release();
+            openSubtitlesV3Client = null;
+        }
+        clearOpenSubtitlesAttachState();
         nextEpisodeMetadataResolver = null;
         if (nextEpisodeHttpClient != null) {
             nextEpisodeHttpClient.dispatcher().cancelAll();
@@ -898,6 +912,7 @@ public class PlayerActivity extends Activity {
             }
             externalDiagnostics.recordStremioConnector(
                     "metadata_content", content.type + "/" + content.id);
+            requestOpenSubtitlesV3(session, content);
             if (!content.isSeries()) {
                 NextEpisodeMetadataResolver resolver = nextEpisodeMetadataResolver;
                 if (resolver != null && isNextEpisodeFeatureEnabled()) {
@@ -922,6 +937,219 @@ public class PlayerActivity extends Activity {
         }
         return mPrefs.mediaUri == null
                 ? null : Utils.getFileName(this, mPrefs.mediaUri);
+    }
+
+    private void requestOpenSubtitlesV3(int session, StremioConnectorStore.Content content) {
+        OpenSubtitlesV3Client client = openSubtitlesV3Client;
+        if (client == null || playerView == null || !isExternalPlayerLaunch()
+                || !OpenSubtitlesV3Client.isSupportedContent(content.type, content.id)) {
+            return;
+        }
+        mPlusPrefs.reload();
+        String[] preferredLanguages = mPlusPrefs.getPreferredSubtitleLanguages();
+        if (preferredLanguages.length == 0) {
+            externalDiagnostics.recordStremioConnector(
+                    "opensubtitles_v3_skipped", "no preferred subtitle languages");
+            return;
+        }
+        externalDiagnostics.recordStremioConnector(
+                "opensubtitles_v3_started", content.type + "/" + content.id);
+        client.fetch(content.type, content.id, preferredLanguages,
+                new OpenSubtitlesV3Client.Listener() {
+                    @Override
+                    public void onLoaded(List<MediaItem.SubtitleConfiguration> subtitles) {
+                        if (playerView != null) {
+                            playerView.post(() -> acceptOpenSubtitlesV3(
+                                    session, content, subtitles));
+                        }
+                    }
+
+                    @Override
+                    public void onFailure(String reason) {
+                        if (playerView != null) {
+                            playerView.post(() -> {
+                                if (session == nextEpisodeSession && !isFinishing()) {
+                                    externalDiagnostics.recordStremioConnector(
+                                            "opensubtitles_v3_failed", reason);
+                                }
+                            });
+                        }
+                    }
+                });
+    }
+
+    private void acceptOpenSubtitlesV3(
+            int session,
+            StremioConnectorStore.Content content,
+            List<MediaItem.SubtitleConfiguration> subtitles) {
+        if (session != nextEpisodeSession || isFinishing()
+                || !isNextEpisodeFeatureEnabled()) {
+            return;
+        }
+        if (subtitles.isEmpty()) {
+            externalDiagnostics.recordStremioConnector(
+                    "opensubtitles_v3_empty", content.type + "/" + content.id);
+            return;
+        }
+
+        java.util.HashSet<String> knownIds = new java.util.HashSet<>();
+        for (MediaItem.SubtitleConfiguration existing : apiSubs) {
+            if (existing.id != null) {
+                knownIds.add(existing.id);
+            }
+        }
+        int added = 0;
+        for (MediaItem.SubtitleConfiguration subtitle : subtitles) {
+            if (subtitle.id != null && knownIds.add(subtitle.id)) {
+                apiSubs.add(subtitle);
+                added++;
+            }
+        }
+        externalDiagnostics.recordStremioConnector(
+                "opensubtitles_v3_loaded",
+                content.type + "/" + content.id + " added=" + added
+                        + " total=" + subtitles.size());
+        if (added == 0) {
+            return;
+        }
+        attachOpenSubtitlesV3(session, 0);
+    }
+
+    private void attachOpenSubtitlesV3(int session, int attempt) {
+        if (session != nextEpisodeSession || isFinishing()) {
+            return;
+        }
+        Player currentPlayer = player;
+        MediaItem mediaItem = currentPlayer == null ? null : currentPlayer.getCurrentMediaItem();
+        if (currentPlayer == null || mediaItem == null) {
+            if (attempt < 4 && playerView != null) {
+                playerView.postDelayed(() -> attachOpenSubtitlesV3(session, attempt + 1), 250L);
+            }
+            return;
+        }
+
+        List<MediaItem.SubtitleConfiguration> existing =
+                mediaItem.localConfiguration == null
+                        ? Collections.emptyList()
+                        : mediaItem.localConfiguration.subtitleConfigurations;
+        java.util.HashSet<String> knownIds = new java.util.HashSet<>();
+        List<MediaItem.SubtitleConfiguration> updated = new ArrayList<>(existing);
+        for (MediaItem.SubtitleConfiguration subtitle : existing) {
+            if (subtitle.id != null) {
+                knownIds.add(subtitle.id);
+            }
+        }
+        int added = 0;
+        for (MediaItem.SubtitleConfiguration subtitle : apiSubs) {
+            if (subtitle.id != null && knownIds.add(subtitle.id)) {
+                updated.add(subtitle);
+                added++;
+            }
+        }
+        if (added == 0) {
+            return;
+        }
+
+        boolean preserveSelections = currentPlayer.getPlaybackState() == Player.STATE_READY
+                || trackMemoryArmed;
+        if (preserveSelections) {
+            openSubtitlesSelectionBeforeAttach = RememberedTrackStore.capture(
+                    currentPlayer.getCurrentTracks(),
+                    currentPlayer.getTrackSelectionParameters(),
+                    !audioSelectionExplicit,
+                    !subtitleSelectionExplicit);
+            openSubtitlesAudioExplicitBeforeAttach = audioSelectionExplicit;
+            openSubtitlesSubtitleExplicitBeforeAttach = subtitleSelectionExplicit;
+            openSubtitlesPersistAudioBeforeAttach = persistAudioSelectionPerFile;
+            openSubtitlesPersistSubtitleBeforeAttach = persistSubtitleSelectionPerFile;
+            openSubtitlesAttachPending = true;
+            trackMemoryArmed = false;
+            trackSelectionChangePending = false;
+        } else {
+            clearOpenSubtitlesAttachState();
+        }
+
+        MediaItem updatedItem = mediaItem.buildUpon()
+                .setSubtitleConfigurations(updated)
+                .build();
+        currentPlayer.setMediaItem(updatedItem, false);
+        externalDiagnostics.recordStremioConnector(
+                "opensubtitles_v3_attached", "count=" + added);
+        if (openSubtitlesAttachPending && playerView != null) {
+            playerView.postDelayed(() -> {
+                if (session == nextEpisodeSession && player != null) {
+                    finishOpenSubtitlesAttach(player.getCurrentTracks());
+                }
+            }, 500L);
+        }
+    }
+
+    private void finishOpenSubtitlesAttach(Tracks tracks) {
+        if (!openSubtitlesAttachPending
+                || !OpenSubtitlesV3Client.hasOpenSubtitlesTrack(tracks)
+                || player == null) {
+            return;
+        }
+        RememberedTrackStore.Selection previous = openSubtitlesSelectionBeforeAttach;
+        boolean audioRestored = true;
+        boolean subtitleRestored = true;
+        openSubtitlesAttachPending = false;
+        openSubtitlesSelectionBeforeAttach = null;
+        trackSelectionChangePending = false;
+
+        if (previous != null) {
+            if (previous.audioAutomatic) {
+                applySmartAudioSelection();
+            } else {
+                audioRestored = applyRememberedAudioSelection(previous);
+                if (!audioRestored) {
+                    applySmartAudioSelection();
+                }
+            }
+            if (previous.subtitleAutomatic) {
+                applySmartSubtitleSelection();
+            } else {
+                subtitleRestored = applyRememberedSubtitleSelection(previous);
+                if (!subtitleRestored) {
+                    applySmartSubtitleSelection();
+                }
+            }
+        } else {
+            applySmartAudioSelection();
+            applySmartSubtitleSelection();
+        }
+
+        audioSelectionExplicit = openSubtitlesAudioExplicitBeforeAttach && audioRestored;
+        subtitleSelectionExplicit = openSubtitlesSubtitleExplicitBeforeAttach
+                && subtitleRestored;
+        persistAudioSelectionPerFile = openSubtitlesPersistAudioBeforeAttach
+                && audioRestored;
+        persistSubtitleSelectionPerFile = openSubtitlesPersistSubtitleBeforeAttach
+                && subtitleRestored;
+        armTrackMemory();
+
+        final int generation = playerGeneration;
+        if (playerView != null) {
+            playerView.postDelayed(() -> {
+                if (generation == playerGeneration && player != null) {
+                    externalDiagnostics.recordTracks(
+                            player,
+                            previous != null && !previous.audioAutomatic
+                                    ? "opensubtitles_preserved_manual" : "smart_audio_policy",
+                            previous != null && !previous.subtitleAutomatic
+                                    ? "opensubtitles_preserved_manual" : "smart_subtitle_policy");
+                }
+            }, 300L);
+        }
+    }
+
+    private void clearOpenSubtitlesAttachState() {
+        openSubtitlesAttachPending = false;
+        openSubtitlesSelectionBeforeAttach = null;
+        openSubtitlesAudioExplicitBeforeAttach = false;
+        openSubtitlesSubtitleExplicitBeforeAttach = false;
+        openSubtitlesPersistAudioBeforeAttach = false;
+        openSubtitlesPersistSubtitleBeforeAttach = false;
     }
 
     private void acceptMovieTitle(int session, String movieId, @Nullable String title) {
@@ -998,6 +1226,10 @@ public class PlayerActivity extends Activity {
 
     private void resetNextEpisodeSession() {
         nextEpisodeSession++;
+        if (openSubtitlesV3Client != null) {
+            openSubtitlesV3Client.cancel();
+        }
+        clearOpenSubtitlesAttachState();
         cancelNextEpisodePopupMessage();
         nextEpisodeInfo = null;
         nextEpisodeDismissed = false;
@@ -1794,6 +2026,7 @@ public class PlayerActivity extends Activity {
 
     public void initializePlayer() {
         releaseAiSubtitleController();
+        clearOpenSubtitlesAttachState();
         if (frameRateSwitchThread != null) {
             frameRateSwitchThread.interrupt();
             frameRateSwitchThread = null;
@@ -1966,7 +2199,7 @@ public class PlayerActivity extends Activity {
                         .build();
                 mediaItemBuilder.setMediaMetadata(mediaMetadata);
             }
-            if (apiAccess && apiSubs.size() > 0) {
+            if (isExternalPlayerLaunch() && apiSubs.size() > 0) {
                 mediaItemBuilder.setSubtitleConfigurations(apiSubs);
             } else if (mPrefs.subtitleUri != null && Utils.fileExists(this, mPrefs.subtitleUri)) {
                 MediaItem.SubtitleConfiguration subtitle = SubtitleUtils.buildSubtitle(this, mPrefs.subtitleUri, null, true);
@@ -2410,6 +2643,7 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onTracksChanged(Tracks tracks) {
+            finishOpenSubtitlesAttach(tracks);
             if (aiSubtitleController != null) {
                 aiSubtitleController.onTracksChanged();
             } else {
