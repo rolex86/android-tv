@@ -4,12 +4,17 @@
 
 - Added a disabled-by-default, manually triggered AI translation branch for selected external
   SRT and WebVTT tracks.
-- Added an isolated controller with lazy networking, strict player-session validation, immediate
-  cancellation and a private `cacheDir/ai_subtitles` cache.
+- Added an isolated controller with lazy networking, strict player-session validation and
+  best-effort server-side cancellation through `DELETE /v1/translations/{jobId}`.
+- Added optional Bearer-token authentication, specific authorization/request/size error messages
+  and bounded response validation.
+- The server owns model- and prompt-aware cache invalidation; the player only stores the validated
+  returned SRT by the server-provided cache key, preventing stale local translations after a model
+  change.
 - Preserves every original subtitle configuration and selects the stable `plus-ai:<cacheKey>`
-  Czech SRT track after Media3 exposes it.
-- Added a standalone Gemini backend with cue parsing, stable IDs, bounded batches, response
-  validation, retries, asynchronous polling and disk caching.
+  Czech SRT track after Media3 exposes it, without repeated progress toasts.
+- Uses the separately deployed **AI Subtitle Translator** Home Assistant add-on; no Gemini API key
+  is stored in the Android app.
 - Kept renderers, decoder priority, audio passthrough, tunneling, buffering and Dolby Vision
   handling unchanged.
 
