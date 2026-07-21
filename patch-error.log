@@ -1,17 +1,1 @@
-From https://github.com/rolex86/android-tv
- * branch            feature/ai-subtitles -> FETCH_HEAD
-Reset branch 'feature/ai-subtitles'
-M	patch-error.log
-branch 'feature/ai-subtitles' set up to track 'origin/feature/ai-subtitles'.
-Your branch is up to date with 'origin/feature/ai-subtitles'.
-Traceback (most recent call last):
-  File "/home/runner/work/android-tv/android-tv/.patches/apply_opensubtitles_v3.py", line 24, in <module>
-    CLIENT.write_text((ROOT / ".patches/OpenSubtitlesV3Client.java").read_text(encoding="utf-8"), encoding="utf-8")
-                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/lib/python3.12/pathlib.py", line 1029, in read_text
-    with self.open(mode='r', encoding=encoding, errors=errors) as f:
-         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/lib/python3.12/pathlib.py", line 1015, in open
-    return io.open(self, mode, buffering, encoding, errors, newline)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-FileNotFoundError: [Errno 2] No such file or directory: '/home/runner/work/android-tv/android-tv/.patches/OpenSubtitlesV3Client.java'
+OpenSubtitles attach selection state: expected one anchor, found 0
