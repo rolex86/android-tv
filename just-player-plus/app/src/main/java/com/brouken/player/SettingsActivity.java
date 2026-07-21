@@ -34,6 +34,8 @@ import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.SwitchPreferenceCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.brouken.player.aisubtitles.AiSubtitlePreferences;
+
 import java.text.Collator;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -235,10 +237,12 @@ public class SettingsActivity extends AppCompatActivity {
                     PlusPrefs.KEY_AI_SUBTITLES_ENABLED);
             EditTextPreference backend = findPreference(
                     PlusPrefs.KEY_AI_SUBTITLE_BACKEND_URL);
+            EditTextPreference apiToken = findPreference(AiSubtitlePreferences.KEY_API_TOKEN);
             Preference target = findPreference(
                     PlusPrefs.KEY_AI_SUBTITLE_TARGET_LANGUAGE);
             Preference httpWarning = findPreference("aiSubtitleHttpWarning");
-            if (enabled == null || backend == null || target == null || httpWarning == null) {
+            if (enabled == null || backend == null || apiToken == null
+                    || target == null || httpWarning == null) {
                 return;
             }
 
@@ -250,11 +254,17 @@ public class SettingsActivity extends AppCompatActivity {
                         ? getString(R.string.pref_ai_subtitle_backend_not_set)
                         : value.trim();
             });
+            apiToken.setOnBindEditTextListener(editText -> {
+                editText.setSingleLine(true);
+                editText.setInputType(InputType.TYPE_CLASS_TEXT
+                        | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            });
 
             Runnable refreshVisibility = () -> {
                 boolean isEnabled = enabled.isChecked();
                 String url = backend.getText();
                 backend.setVisible(isEnabled);
+                apiToken.setVisible(isEnabled);
                 target.setVisible(isEnabled);
                 httpWarning.setVisible(isEnabled && url != null
                         && url.trim().toLowerCase(Locale.ROOT).startsWith("http://"));
@@ -262,6 +272,7 @@ public class SettingsActivity extends AppCompatActivity {
             enabled.setOnPreferenceChangeListener((preference, newValue) -> {
                 boolean isEnabled = Boolean.TRUE.equals(newValue);
                 backend.setVisible(isEnabled);
+                apiToken.setVisible(isEnabled);
                 target.setVisible(isEnabled);
                 String url = backend.getText();
                 httpWarning.setVisible(isEnabled && url != null
