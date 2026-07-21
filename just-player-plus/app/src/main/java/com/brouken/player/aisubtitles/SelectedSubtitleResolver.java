@@ -6,7 +6,6 @@ import androidx.annotation.Nullable;
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
 import androidx.media3.common.MediaItem;
-import androidx.media3.common.MimeTypes;
 import androidx.media3.common.Player;
 import androidx.media3.common.TrackGroup;
 import androidx.media3.common.TrackSelectionOverride;
@@ -64,9 +63,6 @@ public final class SelectedSubtitleResolver {
         List<MediaItem.SubtitleConfiguration> configurations = subtitleConfigurations(
                 player.getCurrentMediaItem());
 
-        // A manual choice in Media3 is represented by a TrackSelectionOverride. This is more
-        // authoritative than Tracks.isTrackSelected(), which may briefly still expose an embedded
-        // or forced subtitle while the override already points at the external OpenSubtitles track.
         Resolution overrideResolution = resolveTextOverride(
                 player.getTrackSelectionParameters(), configurations);
         if (overrideResolution != null) {
@@ -120,18 +116,18 @@ public final class SelectedSubtitleResolver {
                 : parameters.overrides.entrySet()) {
             TrackGroup trackGroup = entry.getKey();
             TrackSelectionOverride override = entry.getValue();
+            if (override.getType() != C.TRACK_TYPE_TEXT) {
+                continue;
+            }
             for (int index : override.trackIndices) {
                 if (index < 0 || index >= trackGroup.length) {
                     continue;
                 }
                 Format format = trackGroup.getFormat(index);
-                if (MimeTypes.getTrackType(format.sampleMimeType) != C.TRACK_TYPE_TEXT) {
-                    continue;
-                }
                 MediaItem.SubtitleConfiguration configuration =
                         findExternalConfiguration(configurations, format);
                 if (configuration == null) {
-                    continue;
+                    return Resolution.failed(Issue.EMBEDDED);
                 }
                 return resolveConfiguration(
                         configuration,
@@ -158,7 +154,7 @@ public final class SelectedSubtitleResolver {
                     selectedFormat.language)) {
                 continue;
             }
-            if (selectedFormat.id != null && selectedFormat.id.equals(configuration.id)) {
+            if (SubtitleTrackIdentity.sameStableId(selectedFormat.id, configuration.id)) {
                 return configuration;
             }
             if (labelMatch != null) {
@@ -176,13 +172,13 @@ public final class SelectedSubtitleResolver {
             @Nullable String selectedId,
             @Nullable String selectedLabel,
             @Nullable String selectedLanguage) {
-        if (configurationId == null || !configurationId.startsWith(EXTERNAL_ID_PREFIX)) {
+        if (!SubtitleTrackIdentity.isExternal(configurationId)) {
             return false;
         }
-        if (selectedId != null && selectedId.equals(configurationId)) {
+        if (SubtitleTrackIdentity.sameStableId(selectedId, configurationId)) {
             return true;
         }
-        if (selectedId != null && selectedId.startsWith(EXTERNAL_ID_PREFIX)) {
+        if (SubtitleTrackIdentity.isExternal(selectedId)) {
             return false;
         }
         String normalizedSelectedLabel = normalizeText(selectedLabel);
@@ -211,7 +207,7 @@ public final class SelectedSubtitleResolver {
             return Resolution.failed(Issue.UNSUPPORTED_FORMAT);
         }
         return Resolution.ready(new AiSubtitleSource(
-                id,
+                SubtitleTrackIdentity.canonicalId(id),
                 label,
                 language,
                 mime,
