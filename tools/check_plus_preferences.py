@@ -156,7 +156,7 @@ runtime_regression_anchors = (
     "releaseAiSubtitleController();",
     "aiSubtitleController.onTracksChanged();",
     "SelectedSubtitleResolver.AI_ID_PREFIX",
-    "httpClient.dispatcher().cancelAll();",
+    "cancelRemoteJob(jobId)",
 )
 for anchor in runtime_regression_anchors:
     if anchor not in external_java:
@@ -220,13 +220,19 @@ else:
     ai_tests = AI_TEST_PATH.read_text(encoding="utf-8")
     for test_name in (
         "supportsOnlyExternalFirstVersionTextMimeTypes",
-        "localCacheFingerprintNormalizesLineEndingsAndIncludesLanguage",
         "readyBackendResponseIsStrictlyValidated",
         "backendAddressAllowsOnlyCredentialFreeHttpOrHttps",
+        "optionalAccessTokenRejectsHeaderInjectionAndUnreasonableLength",
+        "backendHttpErrorsMapToActionableFailures",
         "lateResultIsRejectedAfterDisableMovieChangeOrSourceChange",
     ):
         if test_name not in ai_tests:
             errors.append(f"Missing AI subtitle regression test: {test_name}")
+
+if preferences_xml.count('app:key="aiSubtitleApiToken"') != 1:
+    errors.append("AI subtitle access token must occur exactly once in root_preferences.xml")
+if "AiSubtitlePreferences.KEY_API_TOKEN" not in external_java:
+    errors.append("AI subtitle access token has no runtime hook")
 
 # These binaries contain the protected Media3 renderer/audio path and extension decoders.
 # An intentional upstream refresh must review the playback regression matrix and update hashes.
