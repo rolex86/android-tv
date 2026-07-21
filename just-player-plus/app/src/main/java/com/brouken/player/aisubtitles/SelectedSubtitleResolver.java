@@ -6,13 +6,17 @@ import androidx.annotation.Nullable;
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
 import androidx.media3.common.MediaItem;
+import androidx.media3.common.MimeTypes;
 import androidx.media3.common.Player;
 import androidx.media3.common.TrackGroup;
+import androidx.media3.common.TrackSelectionOverride;
+import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 
 /** Resolves the selected text track and maps it back to its external source URI. */
@@ -59,9 +63,18 @@ public final class SelectedSubtitleResolver {
         }
         List<MediaItem.SubtitleConfiguration> configurations = subtitleConfigurations(
                 player.getCurrentMediaItem());
+
+        // A manual choice in Media3 is represented by a TrackSelectionOverride. This is more
+        // authoritative than Tracks.isTrackSelected(), which may briefly still expose an embedded
+        // or forced subtitle while the override already points at the external OpenSubtitles track.
+        Resolution overrideResolution = resolveTextOverride(
+                player.getTrackSelectionParameters(), configurations);
+        if (overrideResolution != null) {
+            return overrideResolution;
+        }
+
         boolean selectedEmbeddedTrackSeen = false;
         Issue externalFailure = null;
-
         for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
             if (group.getType() != C.TRACK_TYPE_TEXT) {
                 continue;
@@ -97,6 +110,37 @@ public final class SelectedSubtitleResolver {
             return Resolution.failed(Issue.EMBEDDED);
         }
         return Resolution.failed(Issue.NONE_SELECTED);
+    }
+
+    @Nullable
+    private static Resolution resolveTextOverride(
+            TrackSelectionParameters parameters,
+            List<MediaItem.SubtitleConfiguration> configurations) {
+        for (Map.Entry<TrackGroup, TrackSelectionOverride> entry
+                : parameters.overrides.entrySet()) {
+            TrackGroup trackGroup = entry.getKey();
+            TrackSelectionOverride override = entry.getValue();
+            for (int index : override.trackIndices) {
+                if (index < 0 || index >= trackGroup.length) {
+                    continue;
+                }
+                Format format = trackGroup.getFormat(index);
+                if (MimeTypes.getTrackType(format.sampleMimeType) != C.TRACK_TYPE_TEXT) {
+                    continue;
+                }
+                MediaItem.SubtitleConfiguration configuration =
+                        findExternalConfiguration(configurations, format);
+                if (configuration == null) {
+                    continue;
+                }
+                return resolveConfiguration(
+                        configuration,
+                        configuration.id,
+                        format.label != null ? format.label : configuration.label,
+                        format.language != null ? format.language : configuration.language);
+            }
+        }
+        return null;
     }
 
     @Nullable
