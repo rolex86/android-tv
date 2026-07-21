@@ -11,6 +11,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.Call;
@@ -23,16 +24,26 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
-/** Implements the fixed JustPlayer Plus translation API, including bounded polling. */
+/** Implements the JustPlayer Plus translation API, including auth, polling and cancellation. */
 public final class AiSubtitleBackendClient {
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
     static final long POLL_INTERVAL_MS = 2_000L;
     static final long MAX_POLL_DURATION_MS = TimeUnit.MINUTES.toMillis(5L);
     private static final int MAX_RESPONSE_BYTES = 3 * 1024 * 1024;
+    private static final int MAX_TOKEN_LENGTH = 4096;
+    private static final int MAX_LABEL_LENGTH = 120;
+    private static final OkHttpClient CANCELLATION_CLIENT = new OkHttpClient.Builder()
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.SECONDS)
+            .writeTimeout(5, TimeUnit.SECONDS)
+            .build();
 
     public enum Failure {
         TIMEOUT,
         UNAVAILABLE,
+        UNAUTHORIZED,
+        INVALID_REQUEST,
+        TOO_LARGE,
         TRANSLATION_FAILED
     }
 
@@ -44,22 +55,37 @@ public final class AiSubtitleBackendClient {
 
     private final OkHttpClient httpClient;
     private final HttpUrl baseUrl;
+    private final String apiToken;
     private final Handler handler = new Handler(Looper.getMainLooper());
     @Nullable private Call activeCall;
     @Nullable private Listener listener;
     @Nullable private String targetLanguage;
+    @Nullable private String activeJobId;
     private long deadlineMs;
     private long operationToken;
+    private int lastProgress = -1;
     private boolean released;
 
-    public AiSubtitleBackendClient(OkHttpClient httpClient, String backendUrl) {
+    public AiSubtitleBackendClient(OkHttpClient httpClient,
+                                   String backendUrl,
+                                   @Nullable String apiToken) {
         this.httpClient = httpClient;
         this.baseUrl = requireBaseUrl(backendUrl);
+        this.apiToken = normalizeApiToken(apiToken);
     }
 
     public static boolean isValidBackendUrl(@Nullable String value) {
         try {
             requireBaseUrl(value);
+            return true;
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
+    }
+
+    public static boolean isValidApiToken(@Nullable String value) {
+        try {
+            normalizeApiToken(value);
             return true;
         } catch (IllegalArgumentException ignored) {
             return false;
@@ -75,6 +101,7 @@ public final class AiSubtitleBackendClient {
         this.listener = listener;
         targetLanguage = job.targetLanguage;
         deadlineMs = SystemClock.elapsedRealtime() + MAX_POLL_DURATION_MS;
+        lastProgress = -1;
 
         JSONObject body = new JSONObject();
         try {
@@ -94,14 +121,13 @@ public final class AiSubtitleBackendClient {
             return;
         }
 
-        Request request = new Request.Builder()
+        Request.Builder builder = new Request.Builder()
                 .url(endpoint("v1", "translations"))
-                .post(RequestBody.create(body.toString(), JSON))
-                .header("Accept", "application/json")
-                .build();
-        execute(request, true, token);
+                .post(RequestBody.create(body.toString(), JSON));
+        execute(withCommonHeaders(builder).build(), true, token);
     }
 
+    /** Cancels locally and asks the backend to abort a submitted job when possible. */
     public void cancel() {
         operationToken++;
         handler.removeCallbacksAndMessages(null);
@@ -109,44 +135,56 @@ public final class AiSubtitleBackendClient {
             activeCall.cancel();
             activeCall = null;
         }
+        String jobId = activeJobId;
+        activeJobId = null;
         listener = null;
         targetLanguage = null;
+        lastProgress = -1;
+        if (jobId != null) {
+            cancelRemoteJob(jobId);
+        }
     }
 
     public void release() {
-        released = true;
+        if (released) {
+            return;
+        }
         cancel();
+        released = true;
     }
 
     private void execute(Request request, boolean initial, long token) {
         if (!isCurrent(token)) {
             return;
         }
-        activeCall = httpClient.newCall(request);
-        activeCall.enqueue(new Callback() {
+        Call call = httpClient.newCall(request);
+        activeCall = call;
+        call.enqueue(new Callback() {
             @Override
-            public void onFailure(@NonNull Call call, @NonNull IOException error) {
+            public void onFailure(@NonNull Call failedCall, @NonNull IOException error) {
                 handler.post(() -> {
-                    if (!call.isCanceled()) {
+                    if (!failedCall.isCanceled()) {
                         fail(token, Failure.UNAVAILABLE, null);
                     }
                 });
             }
 
             @Override
-            public void onResponse(@NonNull Call call, @NonNull Response response) {
+            public void onResponse(@NonNull Call responseCall, @NonNull Response response) {
                 try (Response closeable = response) {
+                    int code = closeable.code();
+                    Failure httpFailure = mapHttpFailure(code, initial);
+                    if (httpFailure != null) {
+                        handler.post(() -> fail(token, httpFailure, null));
+                        return;
+                    }
                     ResponseBody responseBody = closeable.body();
-                    if (responseBody == null
-                            || responseBody.contentLength() > MAX_RESPONSE_BYTES
-                            || initial && closeable.code() != 200 && closeable.code() != 202
-                            || !initial && closeable.code() != 200) {
-                        handler.post(() -> fail(token, Failure.UNAVAILABLE, null));
+                    if (responseBody == null || responseBody.contentLength() > MAX_RESPONSE_BYTES) {
+                        handler.post(() -> fail(token, Failure.TRANSLATION_FAILED, null));
                         return;
                     }
                     String json = responseBody.string();
-                    if (json.getBytes(java.nio.charset.StandardCharsets.UTF_8).length
-                            > MAX_RESPONSE_BYTES) {
+                    if (json.getBytes(StandardCharsets.UTF_8).length > MAX_RESPONSE_BYTES) {
                         handler.post(() -> fail(token, Failure.TRANSLATION_FAILED, null));
                         return;
                     }
@@ -171,23 +209,37 @@ public final class AiSubtitleBackendClient {
                 return;
             }
             Listener callback = listener;
-            listener = null;
+            clearCompletedState();
             callback.onReady(result);
             return;
         }
         if ("failed".equals(status)) {
-            fail(token, Failure.TRANSLATION_FAILED, payload.optString("message", null));
+            String errorCode = payload.optString("errorCode", "");
+            Failure failure = "TRANSLATION_TIMEOUT".equals(errorCode)
+                    ? Failure.TIMEOUT : Failure.TRANSLATION_FAILED;
+            fail(token, failure, payload.optString("message", null));
+            return;
+        }
+        if ("cancelled".equals(status)) {
+            fail(token, Failure.TRANSLATION_FAILED, null);
             return;
         }
         if (!"pending".equals(status)) {
             fail(token, Failure.TRANSLATION_FAILED, null);
             return;
         }
-        listener.onProgress(Math.max(0, Math.min(100, payload.optInt("progress", 0))));
+
         String jobId = payload.optString("jobId", "").trim();
-        if (jobId.isEmpty() || SystemClock.elapsedRealtime() >= deadlineMs) {
+        if (!jobId.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+                || SystemClock.elapsedRealtime() >= deadlineMs) {
             fail(token, Failure.TIMEOUT, null);
             return;
+        }
+        activeJobId = jobId;
+        int progress = Math.max(0, Math.min(100, payload.optInt("progress", 0)));
+        if (progress != lastProgress) {
+            lastProgress = progress;
+            listener.onProgress(progress);
         }
         handler.postDelayed(() -> poll(token, jobId), POLL_INTERVAL_MS);
     }
@@ -200,12 +252,35 @@ public final class AiSubtitleBackendClient {
             fail(token, Failure.TIMEOUT, null);
             return;
         }
-        Request request = new Request.Builder()
+        Request.Builder builder = new Request.Builder()
                 .url(endpoint("v1", "translations", jobId))
-                .get()
-                .header("Accept", "application/json")
-                .build();
-        execute(request, false, token);
+                .get();
+        execute(withCommonHeaders(builder).build(), false, token);
+    }
+
+    private void cancelRemoteJob(String jobId) {
+        Request.Builder builder = new Request.Builder()
+                .url(endpoint("v1", "translations", jobId))
+                .delete();
+        CANCELLATION_CLIENT.newCall(withCommonHeaders(builder).build()).enqueue(new Callback() {
+            @Override
+            public void onFailure(@NonNull Call call, @NonNull IOException error) {
+                // Best effort only. The local operation is already cancelled.
+            }
+
+            @Override
+            public void onResponse(@NonNull Call call, @NonNull Response response) {
+                response.close();
+            }
+        });
+    }
+
+    private Request.Builder withCommonHeaders(Request.Builder builder) {
+        builder.header("Accept", "application/json");
+        if (!apiToken.isEmpty()) {
+            builder.header("Authorization", "Bearer " + apiToken);
+        }
+        return builder;
     }
 
     private void fail(long token, Failure failure, @Nullable String message) {
@@ -213,8 +288,21 @@ public final class AiSubtitleBackendClient {
             return;
         }
         Listener callback = listener;
-        cancel();
+        String jobId = activeJobId;
+        clearCompletedState();
+        if (jobId != null) {
+            cancelRemoteJob(jobId);
+        }
         callback.onFailure(failure, message);
+    }
+
+    private void clearCompletedState() {
+        handler.removeCallbacksAndMessages(null);
+        activeCall = null;
+        listener = null;
+        targetLanguage = null;
+        activeJobId = null;
+        lastProgress = -1;
     }
 
     private boolean isCurrent(long token) {
@@ -229,6 +317,26 @@ public final class AiSubtitleBackendClient {
         return builder.build();
     }
 
+    @Nullable
+    static Failure mapHttpFailure(int statusCode, boolean initial) {
+        if (statusCode == 401 || statusCode == 403) {
+            return Failure.UNAUTHORIZED;
+        }
+        if (statusCode == 413) {
+            return Failure.TOO_LARGE;
+        }
+        if (statusCode == 400 || statusCode == 422) {
+            return Failure.INVALID_REQUEST;
+        }
+        if (statusCode >= 500) {
+            return Failure.UNAVAILABLE;
+        }
+        if (initial ? statusCode != 200 && statusCode != 202 : statusCode != 200) {
+            return Failure.TRANSLATION_FAILED;
+        }
+        return null;
+    }
+
     private static HttpUrl requireBaseUrl(@Nullable String value) {
         if (value == null || value.trim().isEmpty()) {
             throw new IllegalArgumentException("Empty backend URL");
@@ -241,10 +349,20 @@ public final class AiSubtitleBackendClient {
         }
         if (!("http".equals(url.scheme()) || "https".equals(url.scheme()))
                 || !url.username().isEmpty() || !url.password().isEmpty()
-                || url.query() != null || url.fragment() != null) {
+                || url.query() != null || url.fragment() != null
+                || !(url.encodedPath().isEmpty() || "/".equals(url.encodedPath()))) {
             throw new IllegalArgumentException("Unsupported backend URL");
         }
-        return url;
+        return url.newBuilder().encodedPath("/").build();
+    }
+
+    private static String normalizeApiToken(@Nullable String value) {
+        String token = value == null ? "" : value.trim();
+        if (token.length() > MAX_TOKEN_LENGTH
+                || token.indexOf('\r') >= 0 || token.indexOf('\n') >= 0) {
+            throw new IllegalArgumentException("Invalid API token");
+        }
+        return token;
     }
 
     @Nullable
@@ -257,8 +375,10 @@ public final class AiSubtitleBackendClient {
         if (!cacheKey.matches("[A-Za-z0-9_-]{8,128}")
                 || !"srt".equals(outputFormat)
                 || targetLanguage == null || !targetLanguage.equals(language)
-                || label.isEmpty() || subtitleText.trim().isEmpty()
-                || subtitleText.getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+                || label.isEmpty() || label.length() > MAX_LABEL_LENGTH
+                || label.indexOf('\r') >= 0 || label.indexOf('\n') >= 0
+                || subtitleText.trim().isEmpty() || !subtitleText.contains(" --> ")
+                || subtitleText.getBytes(StandardCharsets.UTF_8).length
                 > AiSubtitleSourceLoader.MAX_INPUT_BYTES) {
             return null;
         }
