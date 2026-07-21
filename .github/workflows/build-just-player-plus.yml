@@ -37,7 +37,16 @@ jobs:
         working-directory: .
         run: |
           set -euo pipefail
-          python3 .patches/apply_opensubtitles_v3.py
+          if ! python3 .patches/apply_opensubtitles_v3.py > patch-error.log 2>&1; then
+            cat patch-error.log
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -f patch-error.log
+            git commit -m "Record OpenSubtitles patch error"
+            git push origin HEAD:feature/ai-subtitles
+            exit 1
+          fi
+          rm -f patch-error.log
           rm -rf .patches
           rm -f .github/workflows/apply-opensubtitles-v3.yml
           git config user.name "github-actions[bot]"
