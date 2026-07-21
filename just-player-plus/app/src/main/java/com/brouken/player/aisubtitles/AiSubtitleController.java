@@ -112,6 +112,12 @@ public final class AiSubtitleController {
             show(R.string.ai_subtitle_backend_invalid);
             return;
         }
+        String apiToken = AiSubtitlePreferences.readApiToken(
+                currentHost.activity()).trim();
+        if (!AiSubtitleBackendClient.isValidApiToken(apiToken)) {
+            show(R.string.pref_ai_subtitle_token_invalid);
+            return;
+        }
         AiSubtitleSource source = resolution.source;
         if (source == null) {
             return;
@@ -125,7 +131,8 @@ public final class AiSubtitleController {
                         activity.getString(R.string.ai_subtitle_target_czech)))
                 .setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton(R.string.ai_subtitle_translate,
-                        (dialog, which) -> beginConfirmedTranslation(source, backendUrl))
+                        (dialog, which) -> beginConfirmedTranslation(
+                                source, backendUrl, apiToken))
                 .create();
         confirmationDialog.setOnDismissListener(dialog -> confirmationDialog = null);
         confirmationDialog.show();
@@ -181,7 +188,9 @@ public final class AiSubtitleController {
         host = null;
     }
 
-    private void beginConfirmedTranslation(AiSubtitleSource source, String backendUrl) {
+    private void beginConfirmedTranslation(AiSubtitleSource source,
+                                               String backendUrl,
+                                               String apiToken) {
         Host currentHost = host;
         if (released || currentHost == null || !currentHost.aiSubtitlesEnabled()) {
             return;
@@ -203,7 +212,7 @@ public final class AiSubtitleController {
         updateButtonState();
         show(R.string.ai_subtitle_translating);
 
-        ensureWorkers(backendUrl);
+        ensureWorkers(backendUrl, apiToken);
         ExecutorService currentExecutor = executor;
         OkHttpClient currentHttpClient = httpClient;
         Session session = activeSession;
@@ -216,19 +225,10 @@ public final class AiSubtitleController {
             try {
                 String subtitleText = new AiSubtitleSourceLoader(
                         applicationContext, currentHttpClient).load(source);
-                String fingerprint = AiSubtitleFileStore.sourceFingerprint(
-                        subtitleText, session.targetLanguage);
                 AiSubtitleFileStore store = new AiSubtitleFileStore(applicationContext);
-                AiSubtitleFileStore.StoredSubtitle cached = store.find(
-                        fingerprint, session.targetLanguage);
                 mainHandler.post(() -> {
-                    if (!isSessionCurrent(session)) {
-                        return;
-                    }
-                    if (cached != null) {
-                        attachSubtitle(session, cached);
-                    } else {
-                        requestTranslation(session, source, subtitleText, fingerprint, store);
+                    if (isSessionCurrent(session)) {
+                        requestTranslation(session, source, subtitleText, store);
                     }
                 });
             } catch (AiSubtitleSourceLoader.LoadException error) {
@@ -246,7 +246,6 @@ public final class AiSubtitleController {
     private void requestTranslation(Session session,
                                     AiSubtitleSource source,
                                     String subtitleText,
-                                    String fingerprint,
                                     AiSubtitleFileStore store) {
         Host currentHost = host;
         AiSubtitleBackendClient currentBackend = backendClient;
@@ -267,9 +266,8 @@ public final class AiSubtitleController {
         currentBackend.start(job, new AiSubtitleBackendClient.Listener() {
             @Override
             public void onProgress(int progress) {
-                if (isSessionCurrent(session) && progress > 0) {
-                    show(R.string.ai_subtitle_progress, progress);
-                }
+                // The translation button remains disabled while work is in progress.
+                // Avoid a new TV toast on every polling response.
             }
 
             @Override
@@ -279,8 +277,7 @@ public final class AiSubtitleController {
                 }
                 executor.execute(() -> {
                     try {
-                        AiSubtitleFileStore.StoredSubtitle stored =
-                                store.store(fingerprint, result);
+                        AiSubtitleFileStore.StoredSubtitle stored = store.store(result);
                         mainHandler.post(() -> attachSubtitle(session, stored));
                     } catch (IOException error) {
                         mainHandler.post(() -> failSession(
@@ -296,6 +293,12 @@ public final class AiSubtitleController {
                         ? R.string.ai_subtitle_timeout
                         : failure == AiSubtitleBackendClient.Failure.UNAVAILABLE
                         ? R.string.ai_subtitle_service_unavailable
+                        : failure == AiSubtitleBackendClient.Failure.UNAUTHORIZED
+                        ? R.string.ai_subtitle_unauthorized
+                        : failure == AiSubtitleBackendClient.Failure.TOO_LARGE
+                        ? R.string.ai_subtitle_too_large
+                        : failure == AiSubtitleBackendClient.Failure.INVALID_REQUEST
+                        ? R.string.ai_subtitle_invalid_request
                         : R.string.ai_subtitle_failed;
                 failSession(session, errorMessage);
             }
@@ -371,7 +374,7 @@ public final class AiSubtitleController {
         }
     }
 
-    private void ensureWorkers(String backendUrl) {
+    private void ensureWorkers(String backendUrl, String apiToken) {
         if (executor == null) {
             executor = Executors.newSingleThreadExecutor();
         }
@@ -382,9 +385,10 @@ public final class AiSubtitleController {
                     .writeTimeout(30, TimeUnit.SECONDS)
                     .build();
         }
-        if (backendClient == null) {
-            backendClient = new AiSubtitleBackendClient(httpClient, backendUrl);
+        if (backendClient != null) {
+            backendClient.release();
         }
+        backendClient = new AiSubtitleBackendClient(httpClient, backendUrl, apiToken);
     }
 
     private void cancelCurrentOperation() {
