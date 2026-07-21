@@ -134,6 +134,11 @@
     <string name="pref_ai_subtitles_enabled_on">Allows manually translating the selected external subtitle track.</string>
     <string name="pref_ai_subtitle_backend_url">Translation service address</string>
     <string name="pref_ai_subtitle_backend_not_set">Not configured</string>
+    <string name="pref_ai_subtitle_api_token">Access token (optional)</string>
+    <string name="pref_ai_subtitle_api_token_summary">Leave blank unless the add-on access token is enabled. The saved value is not displayed.</string>
+    <string name="pref_ai_subtitle_token_invalid">The access token contains invalid characters.</string>
+    <string name="ai_subtitle_unauthorized">The translation service rejected the access token.</string>
+    <string name="ai_subtitle_invalid_request">The translation service rejected the subtitle request.</string>
     <string name="pref_ai_subtitle_target_language">Target language</string>
     <string name="pref_ai_subtitle_http_warning">Unencrypted HTTP should only be used with a trusted home-network service. Provider API keys belong on the server and are never stored by the app.</string>
     <string name="ai_subtitle_button">Translate subtitles with AI</string>
