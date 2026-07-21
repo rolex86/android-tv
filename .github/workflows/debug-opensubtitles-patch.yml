@@ -1,4 +1,4 @@
-name: Debug OpenSubtitles patch
+name: Apply OpenSubtitles v3 source patch
 
 on:
   pull_request:
@@ -6,26 +6,27 @@ on:
       - .github/workflows/debug-opensubtitles-patch.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  debug:
+  apply:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/ai-subtitles
-      - name: Run patch and capture output
+      - name: Generate and publish source changes
         run: |
-          set +e
-          python3 .patches/apply_opensubtitles_v3.py > patch-error.log 2>&1
-          echo $? > patch-status.txt
-          cat patch-error.log
-      - name: Upload patch diagnostics
-        uses: actions/upload-artifact@v4
-        with:
-          name: opensubtitles-patch-debug
-          path: |
-            patch-error.log
-            patch-status.txt
-          if-no-files-found: error
+          set -euo pipefail
+          python3 .patches/apply_opensubtitles_v3.py
+          git checkout -- .github/workflows/build-just-player-plus.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            just-player-plus/app/build.gradle \
+            just-player-plus/app/src/main/java/com/brouken/player/PlayerActivity.java \
+            just-player-plus/app/src/main/java/com/brouken/player/OpenSubtitlesV3Client.java \
+            just-player-plus/app/src/test/java/com/brouken/player/OpenSubtitlesV3ClientTest.java \
+            tools/check_plus_preferences.py
+          git commit -m "Add direct OpenSubtitles v3 subtitle loading"
+          git push origin HEAD:feature/ai-subtitles
