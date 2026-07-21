@@ -21,6 +21,7 @@ import androidx.media3.common.MediaItem;
 import androidx.media3.common.Player;
 import androidx.media3.common.TrackGroup;
 import androidx.media3.common.TrackSelectionOverride;
+import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
 
 import com.brouken.player.BuildConfig;
@@ -87,7 +88,14 @@ public final class AiSubtitleController {
     @Nullable private AiSubtitleBackendClient backendClient;
     @Nullable private String pendingAiSubtitleId;
     @Nullable private Session activeSession;
+    @Nullable private Player observedPlayer;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final Player.Listener trackSelectionListener = new Player.Listener() {
+        @Override
+        public void onTrackSelectionParametersChanged(TrackSelectionParameters parameters) {
+            mainHandler.post(AiSubtitleController.this::updateButtonState);
+        }
+    };
     private long operationToken;
     private boolean released;
     private boolean translating;
@@ -96,6 +104,10 @@ public final class AiSubtitleController {
     public AiSubtitleController(Host host, ImageButton button) {
         this.host = host;
         this.button = button;
+        observedPlayer = host.player();
+        if (observedPlayer != null) {
+            observedPlayer.addListener(trackSelectionListener);
+        }
         updateButtonState();
     }
 
@@ -178,6 +190,10 @@ public final class AiSubtitleController {
         translating = false;
         activeSession = null;
         pendingAiSubtitleId = null;
+        if (observedPlayer != null) {
+            observedPlayer.removeListener(trackSelectionListener);
+            observedPlayer = null;
+        }
         mainHandler.removeCallbacksAndMessages(null);
         if (confirmationDialog != null) {
             confirmationDialog.dismiss();
