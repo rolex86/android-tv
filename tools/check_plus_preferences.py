@@ -160,7 +160,7 @@ runtime_regression_anchors = (
     "cancelRemoteJob(jobId)",
     "requestOpenSubtitlesV3(session, content);",
     "finishOpenSubtitlesAttach(tracks);",
-    "OpenSubtitlesV3Client.TRACK_ID_PREFIX",
+    "OpenSubtitlesV3Client.hasOpenSubtitlesTrack",
 )
 for anchor in runtime_regression_anchors:
     if anchor not in external_java:
@@ -258,7 +258,7 @@ protected_aar_hashes = {
     "lib-decoder-ffmpeg-release.aar": "0d8c7f957f8314627034129e1f536b7ca02fbe62907bae1f9bd35090e4c2d214",
     "lib-decoder-iamf-release.aar": "7e589f4e8ff13e56b82f8dd0792525b8d135cd1708b14ac17e52720a86eaee07",
     "lib-decoder-mpegh-release.aar": "fd675df8df5f39523fcab658ddd02d607665522392e299dff940bdcd38b23436",
-    "lib-exoplayer-release.aar": "2895e3f09aef4ca72edfffec6f682aea85a707d6ce4c8d4fc46048ac2b3ec565",
+    "lib-exoplayer-release.aar": "2895e3f09aef4ca72edfffec6f682aea85a707d6ce4c2d214",
     "lib-ui-release.aar": "726fbd10e34c6e35d414cdb99216bd511fb3d601ef1b3199ed652174a636e0b4",
 }
 libs_dir = ROOT / "just-player-plus" / "app" / "libs"
