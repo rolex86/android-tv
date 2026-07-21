@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 PLAYER = ROOT / "just-player-plus/app/src/main/java/com/brouken/player/PlayerActivity.java"
@@ -9,6 +10,10 @@ AUDIT = ROOT / "tools/check_plus_preferences.py"
 GRADLE = ROOT / "just-player-plus/app/build.gradle"
 MARKER = ROOT / ".patches/run-opensubtitles-v3"
 BUILD_WORKFLOW = ROOT / ".github/workflows/build-just-player-plus.yml"
+
+subprocess.run(["git", "fetch", "origin", "feature/ai-subtitles"], check=True)
+subprocess.run(["git", "checkout", "-B", "feature/ai-subtitles",
+                "origin/feature/ai-subtitles"], check=True)
 
 def replace_once(text, old, new, label):
     count = text.count(old)
