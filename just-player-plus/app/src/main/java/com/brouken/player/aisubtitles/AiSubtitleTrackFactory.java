@@ -15,7 +15,7 @@ public final class AiSubtitleTrackFactory {
         return new MediaItem.SubtitleConfiguration.Builder(subtitle.uri)
                 .setId(SelectedSubtitleResolver.AI_ID_PREFIX + subtitle.cacheKey)
                 .setLanguage(subtitle.language)
-                .setLabel(CZECH_AI_LABEL)
+                .setLabel(subtitle.label)
                 .setMimeType("application/x-subrip")
                 .setRoleFlags(C.ROLE_FLAG_SUBTITLE)
                 .build();
