@@ -28,6 +28,18 @@ Actual format support depends on the Android device, installed system decoders, 
 
 Stremio and other external players may supply subtitle tracks with the playback intent. JustPlayer Plus treats those tracks as candidates together with embedded subtitle tracks. The final track is chosen by the user's JustPlayer Plus language, forced-subtitle and source-preference rules.
 
+## Optional AI subtitle translation
+
+The disabled-by-default **AI subtitles** setting can manually translate the currently selected
+external SRT or WebVTT track into Czech. The app sends subtitle text only after confirmation to a
+user-operated backend, stores no Gemini API key, keeps all original tracks, and attaches the result
+as `Čeština (AI)` without changing the renderer path.
+
+The translation backend is deployed separately as the **AI Subtitle Translator** Home Assistant
+add-on from the `rolex86/ha-addons` repository. Configure its local base URL, for example
+`http://192.168.0.109:8787`. When the add-on access token is enabled, enter the same optional token
+in JustPlayer Plus. The player sends it only as a Bearer authorization header.
+
 ## Protected playback components
 
 Feature work in this fork must not modify these components as part of ordinary preference or track-selection changes:

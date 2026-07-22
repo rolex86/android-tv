@@ -12,6 +12,10 @@ and Stremio.
 The Android application ID is `com.rolex86.justplayerplus`, so it can be
 installed alongside the original `com.brouken.player` application.
 
+The optional AI subtitle translation client is disabled by default and
+expects a separately deployed translation backend. The backend is
+intentionally not part of this repository.
+
 ### Build
 
 GitHub Actions builds the release APK after relevant changes. Locally:

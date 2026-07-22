@@ -31,7 +31,10 @@ import androidx.preference.EditTextPreference;
 import androidx.preference.ListPreference;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
+import androidx.preference.SwitchPreferenceCompat;
 import androidx.recyclerview.widget.RecyclerView;
+
+import com.brouken.player.aisubtitles.AiSubtitlePreferences;
 
 import java.text.Collator;
 import java.util.ArrayList;
@@ -150,6 +153,8 @@ public class SettingsActivity extends AppCompatActivity {
                 });
             }
 
+            setupAiSubtitlePreferences();
+
             Preference diagnostics = findPreference("externalPlayerDiagnosticsView");
             if (diagnostics != null) {
                 diagnostics.setOnPreferenceClickListener(preference -> {
@@ -225,6 +230,62 @@ public class SettingsActivity extends AppCompatActivity {
                     Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 16745);
             }
+        }
+
+        private void setupAiSubtitlePreferences() {
+            SwitchPreferenceCompat enabled = findPreference(
+                    PlusPrefs.KEY_AI_SUBTITLES_ENABLED);
+            EditTextPreference backend = findPreference(
+                    PlusPrefs.KEY_AI_SUBTITLE_BACKEND_URL);
+            EditTextPreference apiToken = findPreference(AiSubtitlePreferences.KEY_API_TOKEN);
+            Preference target = findPreference(
+                    PlusPrefs.KEY_AI_SUBTITLE_TARGET_LANGUAGE);
+            Preference httpWarning = findPreference("aiSubtitleHttpWarning");
+            if (enabled == null || backend == null || apiToken == null
+                    || target == null || httpWarning == null) {
+                return;
+            }
+
+            backend.setOnBindEditTextListener(editText -> editText.setInputType(
+                    InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI));
+            backend.setSummaryProvider(preference -> {
+                String value = ((EditTextPreference) preference).getText();
+                return value == null || value.trim().isEmpty()
+                        ? getString(R.string.pref_ai_subtitle_backend_not_set)
+                        : value.trim();
+            });
+            apiToken.setOnBindEditTextListener(editText -> {
+                editText.setSingleLine(true);
+                editText.setInputType(InputType.TYPE_CLASS_TEXT
+                        | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            });
+
+            Runnable refreshVisibility = () -> {
+                boolean isEnabled = enabled.isChecked();
+                String url = backend.getText();
+                backend.setVisible(isEnabled);
+                apiToken.setVisible(isEnabled);
+                target.setVisible(isEnabled);
+                httpWarning.setVisible(isEnabled && url != null
+                        && url.trim().toLowerCase(Locale.ROOT).startsWith("http://"));
+            };
+            enabled.setOnPreferenceChangeListener((preference, newValue) -> {
+                boolean isEnabled = Boolean.TRUE.equals(newValue);
+                backend.setVisible(isEnabled);
+                apiToken.setVisible(isEnabled);
+                target.setVisible(isEnabled);
+                String url = backend.getText();
+                httpWarning.setVisible(isEnabled && url != null
+                        && url.trim().toLowerCase(Locale.ROOT).startsWith("http://"));
+                return true;
+            });
+            backend.setOnPreferenceChangeListener((preference, newValue) -> {
+                String url = newValue == null ? "" : newValue.toString().trim();
+                httpWarning.setVisible(enabled.isChecked()
+                        && url.toLowerCase(Locale.ROOT).startsWith("http://"));
+                return true;
+            });
+            refreshVisibility.run();
         }
 
         private void showDiagnostics() {

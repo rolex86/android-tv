@@ -19,6 +19,11 @@ TEST_PATH = (
 OFFSET_TEST_PATH = TEST_PATH.with_name("OffsetSubtitleParserFactoryTest.java")
 END_TIME_TEST_PATH = TEST_PATH.with_name("PlaybackEndTimeTest.java")
 STREMIO_TEST_PATH = TEST_PATH.with_name("StremioNextEpisodeTest.java")
+AI_TEST_PATH = (
+    ROOT / "just-player-plus" / "app" / "src" / "test" / "java"
+    / "com" / "brouken" / "player" / "aisubtitles" / "AiSubtitlePolicyTest.java"
+)
+OPEN_SUBTITLES_TEST_PATH = TEST_PATH.with_name("OpenSubtitlesV3ClientTest.java")
 
 plus_prefs = PREFS_PATH.read_text(encoding="utf-8")
 player = PLAYER_PATH.read_text(encoding="utf-8")
@@ -64,6 +69,9 @@ runtime_anchors = {
     "KEY_EXTERNAL_PLAYER_DIAGNOSTICS": "PlusPrefs.KEY_EXTERNAL_PLAYER_DIAGNOSTICS",
     "KEY_STREMIO_CONNECTOR_ENABLED": "mPlusPrefs.stremioConnectorEnabled",
     "KEY_NEXT_EPISODE_NOTICE_SECONDS": "mPlusPrefs.nextEpisodeNoticeSeconds",
+    "KEY_AI_SUBTITLES_ENABLED": "mPlusPrefs.aiSubtitlesEnabled",
+    "KEY_AI_SUBTITLE_BACKEND_URL": "mPlusPrefs.aiSubtitleBackendUrl",
+    "KEY_AI_SUBTITLE_TARGET_LANGUAGE": "mPlusPrefs.aiSubtitleTargetLanguage",
 }
 
 errors = []
@@ -145,6 +153,14 @@ runtime_regression_anchors = (
     "now, getStremioLaunchIdentity())",
     "metadata_resolution_started",
     "setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS)",
+    "if (mPlusPrefs.aiSubtitlesEnabled)",
+    "releaseAiSubtitleController();",
+    "aiSubtitleController.onTracksChanged();",
+    "SelectedSubtitleResolver.AI_ID_PREFIX",
+    "cancelRemoteJob(jobId)",
+    "requestOpenSubtitlesV3(session, content);",
+    "finishOpenSubtitlesAttach(tracks);",
+    "OpenSubtitlesV3Client.hasOpenSubtitlesTrack",
 )
 for anchor in runtime_regression_anchors:
     if anchor not in external_java:
@@ -201,6 +217,39 @@ else:
     ):
         if test_name not in stremio_tests:
             errors.append(f"Missing Stremio metadata regression test: {test_name}")
+
+if not AI_TEST_PATH.exists():
+    errors.append("AI subtitle policy regression tests are missing")
+else:
+    ai_tests = AI_TEST_PATH.read_text(encoding="utf-8")
+    for test_name in (
+        "supportsOnlyExternalFirstVersionTextMimeTypes",
+        "readyBackendResponseIsStrictlyValidated",
+        "backendAddressAllowsOnlyCredentialFreeHttpOrHttps",
+        "optionalAccessTokenRejectsHeaderInjectionAndUnreasonableLength",
+        "backendHttpErrorsMapToActionableFailures",
+        "lateResultIsRejectedAfterDisableMovieChangeOrSourceChange",
+    ):
+        if test_name not in ai_tests:
+            errors.append(f"Missing AI subtitle regression test: {test_name}")
+
+if not OPEN_SUBTITLES_TEST_PATH.exists():
+    errors.append("OpenSubtitles v3 regression tests are missing")
+else:
+    opensubtitles_tests = OPEN_SUBTITLES_TEST_PATH.read_text(encoding="utf-8")
+    for test_name in (
+        "acceptsOnlyImdbMovieAndEpisodeIds",
+        "normalizesStremioAndIsoLanguageVariants",
+        "filtersDeduplicatesAndCapsPreferredLanguages",
+        "preservesForcedAndSdhHintsForSmartSelection",
+    ):
+        if test_name not in opensubtitles_tests:
+            errors.append(f"Missing OpenSubtitles v3 regression test: {test_name}")
+
+if preferences_xml.count('app:key="aiSubtitleApiToken"') != 1:
+    errors.append("AI subtitle access token must occur exactly once in root_preferences.xml")
+if "AiSubtitlePreferences.KEY_API_TOKEN" not in external_java:
+    errors.append("AI subtitle access token has no runtime hook")
 
 # These binaries contain the protected Media3 renderer/audio path and extension decoders.
 # An intentional upstream refresh must review the playback regression matrix and update hashes.

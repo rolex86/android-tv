@@ -1,0 +1,30 @@
+name: Apply OpenSubtitles v3 source patch
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/debug-opensubtitles-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/ai-subtitles
+      - name: Generate and publish source changes
+        run: |
+          set -euo pipefail
+          python3 .patches/apply_opensubtitles_v3.py
+          git checkout -- .github/workflows/build-just-player-plus.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            just-player-plus/app/build.gradle \
+            just-player-plus/app/src/main/java/com/brouken/player/PlayerActivity.java \
+            just-player-plus/app/src/main/java/com/brouken/player/aisubtitles/SelectedSubtitleResolver.java
+          git commit -m "Fix OpenSubtitles auto-selection and AI translation"
+          git push origin HEAD:feature/ai-subtitles
