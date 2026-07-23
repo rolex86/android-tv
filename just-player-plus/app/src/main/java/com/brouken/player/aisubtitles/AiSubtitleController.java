@@ -6,12 +6,7 @@ import android.content.Context;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
-import android.view.Gravity;
-import android.view.ViewGroup;
 import android.widget.ImageButton;
-import android.widget.LinearLayout;
-import android.widget.ProgressBar;
-import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.Nullable;
@@ -58,31 +53,25 @@ public final class AiSubtitleController {
         final String sourceSubtitleId;
         final String targetLanguage;
         @Nullable final String mediaTitle;
-        final boolean wasPlaying;
 
         Session(long token,
                 int playerGeneration,
                 Uri mediaUri,
                 String sourceSubtitleId,
                 String targetLanguage,
-                @Nullable String mediaTitle,
-                boolean wasPlaying) {
+                @Nullable String mediaTitle) {
             this.token = token;
             this.playerGeneration = playerGeneration;
             this.mediaUri = mediaUri;
             this.sourceSubtitleId = sourceSubtitleId;
             this.targetLanguage = targetLanguage;
             this.mediaTitle = mediaTitle;
-            this.wasPlaying = wasPlaying;
         }
     }
 
     @Nullable private Host host;
     @Nullable private ImageButton button;
     @Nullable private AlertDialog confirmationDialog;
-    @Nullable private AlertDialog progressDialog;
-    @Nullable private ProgressBar progressBar;
-    @Nullable private TextView progressText;
     @Nullable private ExecutorService executor;
     @Nullable private OkHttpClient httpClient;
     @Nullable private AiSubtitleBackendClient backendClient;
@@ -99,7 +88,7 @@ public final class AiSubtitleController {
     private long operationToken;
     private boolean released;
     private boolean translating;
-    private boolean resumeAfterTrackSelection;
+    private int translationProgress;
 
     public AiSubtitleController(Host host, ImageButton button) {
         this.host = host;
@@ -194,6 +183,10 @@ public final class AiSubtitleController {
         currentButton.setEnabled(!translating
                 && isTranslationAvailable(currentHost.player()));
         currentButton.setAlpha(currentButton.isEnabled() ? 1f : 0.45f);
+        currentButton.setContentDescription(translating
+                ? currentHost.activity().getString(
+                        R.string.ai_subtitle_progress, translationProgress)
+                : currentHost.activity().getString(R.string.ai_subtitle_button));
     }
 
     public void release() {
@@ -214,7 +207,6 @@ public final class AiSubtitleController {
             confirmationDialog.dismiss();
             confirmationDialog = null;
         }
-        dismissProgressDialog();
         if (backendClient != null) {
             backendClient.release();
             backendClient = null;
@@ -244,11 +236,7 @@ public final class AiSubtitleController {
         if (mediaUri == null || player == null) {
             return;
         }
-        cancelCurrentOperation(false);
-        boolean wasPlaying = player.isPlaying();
-        if (wasPlaying) {
-            player.pause();
-        }
+        cancelCurrentOperation();
         long token = ++operationToken;
         activeSession = new Session(
                 token,
@@ -256,11 +244,11 @@ public final class AiSubtitleController {
                 mediaUri,
                 source.id,
                 currentHost.targetLanguage(),
-                currentHost.mediaTitle(),
-                wasPlaying);
+                currentHost.mediaTitle());
         translating = true;
+        translationProgress = 0;
         updateButtonState();
-        showProgressDialog(0);
+        show(R.string.ai_subtitle_background_started);
 
         ensureWorkers(backendUrl, apiToken);
         ExecutorService currentExecutor = executor;
@@ -317,7 +305,8 @@ public final class AiSubtitleController {
             @Override
             public void onProgress(int progress) {
                 if (isSessionCurrent(session)) {
-                    updateProgressDialog(progress);
+                    translationProgress = progress;
+                    updateButtonState();
                 }
             }
 
@@ -387,9 +376,8 @@ public final class AiSubtitleController {
                     .build();
             player.setMediaItem(updatedItem, false);
         }
-        resumeAfterTrackSelection = session.wasPlaying;
         activeSession = null;
-        updateProgressDialog(100);
+        translationProgress = 100;
         selectPendingTrack();
         mainHandler.postDelayed(this::selectPendingTrack, 150L);
         mainHandler.postDelayed(this::selectPendingTrack, 400L);
@@ -423,11 +411,6 @@ public final class AiSubtitleController {
                                 .setOverrideForType(override)
                                 .build());
                 translating = false;
-                dismissProgressDialog();
-                if (resumeAfterTrackSelection) {
-                    player.play();
-                }
-                resumeAfterTrackSelection = false;
                 show(R.string.ai_subtitle_ready);
                 updateButtonState();
                 return;
@@ -452,32 +435,16 @@ public final class AiSubtitleController {
         backendClient = new AiSubtitleBackendClient(httpClient, backendUrl, apiToken);
     }
 
-    private void cancelCurrentOperation(boolean restorePlayback) {
-        Session session = activeSession;
+    private void cancelCurrentOperation() {
         operationToken++;
         activeSession = null;
         pendingAiSubtitleId = null;
         translating = false;
-        resumeAfterTrackSelection = false;
+        translationProgress = 0;
         if (backendClient != null) {
             backendClient.cancel();
         }
-        dismissProgressDialog();
-        if (restorePlayback && session != null && session.wasPlaying) {
-            Player player = host == null ? null : host.player();
-            if (player != null) {
-                player.play();
-            }
-        }
         updateButtonState();
-    }
-
-    private void cancelByUser() {
-        if (!translating) {
-            return;
-        }
-        cancelCurrentOperation(true);
-        show(R.string.ai_subtitle_cancelled);
     }
 
     private boolean isSessionCurrent(@Nullable Session session) {
@@ -513,76 +480,9 @@ public final class AiSubtitleController {
         }
         translating = false;
         activeSession = null;
-        resumeAfterTrackSelection = false;
-        if (backendClient != null) {
-            backendClient.cancel();
-        }
-        dismissProgressDialog();
-        if (session.wasPlaying) {
-            Player player = host == null ? null : host.player();
-            if (player != null) {
-                player.play();
-            }
-        }
+        translationProgress = 0;
         show(message);
         updateButtonState();
-    }
-
-    private void showProgressDialog(int progress) {
-        Host currentHost = host;
-        if (released || currentHost == null) {
-            return;
-        }
-        Activity activity = currentHost.activity();
-        int padding = Math.round(24 * activity.getResources().getDisplayMetrics().density);
-        LinearLayout layout = new LinearLayout(activity);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setPadding(padding, padding / 2, padding, 0);
-
-        progressText = new TextView(activity);
-        progressText.setGravity(Gravity.CENTER_HORIZONTAL);
-        progressText.setTextSize(18);
-        layout.addView(progressText, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        progressBar = new ProgressBar(activity, null,
-                android.R.attr.progressBarStyleHorizontal);
-        progressBar.setMax(100);
-        LinearLayout.LayoutParams barParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        barParams.topMargin = padding / 2;
-        layout.addView(progressBar, barParams);
-
-        progressDialog = new AlertDialog.Builder(activity)
-                .setTitle(R.string.ai_subtitle_translating)
-                .setView(layout)
-                .setNegativeButton(android.R.string.cancel,
-                        (dialog, which) -> cancelByUser())
-                .create();
-        progressDialog.setCancelable(false);
-        progressDialog.setCanceledOnTouchOutside(false);
-        progressDialog.show();
-        updateProgressDialog(progress);
-    }
-
-    private void updateProgressDialog(int progress) {
-        int bounded = Math.max(0, Math.min(100, progress));
-        if (progressBar != null) {
-            progressBar.setProgress(bounded);
-        }
-        if (progressText != null && host != null) {
-            progressText.setText(host.activity().getString(
-                    R.string.ai_subtitle_progress, bounded));
-        }
-    }
-
-    private void dismissProgressDialog() {
-        if (progressDialog != null) {
-            progressDialog.dismiss();
-            progressDialog = null;
-        }
-        progressBar = null;
-        progressText = null;
     }
 
     private void showResolutionError(@Nullable SelectedSubtitleResolver.Issue issue) {
