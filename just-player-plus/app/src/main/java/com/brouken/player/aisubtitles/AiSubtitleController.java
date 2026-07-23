@@ -82,12 +82,13 @@ public final class AiSubtitleController {
     private final Player.Listener trackSelectionListener = new Player.Listener() {
         @Override
         public void onTrackSelectionParametersChanged(TrackSelectionParameters parameters) {
-            mainHandler.post(AiSubtitleController.this::updateButtonState);
+            mainHandler.post(AiSubtitleController.this::onSelectionChanged);
         }
     };
     private long operationToken;
     private boolean released;
     private boolean translating;
+    private boolean manualSubtitleSelectionChanged;
     private int translationProgress;
 
     public AiSubtitleController(Host host, ImageButton button) {
@@ -196,6 +197,7 @@ public final class AiSubtitleController {
         released = true;
         operationToken++;
         translating = false;
+        manualSubtitleSelectionChanged = false;
         activeSession = null;
         pendingAiSubtitleId = null;
         if (observedPlayer != null) {
@@ -246,6 +248,7 @@ public final class AiSubtitleController {
                 currentHost.targetLanguage(),
                 currentHost.mediaTitle());
         translating = true;
+        manualSubtitleSelectionChanged = false;
         translationProgress = 0;
         updateButtonState();
         show(R.string.ai_subtitle_background_started);
@@ -367,7 +370,6 @@ public final class AiSubtitleController {
                 break;
             }
         }
-        pendingAiSubtitleId = configuration.id;
         if (!duplicate) {
             List<MediaItem.SubtitleConfiguration> updated = new ArrayList<>(existing);
             updated.add(configuration);
@@ -378,6 +380,15 @@ public final class AiSubtitleController {
         }
         activeSession = null;
         translationProgress = 100;
+        if (manualSubtitleSelectionChanged) {
+            pendingAiSubtitleId = null;
+            translating = false;
+            manualSubtitleSelectionChanged = false;
+            show(R.string.ai_subtitle_ready_manual_preserved);
+            updateButtonState();
+            return;
+        }
+        pendingAiSubtitleId = configuration.id;
         selectPendingTrack();
         mainHandler.postDelayed(this::selectPendingTrack, 150L);
         mainHandler.postDelayed(this::selectPendingTrack, 400L);
@@ -411,11 +422,27 @@ public final class AiSubtitleController {
                                 .setOverrideForType(override)
                                 .build());
                 translating = false;
+                manualSubtitleSelectionChanged = false;
                 show(R.string.ai_subtitle_ready);
                 updateButtonState();
                 return;
             }
         }
+    }
+
+    private void onSelectionChanged() {
+        Session session = activeSession;
+        Host currentHost = host;
+        if (translating && session != null && currentHost != null) {
+            SelectedSubtitleResolver.Resolution selected =
+                    SelectedSubtitleResolver.resolve(currentHost.player());
+            String currentSourceId = selected.source == null ? null : selected.source.id;
+            if (!SubtitleTrackIdentity.sameStableId(
+                    session.sourceSubtitleId, currentSourceId)) {
+                manualSubtitleSelectionChanged = true;
+            }
+        }
+        updateButtonState();
     }
 
     private void ensureWorkers(String backendUrl, String apiToken) {
@@ -440,6 +467,7 @@ public final class AiSubtitleController {
         activeSession = null;
         pendingAiSubtitleId = null;
         translating = false;
+        manualSubtitleSelectionChanged = false;
         translationProgress = 0;
         if (backendClient != null) {
             backendClient.cancel();
@@ -453,9 +481,6 @@ public final class AiSubtitleController {
             return false;
         }
         Activity activity = currentHost.activity();
-        SelectedSubtitleResolver.Resolution selected =
-                SelectedSubtitleResolver.resolve(currentHost.player());
-        String currentSourceId = selected.source == null ? null : selected.source.id;
         return AiSubtitleSessionGuard.isCurrent(
                 currentHost.aiSubtitlesEnabled(),
                 released,
@@ -466,7 +491,7 @@ public final class AiSubtitleController {
                 session.mediaUri.toString(),
                 currentHost.mediaUri() == null ? null : currentHost.mediaUri().toString(),
                 session.sourceSubtitleId,
-                currentSourceId,
+                session.sourceSubtitleId,
                 session.targetLanguage,
                 currentHost.targetLanguage())
                 && !activity.isFinishing()
@@ -480,6 +505,7 @@ public final class AiSubtitleController {
         }
         translating = false;
         activeSession = null;
+        manualSubtitleSelectionChanged = false;
         translationProgress = 0;
         show(message);
         updateButtonState();
