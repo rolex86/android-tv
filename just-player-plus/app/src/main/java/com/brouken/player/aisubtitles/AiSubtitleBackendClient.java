@@ -28,7 +28,7 @@ import okhttp3.ResponseBody;
 public final class AiSubtitleBackendClient {
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
     static final long POLL_INTERVAL_MS = 2_000L;
-    static final long MAX_POLL_DURATION_MS = TimeUnit.MINUTES.toMillis(5L);
+    static final long MAX_POLL_DURATION_MS = TimeUnit.HOURS.toMillis(1L);
     private static final int MAX_RESPONSE_BYTES = 3 * 1024 * 1024;
     private static final int MAX_TOKEN_LENGTH = 4096;
     private static final int MAX_LABEL_LENGTH = 120;
@@ -96,7 +96,7 @@ public final class AiSubtitleBackendClient {
         if (released) {
             return;
         }
-        cancel();
+        detach();
         long token = operationToken;
         this.listener = listener;
         targetLanguage = job.targetLanguage;
@@ -129,27 +129,32 @@ public final class AiSubtitleBackendClient {
 
     /** Cancels locally and asks the backend to abort a submitted job when possible. */
     public void cancel() {
+        String jobId = activeJobId;
+        detach();
+        if (jobId != null) {
+            cancelRemoteJob(jobId);
+        }
+    }
+
+    /** Stops polling without cancelling the server-side job. */
+    public void detach() {
         operationToken++;
         handler.removeCallbacksAndMessages(null);
         if (activeCall != null) {
             activeCall.cancel();
             activeCall = null;
         }
-        String jobId = activeJobId;
         activeJobId = null;
         listener = null;
         targetLanguage = null;
         lastProgress = -1;
-        if (jobId != null) {
-            cancelRemoteJob(jobId);
-        }
     }
 
     public void release() {
         if (released) {
             return;
         }
-        cancel();
+        detach();
         released = true;
     }
 
@@ -288,11 +293,7 @@ public final class AiSubtitleBackendClient {
             return;
         }
         Listener callback = listener;
-        String jobId = activeJobId;
         clearCompletedState();
-        if (jobId != null) {
-            cancelRemoteJob(jobId);
-        }
         callback.onFailure(failure, message);
     }
 
