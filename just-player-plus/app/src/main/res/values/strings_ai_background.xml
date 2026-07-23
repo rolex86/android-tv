@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ai_subtitle_continue_background">Continue in background</string>
+    <string name="ai_subtitle_background_started">Subtitle translation continues in the background.</string>
+    <string name="ai_subtitle_ready_manual_preserved">Czech subtitles are ready. Your current subtitle selection was kept.</string>
+</resources>

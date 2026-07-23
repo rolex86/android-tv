@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ai_subtitle_continue_background">Pokračovat na pozadí</string>
+    <string name="ai_subtitle_background_started">Překlad titulků pokračuje na pozadí.</string>
+    <string name="ai_subtitle_ready_manual_preserved">České titulky jsou připravené. Aktuálně vybrané titulky zůstaly zachované.</string>
+</resources>

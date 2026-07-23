@@ -59,6 +59,7 @@ public final class AiSubtitleController {
         final String targetLanguage;
         @Nullable final String mediaTitle;
         final boolean wasPlaying;
+        boolean backgroundMode;
 
         Session(long token,
                 int playerGeneration,
@@ -93,13 +94,15 @@ public final class AiSubtitleController {
     private final Player.Listener trackSelectionListener = new Player.Listener() {
         @Override
         public void onTrackSelectionParametersChanged(TrackSelectionParameters parameters) {
-            mainHandler.post(AiSubtitleController.this::updateButtonState);
+            mainHandler.post(AiSubtitleController.this::onSelectionChanged);
         }
     };
     private long operationToken;
     private boolean released;
     private boolean translating;
+    private boolean manualSubtitleSelectionChanged;
     private boolean resumeAfterTrackSelection;
+    private int translationProgress;
 
     public AiSubtitleController(Host host, ImageButton button) {
         this.host = host;
@@ -194,6 +197,10 @@ public final class AiSubtitleController {
         currentButton.setEnabled(!translating
                 && isTranslationAvailable(currentHost.player()));
         currentButton.setAlpha(currentButton.isEnabled() ? 1f : 0.45f);
+        currentButton.setContentDescription(translating
+                ? currentHost.activity().getString(
+                        R.string.ai_subtitle_progress, translationProgress)
+                : currentHost.activity().getString(R.string.ai_subtitle_button));
     }
 
     public void release() {
@@ -203,6 +210,8 @@ public final class AiSubtitleController {
         released = true;
         operationToken++;
         translating = false;
+        manualSubtitleSelectionChanged = false;
+        resumeAfterTrackSelection = false;
         activeSession = null;
         pendingAiSubtitleId = null;
         if (observedPlayer != null) {
@@ -259,6 +268,9 @@ public final class AiSubtitleController {
                 currentHost.mediaTitle(),
                 wasPlaying);
         translating = true;
+        manualSubtitleSelectionChanged = false;
+        resumeAfterTrackSelection = false;
+        translationProgress = 0;
         updateButtonState();
         showProgressDialog(0);
 
@@ -317,7 +329,11 @@ public final class AiSubtitleController {
             @Override
             public void onProgress(int progress) {
                 if (isSessionCurrent(session)) {
-                    updateProgressDialog(progress);
+                    translationProgress = progress;
+                    updateButtonState();
+                    if (!session.backgroundMode) {
+                        updateProgressDialog(progress);
+                    }
                 }
             }
 
@@ -378,7 +394,15 @@ public final class AiSubtitleController {
                 break;
             }
         }
-        pendingAiSubtitleId = configuration.id;
+
+        boolean preserveManualSelection = manualSubtitleSelectionChanged;
+        activeSession = null;
+        translationProgress = 100;
+        resumeAfterTrackSelection = !session.backgroundMode && session.wasPlaying;
+        if (!session.backgroundMode) {
+            updateProgressDialog(100);
+        }
+
         if (!duplicate) {
             List<MediaItem.SubtitleConfiguration> updated = new ArrayList<>(existing);
             updated.add(configuration);
@@ -387,9 +411,17 @@ public final class AiSubtitleController {
                     .build();
             player.setMediaItem(updatedItem, false);
         }
-        resumeAfterTrackSelection = session.wasPlaying;
-        activeSession = null;
-        updateProgressDialog(100);
+        if (preserveManualSelection) {
+            pendingAiSubtitleId = null;
+            translating = false;
+            manualSubtitleSelectionChanged = false;
+            resumeAfterTrackSelection = false;
+            dismissProgressDialog();
+            show(R.string.ai_subtitle_ready_manual_preserved);
+            updateButtonState();
+            return;
+        }
+        pendingAiSubtitleId = configuration.id;
         selectPendingTrack();
         mainHandler.postDelayed(this::selectPendingTrack, 150L);
         mainHandler.postDelayed(this::selectPendingTrack, 400L);
@@ -423,6 +455,7 @@ public final class AiSubtitleController {
                                 .setOverrideForType(override)
                                 .build());
                 translating = false;
+                manualSubtitleSelectionChanged = false;
                 dismissProgressDialog();
                 if (resumeAfterTrackSelection) {
                     player.play();
@@ -433,6 +466,22 @@ public final class AiSubtitleController {
                 return;
             }
         }
+    }
+
+    private void onSelectionChanged() {
+        Session session = activeSession;
+        Host currentHost = host;
+        if (translating && session != null && session.backgroundMode
+                && currentHost != null) {
+            SelectedSubtitleResolver.Resolution selected =
+                    SelectedSubtitleResolver.resolve(currentHost.player());
+            String currentSourceId = selected.source == null ? null : selected.source.id;
+            if (!SubtitleTrackIdentity.sameStableId(
+                    session.sourceSubtitleId, currentSourceId)) {
+                manualSubtitleSelectionChanged = true;
+            }
+        }
+        updateButtonState();
     }
 
     private void ensureWorkers(String backendUrl, String apiToken) {
@@ -452,13 +501,31 @@ public final class AiSubtitleController {
         backendClient = new AiSubtitleBackendClient(httpClient, backendUrl, apiToken);
     }
 
+    private void continueInBackground() {
+        Session session = activeSession;
+        if (!translating || session == null || session.backgroundMode) {
+            return;
+        }
+        session.backgroundMode = true;
+        resumeAfterTrackSelection = false;
+        dismissProgressDialog();
+        Player player = host == null ? null : host.player();
+        if (session.wasPlaying && player != null) {
+            player.play();
+        }
+        show(R.string.ai_subtitle_background_started);
+        updateButtonState();
+    }
+
     private void cancelCurrentOperation(boolean restorePlayback) {
         Session session = activeSession;
         operationToken++;
         activeSession = null;
         pendingAiSubtitleId = null;
         translating = false;
+        manualSubtitleSelectionChanged = false;
         resumeAfterTrackSelection = false;
+        translationProgress = 0;
         if (backendClient != null) {
             backendClient.cancel();
         }
@@ -486,9 +553,6 @@ public final class AiSubtitleController {
             return false;
         }
         Activity activity = currentHost.activity();
-        SelectedSubtitleResolver.Resolution selected =
-                SelectedSubtitleResolver.resolve(currentHost.player());
-        String currentSourceId = selected.source == null ? null : selected.source.id;
         return AiSubtitleSessionGuard.isCurrent(
                 currentHost.aiSubtitlesEnabled(),
                 released,
@@ -499,7 +563,7 @@ public final class AiSubtitleController {
                 session.mediaUri.toString(),
                 currentHost.mediaUri() == null ? null : currentHost.mediaUri().toString(),
                 session.sourceSubtitleId,
-                currentSourceId,
+                session.sourceSubtitleId,
                 session.targetLanguage,
                 currentHost.targetLanguage())
                 && !activity.isFinishing()
@@ -513,12 +577,11 @@ public final class AiSubtitleController {
         }
         translating = false;
         activeSession = null;
+        manualSubtitleSelectionChanged = false;
         resumeAfterTrackSelection = false;
-        if (backendClient != null) {
-            backendClient.cancel();
-        }
+        translationProgress = 0;
         dismissProgressDialog();
-        if (session.wasPlaying) {
+        if (session.wasPlaying && !session.backgroundMode) {
             Player player = host == null ? null : host.player();
             if (player != null) {
                 player.play();
@@ -558,6 +621,8 @@ public final class AiSubtitleController {
                 .setView(layout)
                 .setNegativeButton(android.R.string.cancel,
                         (dialog, which) -> cancelByUser())
+                .setNeutralButton(R.string.ai_subtitle_continue_background,
+                        (dialog, which) -> continueInBackground())
                 .create();
         progressDialog.setCancelable(false);
         progressDialog.setCanceledOnTouchOutside(false);
