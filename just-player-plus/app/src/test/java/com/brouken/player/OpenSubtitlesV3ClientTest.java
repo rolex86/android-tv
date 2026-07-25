@@ -29,6 +29,21 @@ public class OpenSubtitlesV3ClientTest {
     }
 
     @Test
+    public void buildsHashLookupRouteWithVideoMetadata() {
+        OpenSubtitlesMediaFingerprint.Result fingerprint =
+                new OpenSubtitlesMediaFingerprint.Result(
+                        "0123456789abcdef", 75161993216L,
+                        "Movie.2026.2160p.BluRay.REMUX.mkv");
+        String url = OpenSubtitlesV3Client.exactUrl(
+                "movie", "tt33311069", fingerprint).toString();
+
+        assertTrue(url.contains("/subtitles/movie/0123456789abcdef/"));
+        assertTrue(url.contains("videoID=tt33311069"));
+        assertTrue(url.contains("videoSize=75161993216"));
+        assertTrue(url.contains("filename=Movie.2026.2160p.BluRay.REMUX.mkv.json"));
+    }
+
+    @Test
     public void filtersDeduplicatesAndCapsPreferredLanguages() throws Exception {
         JSONArray subtitles = new JSONArray();
         for (int index = 0; index < 8; index++) {
@@ -68,6 +83,16 @@ public class OpenSubtitlesV3ClientTest {
         assertEquals(2, result.size());
         assertTrue(result.get(0).selectionFlags != 0);
         assertTrue(result.get(1).roleFlags != result.get(0).roleFlags);
+    }
+
+    @Test
+    public void recognizesLikelyReleaseNamesButRejectsConflictingResolution() {
+        assertTrue(OpenSubtitlesV3Client.isLikelyReleaseMatch(
+                "Movie.2026.2160p.UHD.BluRay.REMUX.HEVC-GROUP.mkv",
+                "Movie.2026.2160p.BluRay.REMUX.HEVC-GROUP.srt"));
+        assertFalse(OpenSubtitlesV3Client.isLikelyReleaseMatch(
+                "Movie.2026.2160p.UHD.BluRay.REMUX.HEVC-GROUP.mkv",
+                "Movie.2026.1080p.WEB-DL.x264-OTHER.srt"));
     }
 
     private static JSONObject item(String language, String url, String id) throws Exception {
