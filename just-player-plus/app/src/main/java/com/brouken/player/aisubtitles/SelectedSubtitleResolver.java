@@ -12,16 +12,18 @@ import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
 
+import java.text.Normalizer;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
-/** Resolves the selected text track and maps it back to its external source URI. */
+/** Resolves the selected text track to a readable source, including matched online replacements. */
 public final class SelectedSubtitleResolver {
     public static final String EXTERNAL_ID_PREFIX = "plus-external:";
     public static final String AI_ID_PREFIX = "plus-ai:";
+    private static final String EMBEDDED_PROXY_ID_PREFIX = "plus-embedded-proxy:";
 
     public enum Issue {
         NONE_SELECTED,
@@ -63,13 +65,13 @@ public final class SelectedSubtitleResolver {
         List<MediaItem.SubtitleConfiguration> configurations = subtitleConfigurations(
                 player.getCurrentMediaItem());
 
-        Resolution overrideResolution = resolveTextOverride(
+        Resolution override = resolveTextOverride(
                 player.getTrackSelectionParameters(), configurations);
-        if (overrideResolution != null) {
-            return overrideResolution;
+        if (override != null) {
+            return override;
         }
 
-        boolean selectedEmbeddedTrackSeen = false;
+        boolean embeddedSeen = false;
         Issue externalFailure = null;
         for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
             if (group.getType() != C.TRACK_TYPE_TEXT) {
@@ -81,31 +83,34 @@ public final class SelectedSubtitleResolver {
                     continue;
                 }
                 Format format = trackGroup.getFormat(index);
-                MediaItem.SubtitleConfiguration configuration =
+                MediaItem.SubtitleConfiguration external =
                         findExternalConfiguration(configurations, format);
-                if (configuration == null) {
-                    selectedEmbeddedTrackSeen = true;
+                if (external == null) {
+                    embeddedSeen = true;
+                    Resolution replacement = resolveEmbeddedReplacement(format, configurations);
+                    if (replacement.isReady()) {
+                        return replacement;
+                    }
                     continue;
                 }
-                Resolution resolution = resolveConfiguration(
-                        configuration,
-                        configuration.id,
-                        format.label != null ? format.label : configuration.label,
-                        format.language != null ? format.language : configuration.language);
-                if (resolution.isReady()) {
-                    return resolution;
+                Resolution resolved = resolveConfiguration(
+                        external,
+                        external.id,
+                        format.label != null ? format.label : external.label,
+                        format.language != null ? format.language : external.language);
+                if (resolved.isReady()) {
+                    return resolved;
                 }
-                externalFailure = resolution.issue;
+                externalFailure = resolved.issue;
             }
         }
 
         if (externalFailure != null) {
             return Resolution.failed(externalFailure);
         }
-        if (selectedEmbeddedTrackSeen) {
-            return Resolution.failed(Issue.EMBEDDED);
-        }
-        return Resolution.failed(Issue.NONE_SELECTED);
+        return embeddedSeen
+                ? Resolution.failed(Issue.EMBEDDED)
+                : Resolution.failed(Issue.NONE_SELECTED);
     }
 
     @Nullable
@@ -124,19 +129,120 @@ public final class SelectedSubtitleResolver {
                     continue;
                 }
                 Format format = trackGroup.getFormat(index);
-                MediaItem.SubtitleConfiguration configuration =
+                MediaItem.SubtitleConfiguration external =
                         findExternalConfiguration(configurations, format);
-                if (configuration == null) {
-                    return Resolution.failed(Issue.EMBEDDED);
+                if (external == null) {
+                    return resolveEmbeddedReplacement(format, configurations);
                 }
                 return resolveConfiguration(
-                        configuration,
-                        configuration.id,
-                        format.label != null ? format.label : configuration.label,
-                        format.language != null ? format.language : configuration.language);
+                        external,
+                        external.id,
+                        format.label != null ? format.label : external.label,
+                        format.language != null ? format.language : external.language);
             }
         }
         return null;
+    }
+
+    private static Resolution resolveEmbeddedReplacement(
+            Format embedded,
+            List<MediaItem.SubtitleConfiguration> configurations) {
+        if (isCommentary(embedded)) {
+            return Resolution.failed(Issue.EMBEDDED);
+        }
+        AiSubtitleSource best = null;
+        long bestScore = Long.MAX_VALUE;
+        int order = 0;
+        for (MediaItem.SubtitleConfiguration configuration : configurations) {
+            if (!SubtitleTrackIdentity.isOpenSubtitlesV3(configuration.id)) {
+                order++;
+                continue;
+            }
+            Resolution resolved = resolveConfiguration(
+                    configuration, configuration.id, configuration.label, configuration.language);
+            AiSubtitleSource candidate = resolved.source;
+            if (candidate == null
+                    || !sameKnownLanguage(embedded, candidate.language)
+                    || !sameSubtitleKind(embedded, configuration)) {
+                order++;
+                continue;
+            }
+            long score = (long) SubtitleTrackIdentity.openSubtitlesMatchRank(
+                    configuration.id) * 10_000L + order++;
+            if (score < bestScore) {
+                bestScore = score;
+                best = candidate;
+            }
+        }
+        if (best == null) {
+            return Resolution.failed(Issue.EMBEDDED);
+        }
+        return Resolution.ready(new AiSubtitleSource(
+                embeddedProxyId(embedded),
+                embeddedDisplayName(embedded),
+                embedded.language != null ? embedded.language : best.language,
+                best.mimeType,
+                best.sourceFormat,
+                best.uri));
+    }
+
+    private static boolean sameKnownLanguage(Format embedded, @Nullable String candidateLanguage) {
+        String embeddedLanguage = inferLanguage(embedded.language, embedded.label);
+        String candidate = normalizeLanguage(candidateLanguage);
+        return !embeddedLanguage.isEmpty()
+                && !candidate.isEmpty()
+                && Objects.equals(embeddedLanguage, candidate);
+    }
+
+    private static boolean sameSubtitleKind(
+            Format embedded,
+            MediaItem.SubtitleConfiguration candidate) {
+        return isForced(embedded.selectionFlags, embedded.label)
+                == isForced(candidate.selectionFlags, candidate.label)
+                && isSdh(embedded.roleFlags, embedded.label)
+                == isSdh(candidate.roleFlags, candidate.label);
+    }
+
+    private static String inferLanguage(@Nullable String language, @Nullable String label) {
+        String normalized = normalizeLanguage(language);
+        if (!normalized.isEmpty() && !"und".equals(normalized)) {
+            return normalized;
+        }
+        String text = normalizeText(label);
+        if (hasToken(text, "english") || hasToken(text, "eng")) return "eng";
+        if (hasToken(text, "czech") || hasToken(text, "ces")
+                || hasToken(text, "cze") || hasToken(text, "cesky")) return "ces";
+        if (hasToken(text, "slovak") || hasToken(text, "slk")
+                || hasToken(text, "slo") || hasToken(text, "slovensky")) return "slk";
+        if (hasToken(text, "german") || hasToken(text, "deu")
+                || hasToken(text, "ger") || hasToken(text, "deutsch")) return "deu";
+        return "";
+    }
+
+    private static boolean hasToken(String normalized, String token) {
+        return (" " + normalized + " ").contains(" " + token + " ");
+    }
+
+    private static String embeddedProxyId(Format format) {
+        String canonical = SubtitleTrackIdentity.canonicalId(format.id);
+        if (!canonical.isEmpty()) {
+            return EMBEDDED_PROXY_ID_PREFIX + canonical;
+        }
+        String signature = normalizeText(format.label) + "|"
+                + normalizeLanguage(format.language) + "|"
+                + normalizeMime(format.sampleMimeType) + "|"
+                + format.selectionFlags + "|" + format.roleFlags;
+        return EMBEDDED_PROXY_ID_PREFIX + Integer.toHexString(signature.hashCode());
+    }
+
+    private static String embeddedDisplayName(Format format) {
+        if (format.label != null && !format.label.trim().isEmpty()) {
+            return format.label.trim();
+        }
+        if (format.language != null && !format.language.trim().isEmpty()) {
+            return format.language.trim() + " · Embedded";
+        }
+        return "Embedded subtitles";
     }
 
     @Nullable
@@ -244,13 +350,44 @@ public final class SelectedSubtitleResolver {
                 || "application/vobsub".equals(mime);
     }
 
+    private static boolean isForced(int selectionFlags, @Nullable String label) {
+        return (selectionFlags & C.SELECTION_FLAG_FORCED) != 0
+                || containsLabel(label, "forced")
+                || containsLabel(label, "vynucene")
+                || containsLabel(label, "foreign parts")
+                || containsLabel(label, "signs and songs")
+                || containsLabel(label, "signs songs");
+    }
+
+    private static boolean isSdh(int roleFlags, @Nullable String label) {
+        return (roleFlags & C.ROLE_FLAG_CAPTION) != 0
+                || containsLabel(label, "sdh")
+                || containsLabel(label, "hearing impaired")
+                || containsLabel(label, "hard of hearing");
+    }
+
+    private static boolean isCommentary(Format format) {
+        return containsLabel(format.label, "commentary")
+                || containsLabel(format.label, "komentar");
+    }
+
+    private static boolean containsLabel(@Nullable String label, String marker) {
+        return normalizeText(label).contains(marker);
+    }
+
     private static String normalizeMime(@Nullable String mimeType) {
         return mimeType == null ? "" : mimeType.trim().toLowerCase(Locale.ROOT);
     }
 
     private static String normalizeText(@Nullable String value) {
-        return value == null ? "" : value.trim().replaceAll("\\s+", " ")
-                .toLowerCase(Locale.ROOT);
+        if (value == null) {
+            return "";
+        }
+        return Normalizer.normalize(value, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", " ")
+                .trim();
     }
 
     private static String normalizeLanguage(@Nullable String value) {
@@ -259,7 +396,26 @@ public final class SelectedSubtitleResolver {
         }
         String language = value.trim().toLowerCase(Locale.ROOT).replace('_', '-');
         int separator = language.indexOf('-');
-        return separator > 0 ? language.substring(0, separator) : language;
+        language = separator > 0 ? language.substring(0, separator) : language;
+        switch (language) {
+            case "cs":
+            case "cze":
+            case "ces":
+                return "ces";
+            case "sk":
+            case "slo":
+            case "slk":
+                return "slk";
+            case "en":
+            case "eng":
+                return "eng";
+            case "de":
+            case "ger":
+            case "deu":
+                return "deu";
+            default:
+                return language;
+        }
     }
 
     private static boolean languagesMatch(String first, String second) {
