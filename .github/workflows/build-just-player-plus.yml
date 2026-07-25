@@ -70,12 +70,7 @@ jobs:
         run: sdkmanager "platforms;android-34" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Run smart-selection unit tests
-        run: |
-          set +e
-          ./gradlew testLatestUniversalDebugUnitTest --stacktrace --console=plain > ../gradle-build.log 2>&1
-          status=$?
-          tail -n 250 ../gradle-build.log
-          exit $status
+        run: ./gradlew testLatestUniversalDebugUnitTest --stacktrace --console=plain
 
       - name: Build signed release APK
         if: github.event_name != 'pull_request'
