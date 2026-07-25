@@ -4,7 +4,6 @@ import android.net.Uri;
 
 import androidx.annotation.Nullable;
 import androidx.media3.common.MediaItem;
-import androidx.media3.common.Player;
 
 import java.io.File;
 import java.io.IOException;
@@ -23,9 +22,6 @@ import okhttp3.ResponseBody;
 final class OpenSubtitlesMediaFingerprint {
     static final int HASH_CHUNK_BYTES = 64 * 1024;
     static final long MIN_HASHABLE_BYTES = HASH_CHUNK_BYTES * 2L;
-    private static final int PLAYER_WAIT_ATTEMPTS = 40;
-    private static final long PLAYER_WAIT_MS = 100L;
-
     interface CallObserver {
         void onCallStarted(Call call);
         void onCallFinished(Call call);
@@ -47,9 +43,10 @@ final class OpenSubtitlesMediaFingerprint {
     }
 
     @Nullable
-    static Result fromCurrentPlayer(OkHttpClient httpClient, CallObserver observer)
+    static Result fromMediaItem(OkHttpClient httpClient,
+                                MediaItem mediaItem,
+                                CallObserver observer)
             throws IOException {
-        MediaItem mediaItem = waitForCurrentMediaItem();
         if (mediaItem == null || mediaItem.localConfiguration == null) {
             return null;
         }
@@ -64,27 +61,6 @@ final class OpenSubtitlesMediaFingerprint {
         }
         if ("file".equalsIgnoreCase(scheme) && uri.getPath() != null) {
             return fromFile(new File(uri.getPath()), filename);
-        }
-        return null;
-    }
-
-    @Nullable
-    private static MediaItem waitForCurrentMediaItem() throws IOException {
-        for (int attempt = 0; attempt < PLAYER_WAIT_ATTEMPTS; attempt++) {
-            if (Thread.currentThread().isInterrupted()) {
-                throw new IOException("cancelled");
-            }
-            Player player = PlayerActivity.player;
-            MediaItem mediaItem = player == null ? null : player.getCurrentMediaItem();
-            if (mediaItem != null && mediaItem.localConfiguration != null) {
-                return mediaItem;
-            }
-            try {
-                Thread.sleep(PLAYER_WAIT_MS);
-            } catch (InterruptedException error) {
-                Thread.currentThread().interrupt();
-                throw new IOException("cancelled", error);
-            }
         }
         return null;
     }

@@ -157,7 +157,12 @@ public final class SubtitleTrackIdentity {
                                         @Nullable String label) {
         Integer rank = EMBEDDED_KIND_RANKS.get(
                 subtitleKindKey(language, selectionFlags, roleFlags, label));
-        return rank == null ? Integer.MAX_VALUE : rank;
+        if (rank == null) {
+            return Integer.MAX_VALUE;
+        }
+        // A movie-hash match verifies the external subtitle against the video, not the bytes of an
+        // embedded track. Matching language/kind is therefore at most a likely proxy.
+        return Math.max(1, rank);
     }
 
     public static String matchIcon(@Nullable String id) {

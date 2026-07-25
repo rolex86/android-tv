@@ -12,6 +12,8 @@ import androidx.media3.common.Player;
 import androidx.media3.common.TrackGroup;
 import androidx.media3.common.Tracks;
 
+import com.brouken.player.aisubtitles.SubtitleTrackIdentity;
+
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -97,8 +99,7 @@ final class ExternalPlayerDiagnostics {
                             .append(" bitrate=").append(format.bitrate);
                 } else {
                     details.append(" source=")
-                            .append(format.id != null
-                                    && format.id.startsWith(SmartSubtitleSelector.EXTERNAL_ID_PREFIX)
+                            .append(SubtitleTrackIdentity.isExternal(format.id)
                                     ? "external" : "embedded");
                 }
             }

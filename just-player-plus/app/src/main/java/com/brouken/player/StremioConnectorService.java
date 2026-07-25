@@ -7,9 +7,10 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
-import android.net.Uri;
+import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.IBinder;
+import android.util.Base64;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
@@ -26,21 +27,23 @@ import java.net.Socket;
 import java.net.SocketException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /** Loopback-only Stremio addon that observes content requests and returns no streams. */
 public final class StremioConnectorService extends Service {
     static final int PORT = 16745;
-    static final String HTTP_MANIFEST_URL =
-            "http://127.0.0.1:" + PORT + "/manifest.json";
     static final String STREMIO_ADDONS_URL = "stremio:///addons/series";
 
+    private static final String AUTH_PREFS = "justplayer_plus_stremio_connector_auth";
+    private static final String AUTH_TOKEN = "install_token";
+    private static final int MAX_REQUEST_LINE_LENGTH = 4_096;
     private static final String CHANNEL_ID = "stremio_connector";
     private static final int NOTIFICATION_ID = 16745;
     private static final String MANIFEST = "{"
             + "\"id\":\"com.justplayerplus.connector\","
-            + "\"version\":\"1.1.0\","
+            + "\"version\":\"1.2.0\","
             + "\"name\":\"JustPlayer Plus Connector\","
             + "\"description\":\"Local metadata bridge for JustPlayer Plus next-episode cards\","
             + "\"resources\":[{\"name\":\"stream\",\"types\":[\"series\",\"movie\"]}],"
@@ -55,6 +58,27 @@ public final class StremioConnectorService extends Service {
     private Thread acceptThread;
     private StremioConnectorStore store;
     private ExternalPlayerDiagnostics diagnostics;
+    private String routePrefix;
+
+    static String manifestUrl(Context context) {
+        return "http://127.0.0.1:" + PORT + "/" + getOrCreateToken(context)
+                + "/manifest.json";
+    }
+
+    private static synchronized String getOrCreateToken(Context context) {
+        SharedPreferences preferences = context.getSharedPreferences(
+                AUTH_PREFS, Context.MODE_PRIVATE);
+        String existing = preferences.getString(AUTH_TOKEN, null);
+        if (existing != null && existing.matches("[A-Za-z0-9_-]{43}")) {
+            return existing;
+        }
+        byte[] random = new byte[32];
+        new SecureRandom().nextBytes(random);
+        String generated = Base64.encodeToString(
+                random, Base64.URL_SAFE | Base64.NO_WRAP | Base64.NO_PADDING);
+        preferences.edit().putString(AUTH_TOKEN, generated).apply();
+        return generated;
+    }
 
     static boolean start(Context context) {
         try {
@@ -75,6 +99,7 @@ public final class StremioConnectorService extends Service {
         super.onCreate();
         store = new StremioConnectorStore(this);
         diagnostics = new ExternalPlayerDiagnostics(this);
+        routePrefix = "/" + getOrCreateToken(this);
         createNotificationChannel();
         startForeground(NOTIFICATION_ID, buildNotification());
         startServer();
@@ -127,7 +152,7 @@ public final class StremioConnectorService extends Service {
             running = true;
             acceptThread = new Thread(this::acceptLoop, "stremio-connector-accept");
             acceptThread.start();
-            diagnostics.recordStremioConnector("listening", HTTP_MANIFEST_URL);
+            diagnostics.recordStremioConnector("listening", manifestUrl(this));
         } catch (IOException error) {
             running = false;
             diagnostics.recordStremioConnector(
@@ -159,8 +184,9 @@ public final class StremioConnectorService extends Service {
              BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(
                      client.getOutputStream(), StandardCharsets.UTF_8))) {
             client.setSoTimeout(5_000);
-            String requestLine = reader.readLine();
+            String requestLine = readRequestLine(reader);
             if (requestLine == null) {
+                writeResponse(writer, 400, "application/json", "{\"error\":\"bad request\"}");
                 return;
             }
             String[] parts = requestLine.split(" ", 3);
@@ -174,6 +200,11 @@ public final class StremioConnectorService extends Service {
             if (query >= 0) {
                 path = path.substring(0, query);
             }
+            if (!path.startsWith(routePrefix + "/")) {
+                writeResponse(writer, 404, "application/json", "{\"error\":\"not found\"}");
+                return;
+            }
+            path = path.substring(routePrefix.length());
             if ("OPTIONS".equals(method)) {
                 writeResponse(writer, 204, "text/plain", "");
             } else if (!"GET".equals(method)) {
@@ -192,6 +223,26 @@ public final class StremioConnectorService extends Service {
         } catch (IOException | RuntimeException ignored) {
             // The endpoint is advisory; connector failure must never affect playback.
         }
+    }
+
+    @Nullable
+    private static String readRequestLine(BufferedReader reader) throws IOException {
+        StringBuilder line = new StringBuilder();
+        while (line.length() <= MAX_REQUEST_LINE_LENGTH) {
+            int value = reader.read();
+            if (value == -1) {
+                return line.length() == 0 ? null : line.toString();
+            }
+            if (value == '\n') {
+                int length = line.length();
+                if (length > 0 && line.charAt(length - 1) == '\r') {
+                    line.setLength(length - 1);
+                }
+                return line.toString();
+            }
+            line.append((char) value);
+        }
+        return null;
     }
 
     private void recordStreamRequest(String path, String type) throws IOException {

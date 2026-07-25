@@ -26,9 +26,9 @@ final class StremioConnectorStore {
     private static final String KEY_CONTENT_ASSOCIATIONS = "content_associations";
     private static final int MAX_EVENTS = 24;
     private static final int MAX_ASSOCIATIONS = 48;
-    private static final long MAX_EVENT_AGE_MS = 15 * 60_000L;
+    private static final long MAX_EVENT_AGE_MS = 90_000L;
     private static final long MAX_EXPECTED_AGE_MS = 30_000L;
-    private static final long MAX_ASSOCIATION_AGE_MS = 90L * 24L * 60L * 60_000L;
+    private static final long MAX_ASSOCIATION_AGE_MS = 24L * 60L * 60_000L;
     private static final long DEDUPLICATE_WINDOW_MS = 2_000L;
 
     private final SharedPreferences preferences;
@@ -73,7 +73,8 @@ final class StremioConnectorStore {
             if (event == null) {
                 StremioEpisodeId expected = claimExpectedEpisode(nowMs);
                 if (expected != null) {
-                    Content content = Content.series(expected);
+                    Content content = Content.series(expected)
+                            .withCorrelation("expected_next", 0L);
                     rememberAssociation(launchIdentity, content, nowMs);
                     return content;
                 }
@@ -87,6 +88,8 @@ final class StremioConnectorStore {
             if (content == null) {
                 return null;
             }
+            content = content.withCorrelation(
+                    "recent_request", Math.max(0L, nowMs - event.timestampMs));
 
             // A single current request supersedes all older observations. A later Stremio
             // launch will record a fresh event (including when it automatically continues).
@@ -154,8 +157,10 @@ final class StremioConnectorStore {
                     || nowMs - timestamp > MAX_ASSOCIATION_AGE_MS) {
                 return null;
             }
-            return Content.fromValues(
+            Content content = Content.fromValues(
                     item.optString("type", ""), item.optString("id", ""));
+            return content == null ? null : content.withCorrelation(
+                    "remembered_association", Math.max(0L, nowMs - timestamp));
         }
         return null;
     }
@@ -328,19 +333,31 @@ final class StremioConnectorStore {
         final String type;
         final String id;
         @Nullable final StremioEpisodeId episode;
+        final String correlationSource;
+        final long correlationAgeMs;
 
-        private Content(String type, String id, @Nullable StremioEpisodeId episode) {
+        private Content(String type,
+                        String id,
+                        @Nullable StremioEpisodeId episode,
+                        String correlationSource,
+                        long correlationAgeMs) {
             this.type = type;
             this.id = id;
             this.episode = episode;
+            this.correlationSource = correlationSource;
+            this.correlationAgeMs = correlationAgeMs;
         }
 
         static Content series(StremioEpisodeId episode) {
-            return new Content("series", episode.raw, episode);
+            return new Content("series", episode.raw, episode, "unspecified", -1L);
         }
 
         static Content movie(String id) {
-            return new Content("movie", id, null);
+            return new Content("movie", id, null, "unspecified", -1L);
+        }
+
+        Content withCorrelation(String source, long ageMs) {
+            return new Content(type, id, episode, source, ageMs);
         }
 
         @Nullable

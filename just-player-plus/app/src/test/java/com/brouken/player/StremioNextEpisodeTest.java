@@ -50,6 +50,16 @@ public class StremioNextEpisodeTest {
     }
 
     @Test
+    public void matcherRejectsBrowsingRequestsOlderThanCorrelationWindow() {
+        long now = 1_000_000L;
+
+        assertNotNull(StremioConnectorStore.findRecentContent(
+                events(event("tt1:2:4", now - 89_000L)), now));
+        assertNull(StremioConnectorStore.findRecentContent(
+                events(event("tt1:2:4", now - 91_000L)), now));
+    }
+
+    @Test
     public void freshMovieRequestSupersedesStaleSeriesRequest() {
         long now = 1_000_000L;
 

@@ -201,7 +201,7 @@ public class SettingsActivity extends AppCompatActivity {
                         }
                         clipboard.setPrimaryClip(ClipData.newPlainText(
                                 "JustPlayer Plus connector",
-                                StremioConnectorService.HTTP_MANIFEST_URL));
+                                StremioConnectorService.manifestUrl(context)));
                         Toast.makeText(context,
                                 R.string.pref_stremio_connector_install_instructions,
                                 Toast.LENGTH_LONG).show();

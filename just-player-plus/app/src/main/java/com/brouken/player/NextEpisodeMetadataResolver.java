@@ -24,6 +24,7 @@ import okhttp3.ResponseBody;
 
 /** Resolves IMDb/Cinemeta display metadata and the next released series episode. */
 final class NextEpisodeMetadataResolver {
+    private static final int MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
     private static final Pattern IMDB_ID = Pattern.compile("tt\\d+");
     private static final String CINEMETA_SERIES =
             "https://v3-cinemeta.strem.io/meta/series/%s.json";
@@ -84,7 +85,10 @@ final class NextEpisodeMetadataResolver {
                         listener.onResolved(null);
                         return;
                     }
-                    listener.onResolved(parse(current, body.string(), System.currentTimeMillis()));
+                    listener.onResolved(parse(
+                            current,
+                            BoundedResponseBody.readUtf8(body, MAX_RESPONSE_BYTES),
+                            System.currentTimeMillis()));
                 } catch (IOException | JSONException error) {
                     listener.onResolved(null);
                 }
@@ -116,7 +120,8 @@ final class NextEpisodeMetadataResolver {
                         listener.onResolved(null);
                         return;
                     }
-                    listener.onResolved(parseMovieTitle(body.string()));
+                    listener.onResolved(parseMovieTitle(
+                            BoundedResponseBody.readUtf8(body, MAX_RESPONSE_BYTES)));
                 } catch (IOException | JSONException error) {
                     listener.onResolved(null);
                 }
