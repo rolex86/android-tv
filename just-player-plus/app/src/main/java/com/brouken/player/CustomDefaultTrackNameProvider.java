@@ -42,8 +42,13 @@ class CustomDefaultTrackNameProvider extends DefaultTrackNameProvider {
     }
 
     private static String matchIcon(Format format) {
-        if (SubtitleTrackIdentity.isOpenSubtitlesV3(format.id)) {
-            return SubtitleTrackIdentity.matchIcon(format.id);
+        if (SubtitleTrackIdentity.isOpenSubtitlesV3(format.id, format.label)) {
+            return SubtitleTrackIdentity.matchIcon(
+                    format.id,
+                    format.language,
+                    format.selectionFlags,
+                    format.roleFlags,
+                    format.label);
         }
         if (SubtitleTrackIdentity.isExternal(format.id)) {
             return "?";

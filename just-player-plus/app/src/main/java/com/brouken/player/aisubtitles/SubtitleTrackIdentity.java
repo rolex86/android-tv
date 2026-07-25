@@ -24,6 +24,8 @@ public final class SubtitleTrackIdentity {
 
     private static final Map<String, Integer> OPEN_SUBTITLES_RANKS =
             new ConcurrentHashMap<>();
+    private static final Map<String, Integer> OPEN_SUBTITLES_SIGNATURE_RANKS =
+            new ConcurrentHashMap<>();
     private static final Map<String, Integer> EMBEDDED_KIND_RANKS =
             new ConcurrentHashMap<>();
 
@@ -68,12 +70,17 @@ public final class SubtitleTrackIdentity {
         return canonicalId(id).startsWith(OPEN_SUBTITLES_V3_PREFIX);
     }
 
+    public static boolean isOpenSubtitlesV3(@Nullable String id, @Nullable String label) {
+        return isOpenSubtitlesV3(id) || isOpenSubtitlesLabel(label);
+    }
+
     public static boolean isAi(@Nullable String id) {
         return canonicalId(id).startsWith(AI_PREFIX);
     }
 
     public static void resetOpenSubtitlesMatches() {
         OPEN_SUBTITLES_RANKS.clear();
+        OPEN_SUBTITLES_SIGNATURE_RANKS.clear();
         EMBEDDED_KIND_RANKS.clear();
     }
 
@@ -85,11 +92,27 @@ public final class SubtitleTrackIdentity {
                                                   int rank) {
         String canonical = canonicalId(id);
         if (!canonical.isEmpty()) {
-            OPEN_SUBTITLES_RANKS.merge(canonical, rank, Math::min);
+            registerBestRank(OPEN_SUBTITLES_RANKS, canonical, rank);
+        }
+        String signature = openSubtitlesSignature(
+                language, selectionFlags, roleFlags, label);
+        if (!signature.isEmpty()) {
+            registerBestRank(OPEN_SUBTITLES_SIGNATURE_RANKS, signature, rank);
         }
         String kind = subtitleKindKey(language, selectionFlags, roleFlags, label);
         if (!kind.isEmpty()) {
-            EMBEDDED_KIND_RANKS.merge(kind, rank, Math::min);
+            registerBestRank(EMBEDDED_KIND_RANKS, kind, rank);
+        }
+    }
+
+    private static void registerBestRank(Map<String, Integer> ranks,
+                                         String key,
+                                         int rank) {
+        synchronized (ranks) {
+            Integer previous = ranks.get(key);
+            if (previous == null || rank < previous) {
+                ranks.put(key, rank);
+            }
         }
     }
 
@@ -114,6 +137,20 @@ public final class SubtitleTrackIdentity {
         return Integer.MAX_VALUE;
     }
 
+    public static int openSubtitlesMatchRank(@Nullable String id,
+                                             @Nullable String language,
+                                             int selectionFlags,
+                                             int roleFlags,
+                                             @Nullable String label) {
+        int idRank = openSubtitlesMatchRank(id);
+        if (idRank != Integer.MAX_VALUE) {
+            return idRank;
+        }
+        Integer signatureRank = OPEN_SUBTITLES_SIGNATURE_RANKS.get(
+                openSubtitlesSignature(language, selectionFlags, roleFlags, label));
+        return signatureRank == null ? Integer.MAX_VALUE : signatureRank;
+    }
+
     public static int embeddedMatchRank(@Nullable String language,
                                         int selectionFlags,
                                         int roleFlags,
@@ -125,6 +162,15 @@ public final class SubtitleTrackIdentity {
 
     public static String matchIcon(@Nullable String id) {
         return iconForRank(openSubtitlesMatchRank(id));
+    }
+
+    public static String matchIcon(@Nullable String id,
+                                   @Nullable String language,
+                                   int selectionFlags,
+                                   int roleFlags,
+                                   @Nullable String label) {
+        return iconForRank(openSubtitlesMatchRank(
+                id, language, selectionFlags, roleFlags, label));
     }
 
     public static String embeddedMatchIcon(@Nullable String language,
@@ -167,6 +213,23 @@ public final class SubtitleTrackIdentity {
                 || contains(label, "hearing impaired")
                 || contains(label, "hard of hearing");
         return normalizedLanguage + '|' + (forced ? 'F' : sdh ? 'S' : 'N');
+    }
+
+    private static String openSubtitlesSignature(@Nullable String language,
+                                                 int selectionFlags,
+                                                 int roleFlags,
+                                                 @Nullable String label) {
+        if (!isOpenSubtitlesLabel(label)) {
+            return "";
+        }
+        String kind = subtitleKindKey(language, selectionFlags, roleFlags, label);
+        String normalizedLabel = normalizeText(label);
+        return kind.isEmpty() || normalizedLabel.isEmpty()
+                ? "" : kind + '|' + normalizedLabel;
+    }
+
+    private static boolean isOpenSubtitlesLabel(@Nullable String label) {
+        return normalizeText(label).startsWith("opensubtitles v3");
     }
 
     private static String inferLanguage(@Nullable String label) {

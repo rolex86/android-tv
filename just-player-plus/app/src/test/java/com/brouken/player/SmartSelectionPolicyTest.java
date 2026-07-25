@@ -6,6 +6,9 @@ import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
 import androidx.media3.common.C;
+import androidx.media3.common.Format;
+
+import com.brouken.player.aisubtitles.SubtitleTrackIdentity;
 
 import org.junit.Test;
 
@@ -54,5 +57,54 @@ public class SmartSelectionPolicyTest {
         selection.subtitleAutomatic = true;
         assertEquals(changedAudio, selection.audioSignature());
         assertNotEquals(originalSubtitle, selection.subtitleSignature());
+    }
+
+    @Test
+    public void subtitleSourcePreferenceRecognizesMedia3PrefixedExternalIds() {
+        Format external = new Format.Builder()
+                .setId("1:plus-external:opensubtitles-v3:abc")
+                .build();
+        Format embedded = new Format.Builder().setId("1:embedded:ces").build();
+
+        assertEquals(0, SmartSubtitleSelector.sourceRank(external, "external"));
+        assertEquals(1, SmartSubtitleSelector.sourceRank(embedded, "external"));
+        assertEquals(1, SmartSubtitleSelector.sourceRank(external, "embedded"));
+        assertEquals(0, SmartSubtitleSelector.sourceRank(embedded, "embedded"));
+    }
+
+    @Test
+    public void exactRuntimeMatchOutranksLikelyAndUnknownTracks() {
+        SubtitleTrackIdentity.resetOpenSubtitlesMatches();
+        String exactId = "plus-external:opensubtitles-v3:exact";
+        String likelyId = "plus-external:opensubtitles-v3:likely";
+        SubtitleTrackIdentity.registerOpenSubtitlesMatch(
+                exactId, "ces", 0, C.ROLE_FLAG_SUBTITLE, "Czech", 0);
+        SubtitleTrackIdentity.registerOpenSubtitlesMatch(
+                likelyId, "ces", 0, C.ROLE_FLAG_SUBTITLE, "Czech", 1);
+
+        assertEquals(0, SmartSubtitleSelector.matchRank(
+                new Format.Builder().setId("2:" + exactId).build()));
+        assertEquals(1, SmartSubtitleSelector.matchRank(
+                new Format.Builder().setId(likelyId).build()));
+        assertEquals(2, SmartSubtitleSelector.matchRank(
+                new Format.Builder().setId("embedded:ces").build()));
+    }
+
+    @Test
+    public void automaticSubtitleScorePrioritizesLanguageThenSourceThenExactMatch() {
+        long exact = SmartSubtitleSelector.candidateScore(0, 0, 0, 20);
+        long likely = SmartSubtitleSelector.candidateScore(0, 0, 1, 0);
+        long unknown = SmartSubtitleSelector.candidateScore(0, 0, 2, 0);
+        long preferredSourceUnknown =
+                SmartSubtitleSelector.candidateScore(0, 0, 2, 0);
+        long nonPreferredSourceExact =
+                SmartSubtitleSelector.candidateScore(0, 1, 0, 0);
+        long nextLanguageExact =
+                SmartSubtitleSelector.candidateScore(1, 0, 0, 0);
+
+        assertTrue(exact < likely);
+        assertTrue(likely < unknown);
+        assertTrue(preferredSourceUnknown < nonPreferredSourceExact);
+        assertTrue(nonPreferredSourceExact < nextLanguageExact);
     }
 }

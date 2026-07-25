@@ -5,6 +5,7 @@ import android.net.Uri;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.media3.common.C;
+import androidx.media3.common.Format;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.common.Tracks;
@@ -66,6 +67,7 @@ final class OpenSubtitlesV3Client {
 
     interface Listener {
         void onLoaded(List<MediaItem.SubtitleConfiguration> subtitles);
+        void onRefined(List<MediaItem.SubtitleConfiguration> subtitles);
         void onFailure(String reason);
     }
 
@@ -113,10 +115,10 @@ final class OpenSubtitlesV3Client {
         this.httpClient = httpClient;
     }
 
-    void fetch(String type,
-               String id,
-               String[] preferredLanguages,
-               Listener listener) {
+    synchronized void fetch(String type,
+                            String id,
+                            String[] preferredLanguages,
+                            Listener listener) {
         if (released) {
             return;
         }
@@ -172,13 +174,18 @@ final class OpenSubtitlesV3Client {
                     List<Candidate> genericCandidates = parseCandidatesInternal(
                             json, languages, MatchConfidence.UNKNOWN, filename);
                     List<MediaItem.SubtitleConfiguration> configurations =
-                            buildConfigurations(sortAndLimit(new ArrayList<>(genericCandidates)));
+                            buildConfigurationsIfCurrent(
+                                    token,
+                                    sortAndLimit(new ArrayList<>(genericCandidates)));
+                    if (configurations == null) {
+                        return;
+                    }
                     activeInitialCall = null;
 
                     // This is intentionally delivered before any hash work starts.
                     listener.onLoaded(configurations);
                     startBackgroundRefinement(
-                            token, type, id, languages, genericCandidates);
+                            token, type, id, languages, genericCandidates, listener);
                 } catch (IOException | JSONException | RuntimeException error) {
                     if (isCurrent(token)) {
                         activeInitialCall = null;
@@ -189,11 +196,13 @@ final class OpenSubtitlesV3Client {
         });
     }
 
-    private void startBackgroundRefinement(long token,
-                                           String type,
-                                           String id,
-                                           String[] languages,
-                                           List<Candidate> genericCandidates) {
+    private synchronized void startBackgroundRefinement(
+            long token,
+            String type,
+            String id,
+            String[] languages,
+            List<Candidate> genericCandidates,
+            Listener listener) {
         if (!isCurrent(token)) {
             return;
         }
@@ -208,14 +217,16 @@ final class OpenSubtitlesV3Client {
                 String json = requestRefinementJson(token, exactUrl(type, id, fingerprint));
                 List<Candidate> exactCandidates = parseCandidatesInternal(
                         json, languages, MatchConfidence.EXACT, fingerprint.filename);
-                LinkedHashMap<String, Candidate> merged = new LinkedHashMap<>();
-                merge(merged, genericCandidates);
-                merge(merged, exactCandidates);
-
-                // Re-register confidence for stable track IDs. The already attached list remains
-                // untouched, while icons and embedded-to-online resolution immediately see the
-                // improved exact ranks.
-                buildConfigurations(sortAndLimit(new ArrayList<>(merged.values())));
+                if (exactCandidates.isEmpty()) {
+                    return;
+                }
+                List<MediaItem.SubtitleConfiguration> configurations =
+                        buildConfigurationsIfCurrent(
+                                token,
+                                mergeRefinedCandidates(genericCandidates, exactCandidates));
+                if (configurations != null && isCurrent(token)) {
+                    listener.onRefined(configurations);
+                }
             } catch (IOException | JSONException | RuntimeException ignored) {
                 // Initial OpenSubtitles results are already attached; refinement is optional.
             } finally {
@@ -342,7 +353,15 @@ final class OpenSubtitlesV3Client {
         }
     }
 
-    void cancel() {
+    static List<Candidate> mergeRefinedCandidates(List<Candidate> genericCandidates,
+                                                   List<Candidate> exactCandidates) {
+        LinkedHashMap<String, Candidate> merged = new LinkedHashMap<>();
+        merge(merged, genericCandidates);
+        merge(merged, exactCandidates);
+        return sortAndLimit(new ArrayList<>(merged.values()));
+    }
+
+    synchronized void cancel() {
         operationToken++;
 
         Call initial = activeInitialCall;
@@ -364,7 +383,7 @@ final class OpenSubtitlesV3Client {
         }
     }
 
-    void release() {
+    synchronized void release() {
         if (released) {
             return;
         }
@@ -377,7 +396,14 @@ final class OpenSubtitlesV3Client {
         return !released && token == operationToken;
     }
 
-    private void clearRefinementTask(long token) {
+    @Nullable
+    private synchronized List<MediaItem.SubtitleConfiguration> buildConfigurationsIfCurrent(
+            long token,
+            List<Candidate> candidates) {
+        return isCurrent(token) ? buildConfigurations(candidates) : null;
+    }
+
+    private synchronized void clearRefinementTask(long token) {
         if (operationToken == token) {
             activeRefinementTask = null;
         }
@@ -399,7 +425,8 @@ final class OpenSubtitlesV3Client {
                 continue;
             }
             for (int index = 0; index < group.getMediaTrackGroup().length; index++) {
-                if (isOpenSubtitlesTrack(group.getMediaTrackGroup().getFormat(index).id)) {
+                Format format = group.getMediaTrackGroup().getFormat(index);
+                if (SubtitleTrackIdentity.isOpenSubtitlesV3(format.id, format.label)) {
                     return true;
                 }
             }
@@ -478,11 +505,24 @@ final class OpenSubtitlesV3Client {
     }
 
     private static List<Candidate> sortAndLimit(List<Candidate> candidates) {
-        candidates.sort(Comparator
-                .comparingInt((Candidate candidate) -> candidate.languageRank)
-                .thenComparingInt(candidate -> candidate.confidence.rank)
-                .thenComparingInt(OpenSubtitlesV3Client::typeRank)
-                .thenComparingInt(candidate -> candidate.sourceOrder));
+        Collections.sort(candidates, new Comparator<Candidate>() {
+            @Override
+            public int compare(Candidate first, Candidate second) {
+                int result = Integer.compare(first.languageRank, second.languageRank);
+                if (result != 0) {
+                    return result;
+                }
+                result = Integer.compare(first.confidence.rank, second.confidence.rank);
+                if (result != 0) {
+                    return result;
+                }
+                result = Integer.compare(typeRank(first), typeRank(second));
+                if (result != 0) {
+                    return result;
+                }
+                return Integer.compare(first.sourceOrder, second.sourceOrder);
+            }
+        });
 
         Map<String, Integer> languageCounts = new HashMap<>();
         List<Candidate> selected = new ArrayList<>();

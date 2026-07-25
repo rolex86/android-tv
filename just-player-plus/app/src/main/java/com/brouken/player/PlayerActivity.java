@@ -105,6 +105,7 @@ import androidx.media3.ui.TimeBar;
 import com.brouken.player.dtpv.DoubleTapPlayerView;
 import com.brouken.player.dtpv.youtube.YouTubeOverlay;
 import com.brouken.player.aisubtitles.AiSubtitleController;
+import com.brouken.player.aisubtitles.SubtitleTrackIdentity;
 import com.getkeepsafe.taptargetview.TapTarget;
 import com.getkeepsafe.taptargetview.TapTargetView;
 import com.google.android.material.snackbar.Snackbar;
@@ -153,6 +154,13 @@ public class PlayerActivity extends Activity {
     private boolean openSubtitlesSubtitleExplicitBeforeAttach;
     private boolean openSubtitlesPersistAudioBeforeAttach;
     private boolean openSubtitlesPersistSubtitleBeforeAttach;
+    @Nullable
+    private String openSubtitlesSubtitleIdBeforeAttach;
+    @Nullable
+    private List<String> openSubtitlesExpectedLabels;
+    @Nullable
+    private List<MediaItem.SubtitleConfiguration> pendingOpenSubtitlesRefinement;
+    private int pendingOpenSubtitlesRefinementSession;
     private int nextEpisodeSession;
     private boolean nextEpisodeDismissed;
     private boolean nextEpisodeShown;
@@ -965,6 +973,14 @@ public class PlayerActivity extends Activity {
                     }
 
                     @Override
+                    public void onRefined(List<MediaItem.SubtitleConfiguration> subtitles) {
+                        if (playerView != null) {
+                            playerView.post(() -> acceptOpenSubtitlesV3Refinement(
+                                    session, subtitles));
+                        }
+                    }
+
+                    @Override
                     public void onFailure(String reason) {
                         if (playerView != null) {
                             playerView.post(() -> {
@@ -1012,10 +1028,89 @@ public class PlayerActivity extends Activity {
         if (added == 0) {
             return;
         }
-        attachOpenSubtitlesV3(session, 0);
+        attachOpenSubtitlesV3(session, 0, false);
     }
 
-    private void attachOpenSubtitlesV3(int session, int attempt) {
+    private void acceptOpenSubtitlesV3Refinement(
+            int session,
+            List<MediaItem.SubtitleConfiguration> subtitles) {
+        if (session != nextEpisodeSession || isFinishing()
+                || !isNextEpisodeFeatureEnabled() || subtitles.isEmpty()) {
+            return;
+        }
+        if (openSubtitlesAttachPending) {
+            pendingOpenSubtitlesRefinement = new ArrayList<>(subtitles);
+            pendingOpenSubtitlesRefinementSession = session;
+            return;
+        }
+        if (trackSelectionChangePending && trackMemoryArmed && player != null) {
+            trackSelectionChangePending = false;
+            rememberManualTrackSelection(player.getCurrentTracks());
+        }
+
+        List<MediaItem.SubtitleConfiguration> refinedSubtitles =
+                preserveSelectedOpenSubtitlesConfiguration(subtitles);
+        List<MediaItem.SubtitleConfiguration> updatedApiSubs = new ArrayList<>();
+        for (MediaItem.SubtitleConfiguration subtitle : apiSubs) {
+            if (!SubtitleTrackIdentity.isOpenSubtitlesV3(subtitle.id)) {
+                updatedApiSubs.add(subtitle);
+            }
+        }
+        updatedApiSubs.addAll(refinedSubtitles);
+        apiSubs.clear();
+        apiSubs.addAll(updatedApiSubs);
+        externalDiagnostics.recordStremioConnector(
+                "opensubtitles_v3_refined", "count=" + refinedSubtitles.size());
+        attachOpenSubtitlesV3(session, 0, true);
+    }
+
+    private List<MediaItem.SubtitleConfiguration> preserveSelectedOpenSubtitlesConfiguration(
+            List<MediaItem.SubtitleConfiguration> refined) {
+        List<MediaItem.SubtitleConfiguration> result = new ArrayList<>(refined);
+        if (!subtitleSelectionExplicit || player == null
+                || player.getCurrentMediaItem() == null
+                || player.getCurrentMediaItem().localConfiguration == null) {
+            return result;
+        }
+        Format selected = selectedTrackFormat(
+                player.getCurrentTracks(), C.TRACK_TYPE_TEXT);
+        if (selected == null) {
+            return result;
+        }
+
+        MediaItem.SubtitleConfiguration selectedConfiguration = null;
+        for (MediaItem.SubtitleConfiguration configuration
+                : player.getCurrentMediaItem().localConfiguration.subtitleConfigurations) {
+            if (!SubtitleTrackIdentity.isOpenSubtitlesV3(
+                    configuration.id, configuration.label)) {
+                continue;
+            }
+            if (SubtitleTrackIdentity.sameStableId(selected.id, configuration.id)) {
+                selectedConfiguration = configuration;
+                break;
+            }
+            if (Objects.equals(selected.label, configuration.label)) {
+                if (selectedConfiguration != null) {
+                    selectedConfiguration = null;
+                    break;
+                }
+                selectedConfiguration = configuration;
+            }
+        }
+        if (selectedConfiguration == null) {
+            return result;
+        }
+        for (MediaItem.SubtitleConfiguration configuration : result) {
+            if (SubtitleTrackIdentity.sameStableId(
+                    selectedConfiguration.id, configuration.id)) {
+                return result;
+            }
+        }
+        result.add(selectedConfiguration);
+        return result;
+    }
+
+    private void attachOpenSubtitlesV3(int session, int attempt, boolean replaceExisting) {
         if (session != nextEpisodeSession || isFinishing()) {
             return;
         }
@@ -1023,7 +1118,8 @@ public class PlayerActivity extends Activity {
         MediaItem mediaItem = currentPlayer == null ? null : currentPlayer.getCurrentMediaItem();
         if (currentPlayer == null || mediaItem == null) {
             if (attempt < 4 && playerView != null) {
-                playerView.postDelayed(() -> attachOpenSubtitlesV3(session, attempt + 1), 250L);
+                playerView.postDelayed(() -> attachOpenSubtitlesV3(
+                        session, attempt + 1, replaceExisting), 250L);
             }
             return;
         }
@@ -1033,8 +1129,13 @@ public class PlayerActivity extends Activity {
                         ? Collections.emptyList()
                         : mediaItem.localConfiguration.subtitleConfigurations;
         java.util.HashSet<String> knownIds = new java.util.HashSet<>();
-        List<MediaItem.SubtitleConfiguration> updated = new ArrayList<>(existing);
+        List<MediaItem.SubtitleConfiguration> updated = new ArrayList<>();
         for (MediaItem.SubtitleConfiguration subtitle : existing) {
+            if (replaceExisting
+                    && SubtitleTrackIdentity.isOpenSubtitlesV3(subtitle.id)) {
+                continue;
+            }
+            updated.add(subtitle);
             if (subtitle.id != null) {
                 knownIds.add(subtitle.id);
             }
@@ -1046,7 +1147,7 @@ public class PlayerActivity extends Activity {
                 added++;
             }
         }
-        if (added == 0) {
+        if (!replaceExisting && added == 0) {
             return;
         }
 
@@ -1058,6 +1159,9 @@ public class PlayerActivity extends Activity {
         openSubtitlesSubtitleExplicitBeforeAttach = subtitleSelectionExplicit;
         openSubtitlesPersistAudioBeforeAttach = persistAudioSelectionPerFile;
         openSubtitlesPersistSubtitleBeforeAttach = persistSubtitleSelectionPerFile;
+        openSubtitlesSubtitleIdBeforeAttach = subtitleSelectionExplicit
+                ? selectedTrackId(currentPlayer.getCurrentTracks(), C.TRACK_TYPE_TEXT)
+                : null;
         openSubtitlesAttachPending = true;
         trackMemoryArmed = false;
         trackSelectionChangePending = false;
@@ -1074,9 +1178,12 @@ public class PlayerActivity extends Activity {
         MediaItem updatedItem = mediaItem.buildUpon()
                 .setSubtitleConfigurations(updated)
                 .build();
+        openSubtitlesExpectedLabels = openSubtitlesLabels(updated);
         currentPlayer.setMediaItem(updatedItem, false);
         externalDiagnostics.recordStremioConnector(
-                "opensubtitles_v3_attached", "count=" + added);
+                replaceExisting ? "opensubtitles_v3_refinement_attached"
+                        : "opensubtitles_v3_attached",
+                "count=" + added);
         if (openSubtitlesAttachPending && playerView != null) {
             playerView.postDelayed(() -> {
                 if (session == nextEpisodeSession && player != null) {
@@ -1088,15 +1195,18 @@ public class PlayerActivity extends Activity {
 
     private void finishOpenSubtitlesAttach(Tracks tracks) {
         if (!openSubtitlesAttachPending
-                || !OpenSubtitlesV3Client.hasOpenSubtitlesTrack(tracks)
+                || !hasExpectedOpenSubtitlesTracks(tracks)
                 || player == null) {
             return;
         }
         RememberedTrackStore.Selection previous = openSubtitlesSelectionBeforeAttach;
+        String subtitleIdBeforeAttach = openSubtitlesSubtitleIdBeforeAttach;
         boolean audioRestored = true;
         boolean subtitleRestored = true;
         openSubtitlesAttachPending = false;
         openSubtitlesSelectionBeforeAttach = null;
+        openSubtitlesSubtitleIdBeforeAttach = null;
+        openSubtitlesExpectedLabels = null;
         trackSelectionChangePending = false;
 
         if (previous != null) {
@@ -1111,7 +1221,13 @@ public class PlayerActivity extends Activity {
             if (previous.subtitleAutomatic) {
                 applySmartSubtitleSelection();
             } else {
-                subtitleRestored = applyRememberedSubtitleSelection(previous);
+                subtitleRestored = applyTrackSelectionByStableId(
+                        tracks,
+                        C.TRACK_TYPE_TEXT,
+                        subtitleIdBeforeAttach);
+                if (!subtitleRestored) {
+                    subtitleRestored = applyRememberedSubtitleSelection(previous);
+                }
                 if (!subtitleRestored) {
                     applySmartSubtitleSelection();
                 }
@@ -1142,6 +1258,15 @@ public class PlayerActivity extends Activity {
                 }
             }, 300L);
         }
+
+        List<MediaItem.SubtitleConfiguration> pending = pendingOpenSubtitlesRefinement;
+        int pendingSession = pendingOpenSubtitlesRefinementSession;
+        pendingOpenSubtitlesRefinement = null;
+        pendingOpenSubtitlesRefinementSession = 0;
+        if (pending != null && playerView != null) {
+            playerView.post(() -> acceptOpenSubtitlesV3Refinement(
+                    pendingSession, pending));
+        }
     }
 
     private void clearOpenSubtitlesAttachState() {
@@ -1151,6 +1276,94 @@ public class PlayerActivity extends Activity {
         openSubtitlesSubtitleExplicitBeforeAttach = false;
         openSubtitlesPersistAudioBeforeAttach = false;
         openSubtitlesPersistSubtitleBeforeAttach = false;
+        openSubtitlesSubtitleIdBeforeAttach = null;
+        openSubtitlesExpectedLabels = null;
+        pendingOpenSubtitlesRefinement = null;
+        pendingOpenSubtitlesRefinementSession = 0;
+    }
+
+    private static List<String> openSubtitlesLabels(
+            List<MediaItem.SubtitleConfiguration> configurations) {
+        List<String> labels = new ArrayList<>();
+        for (MediaItem.SubtitleConfiguration configuration : configurations) {
+            if (SubtitleTrackIdentity.isOpenSubtitlesV3(
+                    configuration.id, configuration.label)) {
+                labels.add(configuration.label == null ? "" : configuration.label);
+            }
+        }
+        return labels;
+    }
+
+    private boolean hasExpectedOpenSubtitlesTracks(Tracks tracks) {
+        List<String> expected = openSubtitlesExpectedLabels;
+        if (expected == null || expected.isEmpty()) {
+            return OpenSubtitlesV3Client.hasOpenSubtitlesTrack(tracks);
+        }
+        List<String> actual = new ArrayList<>();
+        for (Tracks.Group group : tracks.getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_TEXT) {
+                continue;
+            }
+            TrackGroup trackGroup = group.getMediaTrackGroup();
+            for (int index = 0; index < trackGroup.length; index++) {
+                Format format = trackGroup.getFormat(index);
+                if (SubtitleTrackIdentity.isOpenSubtitlesV3(format.id, format.label)) {
+                    actual.add(format.label == null ? "" : format.label);
+                }
+            }
+        }
+        return expected.equals(actual);
+    }
+
+    @Nullable
+    private static String selectedTrackId(Tracks tracks, int trackType) {
+        Format selected = selectedTrackFormat(tracks, trackType);
+        return selected == null ? null : selected.id;
+    }
+
+    @Nullable
+    private static Format selectedTrackFormat(Tracks tracks, int trackType) {
+        for (Tracks.Group group : tracks.getGroups()) {
+            if (group.getType() != trackType) {
+                continue;
+            }
+            TrackGroup trackGroup = group.getMediaTrackGroup();
+            for (int index = 0; index < trackGroup.length; index++) {
+                if (group.isTrackSelected(index)) {
+                    return trackGroup.getFormat(index);
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean applyTrackSelectionByStableId(
+            Tracks tracks,
+            int trackType,
+            @Nullable String stableId) {
+        if (player == null || stableId == null || stableId.isEmpty()) {
+            return false;
+        }
+        for (Tracks.Group group : tracks.getGroups()) {
+            if (group.getType() != trackType) {
+                continue;
+            }
+            TrackGroup trackGroup = group.getMediaTrackGroup();
+            for (int index = 0; index < trackGroup.length; index++) {
+                if (group.isTrackSupported(index)
+                        && SubtitleTrackIdentity.sameStableId(
+                        stableId, trackGroup.getFormat(index).id)) {
+                    player.setTrackSelectionParameters(
+                            player.getTrackSelectionParameters().buildUpon()
+                                    .setTrackTypeDisabled(trackType, false)
+                                    .setOverrideForType(new TrackSelectionOverride(
+                                            trackGroup, Collections.singletonList(index)))
+                                    .build());
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private void acceptMovieTitle(int session, String movieId, @Nullable String title) {

@@ -93,6 +93,25 @@ public class SelectedSubtitleResolverTest {
     }
 
     @Test
+    public void recoversRuntimeMatchFromLabelWhenMedia3ReplacesTrackId() {
+        SubtitleTrackIdentity.resetOpenSubtitlesMatches();
+        String label = "OpenSubtitles v3 · CES · Movie.Release";
+        SubtitleTrackIdentity.registerOpenSubtitlesMatch(
+                "plus-external:opensubtitles-v3:abc",
+                "ces",
+                0,
+                C.ROLE_FLAG_SUBTITLE,
+                label,
+                0);
+
+        assertTrue(SubtitleTrackIdentity.isOpenSubtitlesV3("1:2", label));
+        assertEquals(0, SubtitleTrackIdentity.openSubtitlesMatchRank(
+                "1:2", "ces", 0, C.ROLE_FLAG_SUBTITLE, label));
+        assertEquals("✓", SubtitleTrackIdentity.matchIcon(
+                "1:2", "ces", 0, C.ROLE_FLAG_SUBTITLE, label));
+    }
+
+    @Test
     public void doesNotGuessExternalTrackFromLanguageOnly() {
         assertFalse(SelectedSubtitleResolver.matchesExternalConfiguration(
                 "plus-external:opensubtitles-v3:abc",

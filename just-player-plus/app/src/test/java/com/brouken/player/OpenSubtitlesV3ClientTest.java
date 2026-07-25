@@ -4,6 +4,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Test;
 
+import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
@@ -78,6 +79,53 @@ public class OpenSubtitlesV3ClientTest {
         assertFalse(OpenSubtitlesV3Client.isLikelyReleaseMatch(
                 "Movie.2026.2160p.UHD.BluRay.REMUX.HEVC-GROUP.mkv",
                 "Movie.2026.1080p.WEB-DL.x264-OTHER.srt"));
+    }
+
+    @Test
+    public void refinementPromotesExistingMatchesAndKeepsExactOnlyResults() {
+        OpenSubtitlesV3Client.Candidate genericUnknown = candidate(
+                "https://example.test/shared.srt",
+                OpenSubtitlesV3Client.MatchConfidence.UNKNOWN,
+                0);
+        OpenSubtitlesV3Client.Candidate genericLikely = candidate(
+                "https://example.test/likely.srt",
+                OpenSubtitlesV3Client.MatchConfidence.LIKELY,
+                1);
+        OpenSubtitlesV3Client.Candidate exactShared = candidate(
+                genericUnknown.url,
+                OpenSubtitlesV3Client.MatchConfidence.EXACT,
+                0);
+        OpenSubtitlesV3Client.Candidate exactOnly = candidate(
+                "https://example.test/exact-only.srt",
+                OpenSubtitlesV3Client.MatchConfidence.EXACT,
+                1);
+
+        List<OpenSubtitlesV3Client.Candidate> refined =
+                OpenSubtitlesV3Client.mergeRefinedCandidates(
+                        Arrays.asList(genericUnknown, genericLikely),
+                        Arrays.asList(exactShared, exactOnly));
+
+        assertEquals(3, refined.size());
+        assertEquals(OpenSubtitlesV3Client.MatchConfidence.EXACT, refined.get(0).confidence);
+        assertEquals(OpenSubtitlesV3Client.MatchConfidence.EXACT, refined.get(1).confidence);
+        assertEquals(OpenSubtitlesV3Client.MatchConfidence.LIKELY, refined.get(2).confidence);
+        boolean exactOnlyIncluded = false;
+        for (OpenSubtitlesV3Client.Candidate candidate : refined) {
+            if (exactOnly.url.equals(candidate.url)) {
+                exactOnlyIncluded = true;
+                break;
+            }
+        }
+        assertTrue(exactOnlyIncluded);
+    }
+
+    private static OpenSubtitlesV3Client.Candidate candidate(
+            String url,
+            OpenSubtitlesV3Client.MatchConfidence confidence,
+            int sourceOrder) {
+        return new OpenSubtitlesV3Client.Candidate(
+                url, "ces", "Czech", "application/x-subrip",
+                0, 0, confidence, 0, sourceOrder);
     }
 
     private static JSONObject item(String language, String url, String id) throws Exception {
