@@ -40,7 +40,7 @@ import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
-/** Loads and ranks subtitle candidates from Stremio's official OpenSubtitles v3 addon. */
+/** Loads OpenSubtitles immediately, then refines confidence in the background. */
 final class OpenSubtitlesV3Client {
     static final String TRACK_ID_PREFIX = SmartSubtitleSelector.EXTERNAL_ID_PREFIX
             + "opensubtitles-v3:";
@@ -50,11 +50,9 @@ final class OpenSubtitlesV3Client {
     private static final int MAX_LABEL_LENGTH = 140;
 
     enum MatchConfidence {
-        EXACT("exact", 0), LIKELY("likely", 1), UNKNOWN("unknown", 2);
-        final String idPart;
+        EXACT(0), LIKELY(1), UNKNOWN(2);
         final int rank;
-        MatchConfidence(String idPart, int rank) {
-            this.idPart = idPart;
+        MatchConfidence(int rank) {
             this.rank = rank;
         }
     }
@@ -104,6 +102,7 @@ final class OpenSubtitlesV3Client {
     void fetch(String type, String id, String[] preferredLanguages, Listener listener) {
         if (released) return;
         cancel();
+        SubtitleTrackIdentity.resetOpenSubtitlesMatches();
         long token = operationToken;
         String[] languages = requestedLanguages(preferredLanguages);
         if (!isSupportedContent(type, id) || languages.length == 0) {
@@ -135,41 +134,45 @@ final class OpenSubtitlesV3Client {
     private void fetchInBackground(long token, String type, String id,
                                    String[] languages, Listener listener) {
         LinkedHashMap<String, Candidate> merged = new LinkedHashMap<>();
-        boolean succeeded = false;
-        OpenSubtitlesMediaFingerprint.Result fingerprint = fingerprint(token);
+        String filename = currentFilename();
 
-        if (isCurrent(token) && fingerprint != null) {
-            try {
-                merge(merged, parseCandidatesInternal(
-                        requestJson(token, exactUrl(type, id, fingerprint)), languages,
-                        MatchConfidence.EXACT, fingerprint.filename));
-                succeeded = true;
-            } catch (IOException | JSONException | RuntimeException ignored) {
-                // Generic IMDb lookup below remains available.
+        // Preserve the old behavior: generic IMDb results are loaded and attached first.
+        try {
+            merge(merged, parseCandidatesInternal(
+                    requestJson(token, genericUrl(type, id)), languages,
+                    MatchConfidence.UNKNOWN, filename));
+        } catch (IOException | JSONException | RuntimeException error) {
+            if (isCurrent(token)) {
+                clearTask(token);
+                listener.onFailure(error instanceof IOException ? "network" : "invalid_response");
             }
-        }
-
-        if (isCurrent(token)) {
-            try {
-                merge(merged, parseCandidatesInternal(
-                        requestJson(token, genericUrl(type, id)), languages,
-                        MatchConfidence.UNKNOWN,
-                        fingerprint == null ? currentFilename() : fingerprint.filename));
-                succeeded = true;
-            } catch (IOException | JSONException | RuntimeException error) {
-                if (!succeeded && isCurrent(token)) {
-                    clearTask(token);
-                    listener.onFailure(error instanceof IOException ? "network" : "invalid_response");
-                    return;
-                }
-            }
+            return;
         }
 
         if (!isCurrent(token)) return;
-        List<MediaItem.SubtitleConfiguration> result = buildConfigurations(
+        List<MediaItem.SubtitleConfiguration> immediate = buildConfigurations(
                 sortAndLimit(new ArrayList<>(merged.values())));
+        listener.onLoaded(immediate);
+
+        // Hashing is a second-stage refinement and never blocks the initial list.
+        OpenSubtitlesMediaFingerprint.Result fingerprint = fingerprint(token);
+        if (!isCurrent(token) || fingerprint == null) {
+            clearTask(token);
+            return;
+        }
+        try {
+            merge(merged, parseCandidatesInternal(
+                    requestJson(token, exactUrl(type, id, fingerprint)), languages,
+                    MatchConfidence.EXACT, fingerprint.filename));
+        } catch (IOException | JSONException | RuntimeException ignored) {
+            clearTask(token);
+            return;
+        }
+
+        if (!isCurrent(token)) return;
+        // Re-register refined ranks. Stable IDs prevent duplicate tracks in PlayerActivity.
+        buildConfigurations(sortAndLimit(new ArrayList<>(merged.values())));
         clearTask(token);
-        listener.onLoaded(result);
     }
 
     @Nullable
@@ -371,8 +374,11 @@ final class OpenSubtitlesV3Client {
             List<Candidate> candidates) {
         List<MediaItem.SubtitleConfiguration> result = new ArrayList<>();
         for (Candidate c : candidates) {
+            String id = TRACK_ID_PREFIX + shortHash(c.url);
+            SubtitleTrackIdentity.registerOpenSubtitlesMatch(
+                    id, c.language, c.selectionFlags, c.roleFlags, c.label, c.confidence.rank);
             result.add(new MediaItem.SubtitleConfiguration.Builder(Uri.parse(c.url))
-                    .setId(TRACK_ID_PREFIX + c.confidence.idPart + ":" + shortHash(c.url))
+                    .setId(id)
                     .setLanguage(c.language).setLabel(c.label).setMimeType(c.mimeType)
                     .setRoleFlags(c.roleFlags).setSelectionFlags(c.selectionFlags).build());
         }
