@@ -79,7 +79,14 @@ public class SelectedSubtitleResolverTest {
                 id, "eng", 0, C.ROLE_FLAG_SUBTITLE, "English Full", 2);
         assertEquals(2, SubtitleTrackIdentity.openSubtitlesMatchRank(id));
         assertEquals("?", SubtitleTrackIdentity.matchIcon(id));
-        assertEquals("?", SubtitleTrackIdentity.embeddedMatchIcon(
+        assertEquals("", SubtitleTrackIdentity.embeddedMatchIcon(
+                "eng", 0, C.ROLE_FLAG_SUBTITLE, "English Full"));
+
+        SubtitleTrackIdentity.registerOpenSubtitlesMatch(
+                id, "eng", 0, C.ROLE_FLAG_SUBTITLE, "English Full", 1);
+        assertEquals(1, SubtitleTrackIdentity.openSubtitlesMatchRank(id));
+        assertEquals("≈", SubtitleTrackIdentity.matchIcon(id));
+        assertEquals("", SubtitleTrackIdentity.embeddedMatchIcon(
                 "eng", 0, C.ROLE_FLAG_SUBTITLE, "English Full"));
 
         SubtitleTrackIdentity.registerOpenSubtitlesMatch(

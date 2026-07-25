@@ -215,6 +215,7 @@ public class PlayerActivity extends Activity {
     private ImageButton aiSubtitleButton;
     private LinearLayout dynamicControls;
     private AiSubtitleController aiSubtitleController;
+    @Nullable private AiSubtitleAttachTransaction aiSubtitleAttachTransaction;
     private ImageButton exoPlayPause;
     private ProgressBar loadingProgressBar;
     private PlayerControlView controlView;
@@ -269,6 +270,62 @@ public class PlayerActivity extends Activity {
     private PlayerMessage nextEpisodePopupMessage;
     private int nextEpisodePopupScheduleGeneration;
     private long nextEpisodeNoticeMs = TimeUnit.SECONDS.toMillis(30L);
+    private static final long AI_SUBTITLE_ATTACH_TIMEOUT_MS = 30_000L;
+
+    private static final class AiSubtitleAttachTransaction {
+        final int playerGeneration;
+        final int mediaItemIndex;
+        final MediaItem originalItem;
+        final long positionMs;
+        final boolean playWhenReady;
+        final PlaybackParameters playbackParameters;
+        final RememberedTrackStore.Selection previousSelection;
+        @Nullable final String previousSubtitleId;
+        final boolean trackMemoryWasArmed;
+        final boolean audioSelectionWasExplicit;
+        final boolean subtitleSelectionWasExplicit;
+        final boolean persistAudioSelection;
+        final boolean persistSubtitleSelection;
+        final String expectedSubtitleId;
+        final AiSubtitleController.AttachmentCallback callback;
+        @Nullable Runnable timeoutRunnable;
+        boolean recovering;
+        boolean rollbackPrepared;
+        String failureReason = "unknown";
+
+        AiSubtitleAttachTransaction(
+                int playerGeneration,
+                int mediaItemIndex,
+                MediaItem originalItem,
+                long positionMs,
+                boolean playWhenReady,
+                PlaybackParameters playbackParameters,
+                RememberedTrackStore.Selection previousSelection,
+                @Nullable String previousSubtitleId,
+                boolean trackMemoryWasArmed,
+                boolean audioSelectionWasExplicit,
+                boolean subtitleSelectionWasExplicit,
+                boolean persistAudioSelection,
+                boolean persistSubtitleSelection,
+                String expectedSubtitleId,
+                AiSubtitleController.AttachmentCallback callback) {
+            this.playerGeneration = playerGeneration;
+            this.mediaItemIndex = mediaItemIndex;
+            this.originalItem = originalItem;
+            this.positionMs = positionMs;
+            this.playWhenReady = playWhenReady;
+            this.playbackParameters = playbackParameters;
+            this.previousSelection = previousSelection;
+            this.previousSubtitleId = previousSubtitleId;
+            this.trackMemoryWasArmed = trackMemoryWasArmed;
+            this.audioSelectionWasExplicit = audioSelectionWasExplicit;
+            this.subtitleSelectionWasExplicit = subtitleSelectionWasExplicit;
+            this.persistAudioSelection = persistAudioSelection;
+            this.persistSubtitleSelection = persistSubtitleSelection;
+            this.expectedSubtitleId = expectedSubtitleId;
+            this.callback = callback;
+        }
+    }
 
     private final SharedPreferences.OnSharedPreferenceChangeListener plusPreferenceListener =
             (preferences, key) -> {
@@ -847,7 +904,9 @@ public class PlayerActivity extends Activity {
                 .readTimeout(10, TimeUnit.SECONDS)
                 .build();
         nextEpisodeMetadataResolver = new NextEpisodeMetadataResolver(nextEpisodeHttpClient);
-        openSubtitlesV3Client = new OpenSubtitlesV3Client(nextEpisodeHttpClient);
+        openSubtitlesV3Client = new OpenSubtitlesV3Client(
+                nextEpisodeHttpClient,
+                (state, detail) -> externalDiagnostics.recordStremioConnector(state, detail));
         nextEpisodeOverlay = new NextEpisodeOverlay(
                 coordinatorLayout, nextEpisodeHttpClient, new NextEpisodeOverlay.Listener() {
             @Override
@@ -1181,6 +1240,7 @@ public class PlayerActivity extends Activity {
         apiSubs.addAll(updatedApiSubs);
         externalDiagnostics.recordStremioConnector(
                 "opensubtitles_v3_refined", "count=" + refinedSubtitles.size());
+        updateAiSubtitleButtonState();
         if (hasSameOpenSubtitlesConfigurations(refinedSubtitles)) {
             if (!subtitleSelectionExplicit) {
                 boolean memoryWasArmed = trackMemoryArmed;
@@ -2438,6 +2498,7 @@ public class PlayerActivity extends Activity {
 
     public void initializePlayer() {
         releaseAiSubtitleController();
+        abandonAiSubtitleAttach();
         clearOpenSubtitlesAttachState();
         if (frameRateSwitchThread != null) {
             frameRateSwitchThread.interrupt();
@@ -2713,6 +2774,7 @@ public class PlayerActivity extends Activity {
 
     public void releasePlayer(boolean save) {
         releaseAiSubtitleController();
+        abandonAiSubtitleAttach();
         cancelNextEpisodePopupMessage();
         trackMemoryArmed = false;
         trackSelectionChangePending = false;
@@ -2885,6 +2947,7 @@ public class PlayerActivity extends Activity {
             setEndControlsVisible(haveMedia && (state == Player.STATE_ENDED || isNearEnd));
 
             if (state == Player.STATE_READY) {
+                completeAiSubtitleAttachIfReady();
                 frameRendered = true;
 
                 if (nextEpisodeInfo != null && !nextEpisodeDismissed && !nextEpisodeShown) {
@@ -3062,6 +3125,7 @@ public class PlayerActivity extends Activity {
         @Override
         public void onTracksChanged(Tracks tracks) {
             finishOpenSubtitlesAttach(tracks);
+            completeAiSubtitleAttachIfReady();
             if (aiSubtitleController != null) {
                 aiSubtitleController.onTracksChanged();
             } else {
@@ -3099,6 +3163,20 @@ public class PlayerActivity extends Activity {
             if (error instanceof ExoPlaybackException) {
                 final ExoPlaybackException exoPlaybackException = (ExoPlaybackException) error;
                 if (exoPlaybackException.type == ExoPlaybackException.TYPE_SOURCE) {
+                    AiSubtitleAttachTransaction transaction = aiSubtitleAttachTransaction;
+                    if (transaction != null) {
+                        if (!transaction.recovering) {
+                            rollbackAiSubtitleAttach(
+                                    transaction, "source_error_" + error.errorCode);
+                            return;
+                        }
+                        externalDiagnostics.recordStremioConnector(
+                                "ai_subtitle_attach_rollback_failed",
+                                "reason=source_error_" + error.errorCode);
+                        finishAiSubtitleAttach(transaction, false);
+                        finish();
+                        return;
+                    }
                     releasePlayer(false);
                     return;
                 }
@@ -4035,7 +4113,243 @@ public class PlayerActivity extends Activity {
                         || mPlusPrefs.aiSubtitleTargetLanguage.isEmpty()
                         ? "ces" : mPlusPrefs.aiSubtitleTargetLanguage;
             }
+
+            @Override
+            public void attachAiSubtitle(
+                    MediaItem.SubtitleConfiguration configuration,
+                    AiSubtitleController.AttachmentCallback callback) {
+                attachAiSubtitleConfiguration(configuration, callback);
+            }
         }, aiSubtitleButton);
+    }
+
+    private void attachAiSubtitleConfiguration(
+            MediaItem.SubtitleConfiguration configuration,
+            AiSubtitleController.AttachmentCallback callback) {
+        ExoPlayer currentPlayer = player;
+        MediaItem currentItem = currentPlayer == null ? null : currentPlayer.getCurrentMediaItem();
+        if (currentPlayer == null || currentItem == null || configuration.id == null
+                || aiSubtitleAttachTransaction != null) {
+            callback.onFailure();
+            return;
+        }
+
+        List<MediaItem.SubtitleConfiguration> existing =
+                currentItem.localConfiguration == null
+                        ? Collections.emptyList()
+                        : currentItem.localConfiguration.subtitleConfigurations;
+        List<MediaItem.SubtitleConfiguration> updated = new ArrayList<>(existing);
+        for (MediaItem.SubtitleConfiguration item : existing) {
+            if (SubtitleTrackIdentity.sameStableId(configuration.id, item.id)) {
+                callback.onAttached();
+                return;
+            }
+        }
+        updated.add(configuration);
+
+        RememberedTrackStore.Selection previousSelection = RememberedTrackStore.capture(
+                currentPlayer.getCurrentTracks(),
+                currentPlayer.getTrackSelectionParameters(),
+                !audioSelectionExplicit,
+                !subtitleSelectionExplicit);
+        AiSubtitleAttachTransaction transaction = new AiSubtitleAttachTransaction(
+                playerGeneration,
+                currentPlayer.getCurrentMediaItemIndex(),
+                currentItem,
+                currentPlayer.getCurrentPosition(),
+                currentPlayer.getPlayWhenReady(),
+                currentPlayer.getPlaybackParameters(),
+                previousSelection,
+                selectedTrackId(currentPlayer.getCurrentTracks(), C.TRACK_TYPE_TEXT),
+                trackMemoryArmed,
+                audioSelectionExplicit,
+                subtitleSelectionExplicit,
+                persistAudioSelectionPerFile,
+                persistSubtitleSelectionPerFile,
+                configuration.id,
+                callback);
+        aiSubtitleAttachTransaction = transaction;
+        trackMemoryArmed = false;
+        trackSelectionChangePending = false;
+
+        MediaItem updatedItem = currentItem.buildUpon()
+                .setSubtitleConfigurations(updated)
+                .build();
+        externalDiagnostics.recordStremioConnector(
+                "ai_subtitle_attach_started", "positionMs=" + transaction.positionMs);
+        try {
+            currentPlayer.replaceMediaItem(transaction.mediaItemIndex, updatedItem);
+        } catch (RuntimeException error) {
+            externalDiagnostics.recordStremioConnector(
+                    "ai_subtitle_attach_failed", "reason=replace_exception");
+            finishAiSubtitleAttach(transaction, false);
+            return;
+        }
+        scheduleAiSubtitleAttachTimeout(transaction);
+        completeAiSubtitleAttachIfReady();
+    }
+
+    private void scheduleAiSubtitleAttachTimeout(AiSubtitleAttachTransaction transaction) {
+        if (playerView == null) {
+            rollbackAiSubtitleAttach(transaction, "missing_player_view");
+            return;
+        }
+        if (transaction.timeoutRunnable != null) {
+            playerView.removeCallbacks(transaction.timeoutRunnable);
+        }
+        transaction.timeoutRunnable = () -> {
+            if (aiSubtitleAttachTransaction != transaction) {
+                return;
+            }
+            if (transaction.recovering) {
+                externalDiagnostics.recordStremioConnector(
+                        "ai_subtitle_attach_rollback_failed", "reason=timeout");
+                finishAiSubtitleAttach(transaction, false);
+                finish();
+            } else {
+                rollbackAiSubtitleAttach(transaction, "attach_timeout");
+            }
+        };
+        playerView.postDelayed(transaction.timeoutRunnable, AI_SUBTITLE_ATTACH_TIMEOUT_MS);
+    }
+
+    private void completeAiSubtitleAttachIfReady() {
+        AiSubtitleAttachTransaction transaction = aiSubtitleAttachTransaction;
+        ExoPlayer currentPlayer = player;
+        if (transaction == null || currentPlayer == null
+                || transaction.playerGeneration != playerGeneration
+                || currentPlayer.getPlaybackState() != Player.STATE_READY) {
+            return;
+        }
+        if (transaction.recovering) {
+            if (!transaction.rollbackPrepared) {
+                return;
+            }
+            restoreAiSubtitlePreviousSelection(transaction, true);
+            externalDiagnostics.recordStremioConnector(
+                    "ai_subtitle_attach_rolled_back",
+                    "reason=" + transaction.failureReason);
+            finishAiSubtitleAttach(transaction, false);
+            return;
+        }
+        if (!hasSubtitleTrack(
+                currentPlayer.getCurrentTracks(), transaction.expectedSubtitleId)) {
+            return;
+        }
+        restoreAiSubtitlePreviousSelection(transaction, true);
+        externalDiagnostics.recordStremioConnector(
+                "ai_subtitle_attach_ready", "track=true");
+        finishAiSubtitleAttach(transaction, true);
+    }
+
+    private static boolean hasSubtitleTrack(Tracks tracks, String expectedId) {
+        for (Tracks.Group group : tracks.getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_TEXT) {
+                continue;
+            }
+            TrackGroup trackGroup = group.getMediaTrackGroup();
+            for (int index = 0; index < trackGroup.length; index++) {
+                if (SubtitleTrackIdentity.sameStableId(
+                        expectedId, trackGroup.getFormat(index).id)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private void rollbackAiSubtitleAttach(
+            AiSubtitleAttachTransaction transaction, String reason) {
+        ExoPlayer currentPlayer = player;
+        if (aiSubtitleAttachTransaction != transaction || currentPlayer == null
+                || transaction.playerGeneration != playerGeneration) {
+            finishAiSubtitleAttach(transaction, false);
+            return;
+        }
+        if (transaction.recovering) {
+            finishAiSubtitleAttach(transaction, false);
+            return;
+        }
+        transaction.recovering = true;
+        transaction.failureReason = reason;
+        externalDiagnostics.recordStremioConnector(
+                "ai_subtitle_attach_rollback_started", "reason=" + reason);
+        try {
+            currentPlayer.setMediaItem(
+                    transaction.originalItem, Math.max(0L, transaction.positionMs));
+            currentPlayer.setPlaybackParameters(transaction.playbackParameters);
+            currentPlayer.prepare();
+            transaction.rollbackPrepared = true;
+            currentPlayer.setPlayWhenReady(transaction.playWhenReady);
+            scheduleAiSubtitleAttachTimeout(transaction);
+            completeAiSubtitleAttachIfReady();
+        } catch (RuntimeException error) {
+            externalDiagnostics.recordStremioConnector(
+                    "ai_subtitle_attach_rollback_failed", "reason=restore_exception");
+            finishAiSubtitleAttach(transaction, false);
+            finish();
+        }
+    }
+
+    private void restoreAiSubtitlePreviousSelection(
+            AiSubtitleAttachTransaction transaction, boolean restoreSubtitles) {
+        if (player == null) {
+            return;
+        }
+        if (transaction.previousSelection.audioAutomatic) {
+            applySmartAudioSelection();
+        } else {
+            applyRememberedAudioSelection(transaction.previousSelection);
+        }
+        if (restoreSubtitles) {
+            boolean restoredById = applyTrackSelectionByStableId(
+                    player.getCurrentTracks(),
+                    C.TRACK_TYPE_TEXT,
+                    transaction.previousSubtitleId);
+            if (!restoredById) {
+                if (transaction.previousSelection.subtitleAutomatic) {
+                    applySmartSubtitleSelection();
+                } else {
+                    applyRememberedSubtitleSelection(transaction.previousSelection);
+                }
+            }
+        }
+        player.setPlaybackParameters(transaction.playbackParameters);
+    }
+
+    private void finishAiSubtitleAttach(
+            AiSubtitleAttachTransaction transaction, boolean attached) {
+        if (aiSubtitleAttachTransaction != transaction) {
+            return;
+        }
+        if (playerView != null && transaction.timeoutRunnable != null) {
+            playerView.removeCallbacks(transaction.timeoutRunnable);
+        }
+        transaction.timeoutRunnable = null;
+        aiSubtitleAttachTransaction = null;
+        trackSelectionChangePending = false;
+        trackMemoryArmed = transaction.trackMemoryWasArmed;
+        audioSelectionExplicit = transaction.audioSelectionWasExplicit;
+        subtitleSelectionExplicit = transaction.subtitleSelectionWasExplicit;
+        persistAudioSelectionPerFile = transaction.persistAudioSelection;
+        persistSubtitleSelectionPerFile = transaction.persistSubtitleSelection;
+        if (attached) {
+            transaction.callback.onAttached();
+        } else {
+            transaction.callback.onFailure();
+        }
+    }
+
+    private void abandonAiSubtitleAttach() {
+        AiSubtitleAttachTransaction transaction = aiSubtitleAttachTransaction;
+        if (transaction == null) {
+            return;
+        }
+        if (playerView != null && transaction.timeoutRunnable != null) {
+            playerView.removeCallbacks(transaction.timeoutRunnable);
+        }
+        transaction.timeoutRunnable = null;
+        aiSubtitleAttachTransaction = null;
     }
 
     private void updateAiSubtitleButtonState() {

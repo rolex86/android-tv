@@ -158,6 +158,16 @@ public final class SelectedSubtitleResolver {
                 order++;
                 continue;
             }
+            int matchRank = SubtitleTrackIdentity.openSubtitlesMatchRank(
+                    configuration.id,
+                    configuration.language,
+                    configuration.selectionFlags,
+                    configuration.roleFlags,
+                    configuration.label);
+            if (matchRank != 0) {
+                order++;
+                continue;
+            }
             Resolution resolved = resolveConfiguration(
                     configuration, configuration.id, configuration.label, configuration.language);
             AiSubtitleSource candidate = resolved.source;
@@ -167,8 +177,7 @@ public final class SelectedSubtitleResolver {
                 order++;
                 continue;
             }
-            long score = (long) SubtitleTrackIdentity.openSubtitlesMatchRank(
-                    configuration.id) * 10_000L + order++;
+            long score = order++;
             if (score < bestScore) {
                 bestScore = score;
                 best = candidate;

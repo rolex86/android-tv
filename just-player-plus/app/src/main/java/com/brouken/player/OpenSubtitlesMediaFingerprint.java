@@ -25,6 +25,8 @@ final class OpenSubtitlesMediaFingerprint {
     interface CallObserver {
         void onCallStarted(Call call);
         void onCallFinished(Call call);
+        default void onFingerprintEvent(String state, String detail) {
+        }
     }
 
     static final class Result {
@@ -48,40 +50,55 @@ final class OpenSubtitlesMediaFingerprint {
                                 CallObserver observer)
             throws IOException {
         if (mediaItem == null || mediaItem.localConfiguration == null) {
+            observer.onFingerprintEvent("failed", "reason=missing_media");
             return null;
         }
         Uri uri = mediaItem.localConfiguration.uri;
         String filename = filename(uri, mediaItem);
         String scheme = uri.getScheme();
         if (scheme == null) {
+            observer.onFingerprintEvent("failed", "reason=missing_scheme");
             return null;
         }
+        observer.onFingerprintEvent(
+                "started", "scheme=" + scheme.toLowerCase(Locale.ROOT));
         if ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)) {
             return fromHttp(httpClient, uri, filename, observer);
         }
         if ("file".equalsIgnoreCase(scheme) && uri.getPath() != null) {
-            return fromFile(new File(uri.getPath()), filename);
+            return fromFile(new File(uri.getPath()), filename, observer);
         }
+        observer.onFingerprintEvent("failed", "reason=unsupported_scheme");
         return null;
     }
 
     @Nullable
-    private static Result fromFile(File file, String filename) throws IOException {
+    private static Result fromFile(
+            File file, String filename, CallObserver observer) throws IOException {
         if (!file.isFile()) {
+            observer.onFingerprintEvent("failed", "reason=file_unavailable");
             return null;
         }
         try (RandomAccessFile input = new RandomAccessFile(file, "r")) {
             long size = input.length();
             if (size < MIN_HASHABLE_BYTES) {
+                observer.onFingerprintEvent(
+                        "failed", "reason=file_too_small size=" + size);
                 return null;
             }
             byte[] head = new byte[HASH_CHUNK_BYTES];
             byte[] tail = new byte[HASH_CHUNK_BYTES];
             input.seek(0L);
             input.readFully(head);
+            observer.onFingerprintEvent(
+                    "head_ok", "bytes=" + HASH_CHUNK_BYTES + " size=" + size);
             input.seek(size - HASH_CHUNK_BYTES);
             input.readFully(tail);
-            return new Result(computeHash(size, head, tail), size, filename);
+            observer.onFingerprintEvent(
+                    "tail_ok", "bytes=" + HASH_CHUNK_BYTES + " rangeValid=true");
+            Result result = new Result(computeHash(size, head, tail), size, filename);
+            observer.onFingerprintEvent("hash_computed", "size=" + size);
+            return result;
         }
     }
 
@@ -97,17 +114,25 @@ final class OpenSubtitlesMediaFingerprint {
         observer.onCallStarted(headCall);
         try (Response response = headCall.execute()) {
             if (!response.isSuccessful()) {
+                observer.onFingerprintEvent(
+                        "failed", "reason=head_http code=" + response.code());
                 return null;
             }
             size = totalSize(response);
             if (size < MIN_HASHABLE_BYTES) {
+                observer.onFingerprintEvent(
+                        "failed", "reason=size_unavailable_or_too_small size=" + size);
                 return null;
             }
             ResponseBody body = response.body();
             if (body == null) {
+                observer.onFingerprintEvent("failed", "reason=head_missing_body");
                 return null;
             }
             head = readExactly(body.byteStream(), HASH_CHUNK_BYTES);
+            observer.onFingerprintEvent(
+                    "head_ok",
+                    "code=" + response.code() + " bytes=" + head.length + " size=" + size);
         } finally {
             observer.onCallFinished(headCall);
         }
@@ -119,21 +144,32 @@ final class OpenSubtitlesMediaFingerprint {
         observer.onCallStarted(tailCall);
         try (Response response = tailCall.execute()) {
             if (!response.isSuccessful() || response.code() != 206) {
+                observer.onFingerprintEvent(
+                        "failed", "reason=tail_http code=" + response.code());
                 return null;
             }
             long returnedStart = contentRangeStart(response.header("Content-Range"));
             if (returnedStart != tailStart) {
+                observer.onFingerprintEvent(
+                        "failed", "reason=tail_range_invalid rangeValid=false");
                 return null;
             }
             ResponseBody body = response.body();
             if (body == null) {
+                observer.onFingerprintEvent("failed", "reason=tail_missing_body");
                 return null;
             }
             tail = readExactly(body.byteStream(), HASH_CHUNK_BYTES);
+            observer.onFingerprintEvent(
+                    "tail_ok",
+                    "code=" + response.code() + " bytes=" + tail.length
+                            + " rangeValid=true");
         } finally {
             observer.onCallFinished(tailCall);
         }
-        return new Result(computeHash(size, head, tail), size, filename);
+        Result result = new Result(computeHash(size, head, tail), size, filename);
+        observer.onFingerprintEvent("hash_computed", "size=" + size);
+        return result;
     }
 
     private static Request request(Uri uri, long start, long end) {

@@ -100,7 +100,10 @@ public final class SubtitleTrackIdentity {
             registerBestRank(OPEN_SUBTITLES_SIGNATURE_RANKS, signature, rank);
         }
         String kind = subtitleKindKey(language, selectionFlags, roleFlags, label);
-        if (!kind.isEmpty()) {
+        if (rank == 0 && !kind.isEmpty()) {
+            // Generic and filename-only matches identify an external subtitle, but are not
+            // strong enough to stand in for a selected embedded track. Only a movie-hash
+            // result may expose an online replacement for embedded subtitle translation.
             registerBestRank(EMBEDDED_KIND_RANKS, kind, rank);
         }
     }
@@ -161,8 +164,8 @@ public final class SubtitleTrackIdentity {
             return Integer.MAX_VALUE;
         }
         // A movie-hash match verifies the external subtitle against the video, not the bytes of an
-        // embedded track. Matching language/kind is therefore at most a likely proxy.
-        return Math.max(1, rank);
+        // embedded track. Matching language/kind is therefore shown as a likely proxy.
+        return rank == 0 ? 1 : Integer.MAX_VALUE;
     }
 
     public static String matchIcon(@Nullable String id) {

@@ -71,6 +71,10 @@ final class OpenSubtitlesV3Client {
         void onFailure(String reason);
     }
 
+    interface DiagnosticListener {
+        void onDiagnostic(String state, String detail);
+    }
+
     static final class Candidate {
         final String url;
         final String language;
@@ -104,6 +108,7 @@ final class OpenSubtitlesV3Client {
     }
 
     private final OkHttpClient httpClient;
+    @Nullable private final DiagnosticListener diagnosticListener;
     private final ExecutorService refinementExecutor = Executors.newSingleThreadExecutor();
     @Nullable private volatile Call activeInitialCall;
     @Nullable private volatile Call activeRefinementCall;
@@ -122,7 +127,13 @@ final class OpenSubtitlesV3Client {
     private volatile boolean released;
 
     OpenSubtitlesV3Client(OkHttpClient httpClient) {
+        this(httpClient, null);
+    }
+
+    OpenSubtitlesV3Client(
+            OkHttpClient httpClient, @Nullable DiagnosticListener diagnosticListener) {
         this.httpClient = httpClient;
+        this.diagnosticListener = diagnosticListener;
     }
 
     synchronized void fetch(String type,
@@ -239,14 +250,32 @@ final class OpenSubtitlesV3Client {
             }
 
             try {
+                diagnostic("opensubtitles_v3_exact_started", "size=" + fingerprint.size);
                 String json = requestRefinementJson(token, exactUrl(type, id, fingerprint));
                 List<Candidate> exactCandidates = parseCandidatesInternal(
                         json, languages, MatchConfidence.EXACT, fingerprint.filename);
                 if (exactCandidates.isEmpty()) {
+                    diagnostic("opensubtitles_v3_exact_empty", "count=0");
                     return;
                 }
+                diagnostic(
+                        "opensubtitles_v3_exact_loaded",
+                        "count=" + exactCandidates.size());
                 deliverExact(token, exactCandidates, listener);
-            } catch (IOException | JSONException | RuntimeException ignored) {
+            } catch (IOException ignored) {
+                if (isCurrent(token)) {
+                    diagnostic("opensubtitles_v3_exact_failed", "reason=io");
+                }
+                // Generic OpenSubtitles results, when available, remain usable.
+            } catch (JSONException ignored) {
+                if (isCurrent(token)) {
+                    diagnostic("opensubtitles_v3_exact_failed", "reason=invalid_json");
+                }
+                // Generic OpenSubtitles results, when available, remain usable.
+            } catch (RuntimeException ignored) {
+                if (isCurrent(token)) {
+                    diagnostic("opensubtitles_v3_exact_failed", "reason=runtime");
+                }
                 // Generic OpenSubtitles results, when available, remain usable.
             } finally {
                 clearRefinementTask(token);
@@ -273,8 +302,26 @@ final class OpenSubtitlesV3Client {
                                 activeRefinementCall = null;
                             }
                         }
+
+                        @Override
+                        public void onFingerprintEvent(String state, String detail) {
+                            if (isCurrent(token)) {
+                                diagnostic(
+                                        "opensubtitles_v3_fingerprint_" + state, detail);
+                            }
+                        }
                     });
-        } catch (IOException | RuntimeException ignored) {
+        } catch (IOException ignored) {
+            if (isCurrent(token)) {
+                diagnostic(
+                        "opensubtitles_v3_fingerprint_failed", "reason=io_exception");
+            }
+            return null;
+        } catch (RuntimeException ignored) {
+            if (isCurrent(token)) {
+                diagnostic(
+                        "opensubtitles_v3_fingerprint_failed", "reason=runtime_exception");
+            }
             return null;
         }
     }
@@ -294,8 +341,12 @@ final class OpenSubtitlesV3Client {
                 throw new IOException("cancelled");
             }
             if (!response.isSuccessful()) {
+                diagnostic(
+                        "opensubtitles_v3_exact_http", "code=" + response.code());
                 throw new IOException("http_" + response.code());
             }
+            diagnostic(
+                    "opensubtitles_v3_exact_http", "code=" + response.code());
             ResponseBody body = response.body();
             if (body == null) {
                 throw new IOException("invalid_body");
@@ -484,6 +535,17 @@ final class OpenSubtitlesV3Client {
 
     private boolean isCurrent(long token) {
         return !released && token == operationToken;
+    }
+
+    private void diagnostic(String state, String detail) {
+        DiagnosticListener listener = diagnosticListener;
+        if (listener != null) {
+            try {
+                listener.onDiagnostic(state, detail);
+            } catch (RuntimeException ignored) {
+                // Diagnostics must never affect subtitle loading or playback.
+            }
+        }
     }
 
     @Nullable
