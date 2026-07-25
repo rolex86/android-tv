@@ -70,6 +70,22 @@ public class SelectedSubtitleResolverTest {
     }
 
     @Test
+    public void exposesCompactOpenSubtitlesMatchIcons() {
+        assertEquals(0, SubtitleTrackIdentity.openSubtitlesMatchRank(
+                "1:plus-external:opensubtitles-v3:exact:abc"));
+        assertEquals(1, SubtitleTrackIdentity.openSubtitlesMatchRank(
+                "plus-external:opensubtitles-v3:likely:def"));
+        assertEquals(2, SubtitleTrackIdentity.openSubtitlesMatchRank(
+                "plus-external:opensubtitles-v3:unknown:ghi"));
+        assertEquals("✓", SubtitleTrackIdentity.matchIcon(
+                "plus-external:opensubtitles-v3:exact:abc"));
+        assertEquals("≈", SubtitleTrackIdentity.matchIcon(
+                "plus-external:opensubtitles-v3:likely:def"));
+        assertEquals("?", SubtitleTrackIdentity.matchIcon(
+                "plus-external:opensubtitles-v3:unknown:ghi"));
+    }
+
+    @Test
     public void doesNotGuessExternalTrackFromLanguageOnly() {
         assertFalse(SelectedSubtitleResolver.matchesExternalConfiguration(
                 "plus-external:opensubtitles-v3:abc",
