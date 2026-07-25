@@ -131,7 +131,7 @@
     <string name="pref_ai_subtitles_header">AI subtitles</string>
     <string name="pref_ai_subtitles_enabled">AI subtitle translation</string>
     <string name="pref_ai_subtitles_enabled_off">AI subtitle translation is not available in the player.</string>
-    <string name="pref_ai_subtitles_enabled_on">Allows manually translating a selected external subtitle track or a hash-verified online replacement for an embedded track.</string>
+    <string name="pref_ai_subtitles_enabled_on">Allows manually translating the selected external subtitle track.</string>
     <string name="pref_ai_subtitle_backend_url">Translation service address</string>
     <string name="pref_ai_subtitle_backend_not_set">Not configured</string>
     <string name="pref_ai_subtitle_api_token">Access token (optional)</string>
@@ -148,7 +148,7 @@
     <string name="ai_subtitle_target_czech">Czech</string>
     <string name="ai_subtitle_label_czech">Czech (AI)</string>
     <string name="ai_subtitle_select_external">First select an external text subtitle track.</string>
-    <string name="ai_subtitle_embedded_unsupported">The selected track is embedded and no hash-verified online replacement is available.</string>
+    <string name="ai_subtitle_embedded_unsupported">The selected track is embedded in the video and cannot be translated.</string>
     <string name="ai_subtitle_image_unsupported">Image subtitles cannot be translated without OCR.</string>
     <string name="ai_subtitle_format_unsupported">The selected subtitle format is not supported.</string>
     <string name="ai_subtitle_uri_unreadable">The selected subtitle source cannot be read.</string>

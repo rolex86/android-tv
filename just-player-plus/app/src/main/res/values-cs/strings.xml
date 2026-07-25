@@ -130,7 +130,7 @@
     <string name="pref_ai_subtitles_header">AI titulky</string>
     <string name="pref_ai_subtitles_enabled">AI překlad titulků</string>
     <string name="pref_ai_subtitles_enabled_off">AI překlad titulků není v přehrávači dostupný.</string>
-    <string name="pref_ai_subtitles_enabled_on">Umožní ručně přeložit vybranou externí stopu nebo hashově ověřenou online náhradu vložené stopy.</string>
+    <string name="pref_ai_subtitles_enabled_on">Umožní ručně přeložit vybranou externí titulkovou stopu.</string>
     <string name="pref_ai_subtitle_backend_url">Adresa překladové služby</string>
     <string name="pref_ai_subtitle_backend_not_set">Nenastaveno</string>
     <string name="pref_ai_subtitle_api_token">Přístupový token (volitelné)</string>
@@ -147,7 +147,7 @@
     <string name="ai_subtitle_target_czech">Čeština</string>
     <string name="ai_subtitle_label_czech">Čeština (AI)</string>
     <string name="ai_subtitle_select_external">Nejdřív vyberte externí textové titulky.</string>
-    <string name="ai_subtitle_embedded_unsupported">Vybraná stopa je vložená a není pro ni dostupná hashově ověřená online náhrada.</string>
+    <string name="ai_subtitle_embedded_unsupported">Vybraná stopa je vložená ve videu a nelze ji přeložit.</string>
     <string name="ai_subtitle_image_unsupported">Obrazové titulky nelze bez OCR přeložit.</string>
     <string name="ai_subtitle_format_unsupported">Vybraný formát titulků zatím nelze přeložit.</string>
     <string name="ai_subtitle_uri_unreadable">Zdroj vybraných titulků nelze přečíst.</string>

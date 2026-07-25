@@ -50,14 +50,7 @@ class CustomDefaultTrackNameProvider extends DefaultTrackNameProvider {
                     format.roleFlags,
                     format.label);
         }
-        if (SubtitleTrackIdentity.isExternal(format.id)) {
-            return "?";
-        }
-        return SubtitleTrackIdentity.embeddedMatchIcon(
-                format.language,
-                format.selectionFlags,
-                format.roleFlags,
-                format.label);
+        return "";
     }
 
     private String formatNameFromMime(final String mimeType) {

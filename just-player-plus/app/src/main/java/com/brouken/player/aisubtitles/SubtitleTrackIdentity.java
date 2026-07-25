@@ -26,8 +26,6 @@ public final class SubtitleTrackIdentity {
             new ConcurrentHashMap<>();
     private static final Map<String, Integer> OPEN_SUBTITLES_SIGNATURE_RANKS =
             new ConcurrentHashMap<>();
-    private static final Map<String, Integer> EMBEDDED_KIND_RANKS =
-            new ConcurrentHashMap<>();
 
     private SubtitleTrackIdentity() {
     }
@@ -81,7 +79,6 @@ public final class SubtitleTrackIdentity {
     public static void resetOpenSubtitlesMatches() {
         OPEN_SUBTITLES_RANKS.clear();
         OPEN_SUBTITLES_SIGNATURE_RANKS.clear();
-        EMBEDDED_KIND_RANKS.clear();
     }
 
     public static void registerOpenSubtitlesMatch(@Nullable String id,
@@ -98,13 +95,6 @@ public final class SubtitleTrackIdentity {
                 language, selectionFlags, roleFlags, label);
         if (!signature.isEmpty()) {
             registerBestRank(OPEN_SUBTITLES_SIGNATURE_RANKS, signature, rank);
-        }
-        String kind = subtitleKindKey(language, selectionFlags, roleFlags, label);
-        if (rank == 0 && !kind.isEmpty()) {
-            // Generic and filename-only matches identify an external subtitle, but are not
-            // strong enough to stand in for a selected embedded track. Only a movie-hash
-            // result may expose an online replacement for embedded subtitle translation.
-            registerBestRank(EMBEDDED_KIND_RANKS, kind, rank);
         }
     }
 
@@ -154,20 +144,6 @@ public final class SubtitleTrackIdentity {
         return signatureRank == null ? Integer.MAX_VALUE : signatureRank;
     }
 
-    public static int embeddedMatchRank(@Nullable String language,
-                                        int selectionFlags,
-                                        int roleFlags,
-                                        @Nullable String label) {
-        Integer rank = EMBEDDED_KIND_RANKS.get(
-                subtitleKindKey(language, selectionFlags, roleFlags, label));
-        if (rank == null) {
-            return Integer.MAX_VALUE;
-        }
-        // A movie-hash match verifies the external subtitle against the video, not the bytes of an
-        // embedded track. Matching language/kind is therefore shown as a likely proxy.
-        return rank == 0 ? 1 : Integer.MAX_VALUE;
-    }
-
     public static String matchIcon(@Nullable String id) {
         return iconForRank(openSubtitlesMatchRank(id));
     }
@@ -179,13 +155,6 @@ public final class SubtitleTrackIdentity {
                                    @Nullable String label) {
         return iconForRank(openSubtitlesMatchRank(
                 id, language, selectionFlags, roleFlags, label));
-    }
-
-    public static String embeddedMatchIcon(@Nullable String language,
-                                           int selectionFlags,
-                                           int roleFlags,
-                                           @Nullable String label) {
-        return iconForRank(embeddedMatchRank(language, selectionFlags, roleFlags, label));
     }
 
     private static String iconForRank(int rank) {
