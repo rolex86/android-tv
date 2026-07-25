@@ -1,5 +1,7 @@
 package com.brouken.player.aisubtitles;
 
+import androidx.media3.common.C;
+
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
@@ -70,19 +72,24 @@ public class SelectedSubtitleResolverTest {
     }
 
     @Test
-    public void exposesCompactOpenSubtitlesMatchIcons() {
-        assertEquals(0, SubtitleTrackIdentity.openSubtitlesMatchRank(
-                "1:plus-external:opensubtitles-v3:exact:abc"));
-        assertEquals(1, SubtitleTrackIdentity.openSubtitlesMatchRank(
-                "plus-external:opensubtitles-v3:likely:def"));
-        assertEquals(2, SubtitleTrackIdentity.openSubtitlesMatchRank(
-                "plus-external:opensubtitles-v3:unknown:ghi"));
-        assertEquals("✓", SubtitleTrackIdentity.matchIcon(
-                "plus-external:opensubtitles-v3:exact:abc"));
-        assertEquals("≈", SubtitleTrackIdentity.matchIcon(
-                "plus-external:opensubtitles-v3:likely:def"));
-        assertEquals("?", SubtitleTrackIdentity.matchIcon(
-                "plus-external:opensubtitles-v3:unknown:ghi"));
+    public void exposesRuntimeMatchIconsForStableIdsAndEmbeddedKinds() {
+        SubtitleTrackIdentity.resetOpenSubtitlesMatches();
+        String id = "plus-external:opensubtitles-v3:abc";
+        SubtitleTrackIdentity.registerOpenSubtitlesMatch(
+                id, "eng", 0, C.ROLE_FLAG_SUBTITLE, "English Full", 2);
+        assertEquals(2, SubtitleTrackIdentity.openSubtitlesMatchRank(id));
+        assertEquals("?", SubtitleTrackIdentity.matchIcon(id));
+        assertEquals("?", SubtitleTrackIdentity.embeddedMatchIcon(
+                "eng", 0, C.ROLE_FLAG_SUBTITLE, "English Full"));
+
+        SubtitleTrackIdentity.registerOpenSubtitlesMatch(
+                id, "eng", 0, C.ROLE_FLAG_SUBTITLE, "English Full", 0);
+        assertEquals(0, SubtitleTrackIdentity.openSubtitlesMatchRank(id));
+        assertEquals("✓", SubtitleTrackIdentity.matchIcon(id));
+        assertEquals("✓", SubtitleTrackIdentity.embeddedMatchIcon(
+                "eng", 0, C.ROLE_FLAG_SUBTITLE, "English Full"));
+        assertEquals("", SubtitleTrackIdentity.embeddedMatchIcon(
+                "eng", C.SELECTION_FLAG_FORCED, C.ROLE_FLAG_SUBTITLE, "English Forced"));
     }
 
     @Test
