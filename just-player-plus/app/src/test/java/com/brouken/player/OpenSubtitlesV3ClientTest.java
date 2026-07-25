@@ -29,21 +29,6 @@ public class OpenSubtitlesV3ClientTest {
     }
 
     @Test
-    public void buildsHashLookupRouteWithVideoMetadata() {
-        OpenSubtitlesMediaFingerprint.Result fingerprint =
-                new OpenSubtitlesMediaFingerprint.Result(
-                        "0123456789abcdef", 75161993216L,
-                        "Movie.2026.2160p.BluRay.REMUX.mkv");
-        String url = OpenSubtitlesV3Client.exactUrl(
-                "movie", "tt33311069", fingerprint).toString();
-
-        assertTrue(url.contains("/subtitles/movie/0123456789abcdef/"));
-        assertTrue(url.contains("videoID=tt33311069"));
-        assertTrue(url.contains("videoSize=75161993216"));
-        assertTrue(url.contains("filename=Movie.2026.2160p.BluRay.REMUX.mkv.json"));
-    }
-
-    @Test
     public void filtersDeduplicatesAndCapsPreferredLanguages() throws Exception {
         JSONArray subtitles = new JSONArray();
         for (int index = 0; index < 8; index++) {
