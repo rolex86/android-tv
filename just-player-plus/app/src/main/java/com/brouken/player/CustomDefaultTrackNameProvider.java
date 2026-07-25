@@ -33,7 +33,10 @@ class CustomDefaultTrackNameProvider extends DefaultTrackNameProvider {
             trackName += " - " + format.label;
         }
         if (MimeTypes.getTrackType(format.sampleMimeType) == C.TRACK_TYPE_TEXT) {
-            trackName = matchIcon(format) + " " + trackName;
+            String icon = matchIcon(format);
+            if (!icon.isEmpty()) {
+                trackName = icon + " " + trackName;
+            }
         }
         return trackName;
     }
@@ -45,7 +48,11 @@ class CustomDefaultTrackNameProvider extends DefaultTrackNameProvider {
         if (SubtitleTrackIdentity.isExternal(format.id)) {
             return "?";
         }
-        return "✓";
+        return SubtitleTrackIdentity.embeddedMatchIcon(
+                format.language,
+                format.selectionFlags,
+                format.roleFlags,
+                format.label);
     }
 
     private String formatNameFromMime(final String mimeType) {
