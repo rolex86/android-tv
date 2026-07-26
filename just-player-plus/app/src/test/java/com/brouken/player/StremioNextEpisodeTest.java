@@ -54,9 +54,9 @@ public class StremioNextEpisodeTest {
         long now = 1_000_000L;
 
         assertNotNull(StremioConnectorStore.findRecentContent(
-                events(event("tt1:2:4", now - 89_000L)), now));
+                events(event("tt1:2:4", now - 899_000L)), now));
         assertNull(StremioConnectorStore.findRecentContent(
-                events(event("tt1:2:4", now - 91_000L)), now));
+                events(event("tt1:2:4", now - 901_000L)), now));
     }
 
     @Test
@@ -100,6 +100,35 @@ public class StremioNextEpisodeTest {
         assertEquals("tt123:2:4", series.episode.raw);
         assertNull(StremioConnectorStore.Content.fromValues("series", "tt123"));
         assertNull(StremioConnectorStore.Content.fromValues("channel", "tt999"));
+    }
+
+    @Test
+    public void subtitleRequestRecoversEpisodeIdentityAndFilename() {
+        StremioSubtitleRequest request = StremioSubtitleRequest.parse(
+                "/subtitles/series/efe600f792bf6a7f/"
+                        + "videoID=tt123%3A2%3A4&videoSize=123456"
+                        + "&filename=Show.S02E04.1080p.WEB-DL.mkv.json");
+
+        assertNotNull(request);
+        assertEquals("series", request.type);
+        assertEquals("tt123:2:4", request.videoId);
+        assertEquals("Show.S02E04.1080p.WEB-DL.mkv", request.filename);
+    }
+
+    @Test
+    public void subtitleRequestSupportsQueryExtrasAndRejectsMissingIdentity() {
+        StremioSubtitleRequest movie = StremioSubtitleRequest.parse(
+                "/subtitles/movie/hash.json"
+                        + "?videoID=tt0133093&filename=The+Matrix+1999.mkv");
+
+        assertNotNull(movie);
+        assertEquals("movie", movie.type);
+        assertEquals("tt0133093", movie.videoId);
+        assertEquals("The Matrix 1999.mkv", movie.filename);
+        assertNull(StremioSubtitleRequest.parse(
+                "/subtitles/movie/hash/filename=Movie.mkv.json"));
+        assertNull(StremioSubtitleRequest.parse(
+                "/subtitles/series/hash/videoID=tt0133093.json"));
     }
 
     @Test

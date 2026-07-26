@@ -216,6 +216,8 @@ else:
         "launchIdentityIsStableAndDoesNotStoreTheRawTitle",
         "rememberedContentRejectsMalformedTypesAndIds",
         "movieMetadataUsesCinemetaName",
+        "subtitleRequestRecoversEpisodeIdentityAndFilename",
+        "subtitleRequestSupportsQueryExtrasAndRejectsMissingIdentity",
     ):
         if test_name not in stremio_tests:
             errors.append(f"Missing Stremio metadata regression test: {test_name}")

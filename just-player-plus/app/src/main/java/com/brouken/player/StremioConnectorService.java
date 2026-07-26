@@ -28,7 +28,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** Loopback-only Stremio addon that observes content requests and returns no streams. */
+/** Loopback-only Stremio addon that observes content identity requests and returns no media. */
 public final class StremioConnectorService extends Service {
     static final int PORT = 16745;
     static final String HTTP_MANIFEST_URL =
@@ -40,10 +40,13 @@ public final class StremioConnectorService extends Service {
     private static final int NOTIFICATION_ID = 16745;
     private static final String MANIFEST = "{"
             + "\"id\":\"com.justplayerplus.connector\","
-            + "\"version\":\"1.2.0\","
+            + "\"version\":\"1.3.0\","
             + "\"name\":\"JustPlayer Plus Connector\","
-            + "\"description\":\"Local metadata bridge for JustPlayer Plus next-episode cards\","
-            + "\"resources\":[{\"name\":\"stream\",\"types\":[\"series\",\"movie\"]}],"
+            + "\"description\":\"Local metadata bridge for JustPlayer Plus\","
+            + "\"resources\":["
+            + "{\"name\":\"stream\",\"types\":[\"series\",\"movie\"]},"
+            + "{\"name\":\"subtitles\",\"types\":[\"series\",\"movie\"]}"
+            + "],"
             + "\"types\":[\"series\",\"movie\"],"
             + "\"catalogs\":[],"
             + "\"behaviorHints\":{\"configurable\":false}"
@@ -170,7 +173,8 @@ public final class StremioConnectorService extends Service {
                 return;
             }
             String method = parts[0];
-            String path = parts[1];
+            String requestTarget = parts[1];
+            String path = requestTarget;
             int query = path.indexOf('?');
             if (query >= 0) {
                 path = path.substring(0, query);
@@ -187,6 +191,9 @@ public final class StremioConnectorService extends Service {
             } else if (path.startsWith("/stream/movie/") && path.endsWith(".json")) {
                 recordStreamRequest(path, "movie");
                 writeResponse(writer, 200, "application/json", "{\"streams\":[]}");
+            } else if (path.startsWith("/subtitles/") && path.endsWith(".json")) {
+                recordSubtitleRequest(requestTarget);
+                writeResponse(writer, 200, "application/json", "{\"subtitles\":[]}");
             } else {
                 writeResponse(writer, 404, "application/json", "{\"error\":\"not found\"}");
             }
@@ -221,6 +228,23 @@ public final class StremioConnectorService extends Service {
         String id = URLDecoder.decode(encodedId, StandardCharsets.UTF_8.name());
         store.record(type, id, System.currentTimeMillis());
         diagnostics.recordStremioConnector("stream_request", type + "/" + id);
+    }
+
+    private void recordSubtitleRequest(String requestTarget) {
+        StremioSubtitleRequest request = StremioSubtitleRequest.parse(requestTarget);
+        if (request == null) {
+            diagnostics.recordStremioConnector(
+                    "subtitle_request_ignored", "missing_or_invalid_video_id");
+            return;
+        }
+        long now = System.currentTimeMillis();
+        store.recordContentAssociation(
+                request.type, request.videoId, request.filename, now);
+        diagnostics.recordStremioConnector(
+                "subtitle_request",
+                request.type + "/" + request.videoId
+                        + " filename=" + (request.filename == null
+                        ? "unavailable" : "available"));
     }
 
     private static void writeResponse(BufferedWriter writer, int code, String type, String body)

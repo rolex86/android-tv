@@ -26,7 +26,7 @@ final class StremioConnectorStore {
     private static final String KEY_CONTENT_ASSOCIATIONS = "content_associations";
     private static final int MAX_EVENTS = 24;
     private static final int MAX_ASSOCIATIONS = 48;
-    private static final long MAX_EVENT_AGE_MS = 90_000L;
+    private static final long MAX_EVENT_AGE_MS = 15 * 60_000L;
     private static final long MAX_EXPECTED_AGE_MS = 30_000L;
     private static final long MAX_ASSOCIATION_AGE_MS = 24L * 60L * 60_000L;
     private static final long DEDUPLICATE_WINDOW_MS = 2_000L;
@@ -82,7 +82,14 @@ final class StremioConnectorStore {
             }
             String token = event.type + "\n" + event.id + "\n" + event.timestampMs;
             if (token.equals(preferences.getString(KEY_CLAIMED_EPISODE, null))) {
-                return findAssociation(launchIdentity, nowMs);
+                Content repeated = Content.fromEvent(event);
+                if (repeated == null) {
+                    return findAssociation(launchIdentity, nowMs);
+                }
+                repeated = repeated.withCorrelation(
+                        "reused_request", Math.max(0L, nowMs - event.timestampMs));
+                rememberAssociation(launchIdentity, repeated, nowMs);
+                return repeated;
             }
             Content content = Content.fromEvent(event);
             if (content == null) {
@@ -91,15 +98,31 @@ final class StremioConnectorStore {
             content = content.withCorrelation(
                     "recent_request", Math.max(0L, nowMs - event.timestampMs));
 
-            // A single current request supersedes all older observations. A later Stremio
-            // launch will record a fresh event (including when it automatically continues).
-            writeEvents(new ArrayList<>());
+            // Keep the latest observation available while the same Stremio detail page reuses
+            // its cached stream list. A request for different content is appended later and wins
+            // because findRecentEvent() always scans from newest to oldest.
             preferences.edit()
                     .putString(KEY_CLAIMED_EPISODE, token)
                     .remove(KEY_EXPECTED_EPISODE)
                     .apply();
             rememberAssociation(launchIdentity, content, nowMs);
             return content;
+        }
+    }
+
+    void recordContentAssociation(String type,
+                                  String id,
+                                  @Nullable String launchIdentity,
+                                  long timestampMs) {
+        if (!isSupportedEvent(type, id)) {
+            return;
+        }
+        synchronized (LOCK) {
+            record(type, id, timestampMs);
+            Content content = Content.fromValues(type, id);
+            if (content != null) {
+                rememberAssociation(launchIdentity, content, timestampMs);
+            }
         }
     }
 
