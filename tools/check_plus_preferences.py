@@ -160,6 +160,7 @@ runtime_regression_anchors = (
     "aiSubtitleController.onTracksChanged();",
     "SelectedSubtitleResolver.AI_ID_PREFIX",
     "cancelRemoteJob(jobId)",
+    "currentPlayer.setMediaItem(\n                    updatedItem, Math.max(0L, transaction.positionMs));",
     "requestOpenSubtitlesV3WhenFilenameReady(session, content, 0);",
     "finishOpenSubtitlesAttach(tracks);",
     "OpenSubtitlesV3Client.hasOpenSubtitlesTrack",
@@ -167,6 +168,12 @@ runtime_regression_anchors = (
 for anchor in runtime_regression_anchors:
     if anchor not in external_java:
         errors.append(f"Missing regression fix runtime hook: {anchor}")
+
+if "replaceMediaItem(transaction.mediaItemIndex, updatedItem)" in player:
+    errors.append(
+        "AI subtitle attachment must rebuild MergingMediaSource; "
+        "replaceMediaItem silently drops newly added subtitle children"
+    )
 
 if not TEST_PATH.exists():
     errors.append("Smart-selection regression tests are missing")

@@ -274,7 +274,6 @@ public class PlayerActivity extends Activity {
 
     private static final class AiSubtitleAttachTransaction {
         final int playerGeneration;
-        final int mediaItemIndex;
         final MediaItem originalItem;
         final long positionMs;
         final boolean playWhenReady;
@@ -295,7 +294,6 @@ public class PlayerActivity extends Activity {
 
         AiSubtitleAttachTransaction(
                 int playerGeneration,
-                int mediaItemIndex,
                 MediaItem originalItem,
                 long positionMs,
                 boolean playWhenReady,
@@ -310,7 +308,6 @@ public class PlayerActivity extends Activity {
                 String expectedSubtitleId,
                 AiSubtitleController.AttachmentCallback callback) {
             this.playerGeneration = playerGeneration;
-            this.mediaItemIndex = mediaItemIndex;
             this.originalItem = originalItem;
             this.positionMs = positionMs;
             this.playWhenReady = playWhenReady;
@@ -1406,6 +1403,13 @@ public class PlayerActivity extends Activity {
     private void attachOpenSubtitles(int session, int attempt) {
         if (session != nextEpisodeSession || isFinishing()
                 || !isNextEpisodeFeatureEnabled()) {
+            return;
+        }
+        if (aiSubtitleAttachTransaction != null) {
+            if (attempt < 16 && playerView != null) {
+                playerView.postDelayed(() -> attachOpenSubtitles(
+                        session, attempt + 1), 250L);
+            }
             return;
         }
         if (openSubtitlesAttachPending) {
@@ -4188,18 +4192,41 @@ public class PlayerActivity extends Activity {
             public void attachAiSubtitle(
                     MediaItem.SubtitleConfiguration configuration,
                     AiSubtitleController.AttachmentCallback callback) {
-                attachAiSubtitleConfiguration(configuration, callback);
+                attachAiSubtitleConfiguration(
+                        configuration, callback, playerGeneration, 0);
             }
         }, aiSubtitleButton);
     }
 
     private void attachAiSubtitleConfiguration(
             MediaItem.SubtitleConfiguration configuration,
-            AiSubtitleController.AttachmentCallback callback) {
+            AiSubtitleController.AttachmentCallback callback,
+            int requestedPlayerGeneration,
+            int attempt) {
+        if (requestedPlayerGeneration != playerGeneration || isFinishing()) {
+            callback.onFailure();
+            return;
+        }
+        if (openSubtitlesAttachPending) {
+            if (attempt < 16 && playerView != null) {
+                if (attempt == 0) {
+                    externalDiagnostics.recordStremioConnector(
+                            "ai_subtitle_attach_waiting", "reason=opensubtitles_attach");
+                }
+                playerView.postDelayed(() -> attachAiSubtitleConfiguration(
+                        configuration,
+                        callback,
+                        requestedPlayerGeneration,
+                        attempt + 1), 250L);
+            } else {
+                callback.onFailure();
+            }
+            return;
+        }
         ExoPlayer currentPlayer = player;
         MediaItem currentItem = currentPlayer == null ? null : currentPlayer.getCurrentMediaItem();
         if (currentPlayer == null || currentItem == null || configuration.id == null
-                || aiSubtitleAttachTransaction != null) {
+                || playerView == null || aiSubtitleAttachTransaction != null) {
             callback.onFailure();
             return;
         }
@@ -4209,13 +4236,21 @@ public class PlayerActivity extends Activity {
                         ? Collections.emptyList()
                         : currentItem.localConfiguration.subtitleConfigurations;
         List<MediaItem.SubtitleConfiguration> updated = new ArrayList<>(existing);
+        boolean configurationKnown = false;
         for (MediaItem.SubtitleConfiguration item : existing) {
             if (SubtitleTrackIdentity.sameStableId(configuration.id, item.id)) {
-                callback.onAttached();
-                return;
+                configurationKnown = true;
+                break;
             }
         }
-        updated.add(configuration);
+        if (configurationKnown
+                && hasSubtitleTrack(currentPlayer.getCurrentTracks(), configuration.id)) {
+            callback.onAttached();
+            return;
+        }
+        if (!configurationKnown) {
+            updated.add(configuration);
+        }
 
         RememberedTrackStore.Selection previousSelection = RememberedTrackStore.capture(
                 currentPlayer.getCurrentTracks(),
@@ -4224,7 +4259,6 @@ public class PlayerActivity extends Activity {
                 !subtitleSelectionExplicit);
         AiSubtitleAttachTransaction transaction = new AiSubtitleAttachTransaction(
                 playerGeneration,
-                currentPlayer.getCurrentMediaItemIndex(),
                 currentItem,
                 currentPlayer.getCurrentPosition(),
                 currentPlayer.getPlayWhenReady(),
@@ -4246,17 +4280,29 @@ public class PlayerActivity extends Activity {
                 .setSubtitleConfigurations(updated)
                 .build();
         externalDiagnostics.recordStremioConnector(
-                "ai_subtitle_attach_started", "positionMs=" + transaction.positionMs);
+                "ai_subtitle_attach_started",
+                "mode=media_source_rebuild"
+                        + " positionMs=" + transaction.positionMs
+                        + " subtitles=" + updated.size());
         try {
-            currentPlayer.replaceMediaItem(transaction.mediaItemIndex, updatedItem);
+            // replaceMediaItem() may update MergingMediaSource in place. Media3 then updates only
+            // its primary video child and silently ignores a newly added side-loaded subtitle
+            // child. Rebuild the source explicitly so the AI track is actually materialized.
+            currentPlayer.setMediaItem(
+                    updatedItem, Math.max(0L, transaction.positionMs));
+            currentPlayer.setPlaybackParameters(transaction.playbackParameters);
+            currentPlayer.prepare();
+            currentPlayer.setPlayWhenReady(transaction.playWhenReady);
         } catch (RuntimeException error) {
             externalDiagnostics.recordStremioConnector(
-                    "ai_subtitle_attach_failed", "reason=replace_exception");
-            finishAiSubtitleAttach(transaction, false);
+                    "ai_subtitle_attach_failed", "reason=rebuild_exception");
+            rollbackAiSubtitleAttach(transaction, "rebuild_exception");
             return;
         }
-        scheduleAiSubtitleAttachTimeout(transaction);
-        completeAiSubtitleAttachIfReady();
+        if (aiSubtitleAttachTransaction == transaction) {
+            scheduleAiSubtitleAttachTimeout(transaction);
+            completeAiSubtitleAttachIfReady();
+        }
     }
 
     private void scheduleAiSubtitleAttachTimeout(AiSubtitleAttachTransaction transaction) {
@@ -4308,7 +4354,8 @@ public class PlayerActivity extends Activity {
         }
         restoreAiSubtitlePreviousSelection(transaction, true);
         externalDiagnostics.recordStremioConnector(
-                "ai_subtitle_attach_ready", "track=true");
+                "ai_subtitle_attach_ready",
+                "track=true id=" + transaction.expectedSubtitleId);
         finishAiSubtitleAttach(transaction, true);
     }
 
@@ -4407,6 +4454,12 @@ public class PlayerActivity extends Activity {
             transaction.callback.onAttached();
         } else {
             transaction.callback.onFailure();
+        }
+        // A direct OpenSubtitles result may have arrived while the AI MediaSource rebuild was in
+        // progress. Re-run its idempotent attach after the AI transaction releases the lock.
+        if (playerView != null && isNextEpisodeFeatureEnabled()) {
+            final int session = nextEpisodeSession;
+            playerView.post(() -> attachOpenSubtitles(session, 0));
         }
     }
 
