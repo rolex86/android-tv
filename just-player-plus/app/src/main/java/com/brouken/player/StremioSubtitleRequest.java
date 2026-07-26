@@ -50,19 +50,42 @@ final class StremioSubtitleRequest {
         String resource = path.substring(
                 prefix.length(), path.length() - ".json".length());
         int extrasSeparator = resource.indexOf('/');
+        String encodedPathId = extrasSeparator < 0
+                ? resource : resource.substring(0, extrasSeparator);
         String pathExtras = extrasSeparator < 0
                 ? "" : resource.substring(extrasSeparator + 1);
         Map<String, String> extras = new LinkedHashMap<>();
         decodeExtras(pathExtras, extras);
         decodeExtras(query, extras);
-        String videoId = firstNonEmpty(
+        String legacyVideoId = firstNonEmpty(
                 extras.get("videoID"), extras.get("videoId"), extras.get("video_id"));
-        if (videoId == null
-                || StremioConnectorStore.Content.fromValues(type, videoId) == null) {
+        String pathVideoId = decodeComponent(encodedPathId);
+        // Current Stremio puts the content ID in the path. The legacy videoID extra is only a
+        // fallback for older clients whose path segment contained the OpenSubtitles hash.
+        String videoId = isSupportedVideoId(type, pathVideoId)
+                ? pathVideoId : isSupportedVideoId(type, legacyVideoId)
+                ? legacyVideoId : null;
+        if (videoId == null) {
             return null;
         }
         String filename = firstNonEmpty(extras.get("filename"), extras.get("fileName"));
         return new StremioSubtitleRequest(type, videoId, filename);
+    }
+
+    private static boolean isSupportedVideoId(String type, @Nullable String value) {
+        return value != null && OpenSubtitlesV3Client.isSupportedContent(type, value);
+    }
+
+    @Nullable
+    private static String decodeComponent(@Nullable String value) {
+        if (value == null || value.isEmpty()) {
+            return null;
+        }
+        try {
+            return URLDecoder.decode(value, StandardCharsets.UTF_8.name()).trim();
+        } catch (IllegalArgumentException | UnsupportedEncodingException ignored) {
+            return null;
+        }
     }
 
     private static void decodeExtras(String encoded, Map<String, String> target) {

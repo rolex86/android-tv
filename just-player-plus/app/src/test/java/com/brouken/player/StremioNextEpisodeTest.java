@@ -135,15 +135,67 @@ public class StremioNextEpisodeTest {
     }
 
     @Test
-    public void subtitleRequestSupportsQueryExtrasAndRejectsMissingIdentity() {
-        StremioSubtitleRequest movie = StremioSubtitleRequest.parse(
+    public void lateSubtitleRequestRefreshesAlreadyResolvedContent() {
+        StremioConnectorStore.Content original =
+                StremioConnectorStore.Content.movie("tt0133093");
+        List<StremioConnectorStore.Event> events = Arrays.asList(
+                new StremioConnectorStore.Event("movie", "tt9999999", 1_500L),
+                new StremioConnectorStore.Event(
+                        "movie",
+                        "tt0133093",
+                        "The.Matrix.1999.2160p.BluRay.x265-GROUP.mkv",
+                        2_000L));
+
+        StremioConnectorStore.Content refreshed =
+                StremioConnectorStore.refreshContent(events, original, 2_500L);
+
+        assertEquals(
+                "The.Matrix.1999.2160p.BluRay.x265-GROUP.mkv",
+                refreshed.mediaFilename);
+    }
+
+    @Test
+    public void filenameRefreshRejectsStaleEventsAndKeepsExistingIdentity() {
+        StremioConnectorStore.Content unresolved =
+                StremioConnectorStore.Content.movie("tt0133093");
+        StremioConnectorStore.Content alreadyResolved = unresolved.withMediaFilename(
+                "Current.Release.mkv");
+        List<StremioConnectorStore.Event> events = Arrays.asList(
+                new StremioConnectorStore.Event(
+                        "movie", "tt0133093", "Stale.Release.mkv", 1_000L),
+                new StremioConnectorStore.Event(
+                        "movie", "tt0133093", "Different.Release.mkv", 10_000L));
+
+        assertNull(StremioConnectorStore.refreshContent(
+                events, unresolved, 10_000L + 5_001L).mediaFilename);
+        assertEquals(
+                "Current.Release.mkv",
+                StremioConnectorStore.refreshContent(
+                        events, alreadyResolved, 10_000L).mediaFilename);
+    }
+
+    @Test
+    public void subtitleRequestSupportsCurrentAndLegacyIdentityFormats() {
+        StremioSubtitleRequest currentMovie = StremioSubtitleRequest.parse(
+                "/subtitles/movie/tt0133093/"
+                        + "videoHash=efe600f792bf6a7f&videoSize=123456"
+                        + "&filename=The+Matrix+1999.mkv.json");
+        StremioSubtitleRequest currentSeries = StremioSubtitleRequest.parse(
+                "/subtitles/series/tt123%3A2%3A4/"
+                        + "filename=Show.S02E04.1080p.WEB-DL.mkv.json");
+        StremioSubtitleRequest legacyMovie = StremioSubtitleRequest.parse(
                 "/subtitles/movie/hash.json"
                         + "?videoID=tt0133093&filename=The+Matrix+1999.mkv");
 
-        assertNotNull(movie);
-        assertEquals("movie", movie.type);
-        assertEquals("tt0133093", movie.videoId);
-        assertEquals("The Matrix 1999.mkv", movie.filename);
+        assertNotNull(currentMovie);
+        assertEquals("movie", currentMovie.type);
+        assertEquals("tt0133093", currentMovie.videoId);
+        assertEquals("The Matrix 1999.mkv", currentMovie.filename);
+        assertNotNull(currentSeries);
+        assertEquals("tt123:2:4", currentSeries.videoId);
+        assertEquals("Show.S02E04.1080p.WEB-DL.mkv", currentSeries.filename);
+        assertNotNull(legacyMovie);
+        assertEquals("tt0133093", legacyMovie.videoId);
         assertNull(StremioSubtitleRequest.parse(
                 "/subtitles/movie/hash/filename=Movie.mkv.json"));
         assertNull(StremioSubtitleRequest.parse(

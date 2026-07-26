@@ -40,7 +40,7 @@ public final class StremioConnectorService extends Service {
     private static final int NOTIFICATION_ID = 16745;
     private static final String MANIFEST = "{"
             + "\"id\":\"com.justplayerplus.connector\","
-            + "\"version\":\"1.3.0\","
+            + "\"version\":\"1.4.0\","
             + "\"name\":\"JustPlayer Plus Connector\","
             + "\"description\":\"Local metadata bridge for JustPlayer Plus\","
             + "\"resources\":["

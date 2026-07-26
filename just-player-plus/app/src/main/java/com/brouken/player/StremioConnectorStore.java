@@ -27,6 +27,7 @@ final class StremioConnectorStore {
     private static final int MAX_EVENTS = 24;
     private static final int MAX_ASSOCIATIONS = 48;
     private static final long MAX_EVENT_AGE_MS = 15 * 60_000L;
+    private static final long MAX_FILENAME_REFRESH_AGE_MS = 5_000L;
     private static final long MAX_EXPECTED_AGE_MS = 30_000L;
     private static final long MAX_ASSOCIATION_AGE_MS = 24L * 60L * 60_000L;
     private static final long DEDUPLICATE_WINDOW_MS = 2_000L;
@@ -137,6 +138,30 @@ final class StremioConnectorStore {
                 rememberAssociation(mediaFilename, content, timestampMs);
             }
         }
+    }
+
+    Content refreshContent(Content content, long nowMs) {
+        synchronized (LOCK) {
+            return refreshContent(readEvents(), content, nowMs);
+        }
+    }
+
+    static Content refreshContent(List<Event> events, Content content, long nowMs) {
+        if (content.mediaFilename != null) {
+            return content;
+        }
+        for (int index = events.size() - 1; index >= 0; index--) {
+            Event event = events.get(index);
+            if (event.timestampMs > nowMs + 10_000L
+                    || nowMs - event.timestampMs > MAX_FILENAME_REFRESH_AGE_MS
+                    || !content.type.equals(event.type)
+                    || !content.id.equals(event.id)
+                    || event.mediaFilename == null) {
+                continue;
+            }
+            return content.withMediaFilename(event.mediaFilename);
+        }
+        return content;
     }
 
     private void rememberAssociation(@Nullable String launchIdentity,

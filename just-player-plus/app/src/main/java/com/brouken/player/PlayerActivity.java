@@ -1010,7 +1010,7 @@ public class PlayerActivity extends Activity {
                             + " source=" + content.correlationSource
                             + " ageMs=" + content.correlationAgeMs);
             acceptStableStremioIdentity(content);
-            requestOpenSubtitlesV3(session, content);
+            requestOpenSubtitlesV3WhenFilenameReady(session, content, 0);
             if (!content.isSeries()) {
                 NextEpisodeMetadataResolver resolver = nextEpisodeMetadataResolver;
                 if (resolver != null && isNextEpisodeFeatureEnabled()) {
@@ -1026,6 +1026,24 @@ public class PlayerActivity extends Activity {
                         session, current.raw, result));
             }
         }, delay);
+    }
+
+    private void requestOpenSubtitlesV3WhenFilenameReady(
+            int session,
+            StremioConnectorStore.Content content,
+            int attempt) {
+        if (session != nextEpisodeSession || isFinishing()
+                || !isNextEpisodeFeatureEnabled() || playerView == null) {
+            return;
+        }
+        StremioConnectorStore.Content refreshed = new StremioConnectorStore(this)
+                .refreshContent(content, System.currentTimeMillis());
+        if (refreshed.mediaFilename != null || attempt >= 4) {
+            requestOpenSubtitlesV3(session, refreshed);
+            return;
+        }
+        playerView.postDelayed(() -> requestOpenSubtitlesV3WhenFilenameReady(
+                session, refreshed, attempt + 1), 250L);
     }
 
     @Nullable
@@ -1176,16 +1194,21 @@ public class PlayerActivity extends Activity {
                     new OpenSubtitlesRestClient(this, nextEpisodeHttpClient);
         }
         OpenSubtitlesRestClient client = openSubtitlesRestClient;
+        StremioConnectorStore.Content refreshedContent =
+                new StremioConnectorStore(this).refreshContent(
+                        content, System.currentTimeMillis());
         openSubtitlesRestRequestedSession = session;
         externalDiagnostics.recordStremioConnector(
                 "opensubtitles_exact_started",
-                content.type + "/" + content.id
-                        + " account=" + credentials.hasAccount());
+                refreshedContent.type + "/" + refreshedContent.id
+                        + " account=" + credentials.hasAccount()
+                        + " filename=" + (refreshedContent.mediaFilename == null
+                        ? "uri_fallback" : "stremio"));
         client.resolve(
                 mediaItem,
-                content.type,
-                content.id,
-                getOpenSubtitlesMediaFilename(content),
+                refreshedContent.type,
+                refreshedContent.id,
+                getOpenSubtitlesMediaFilename(refreshedContent),
                 credentials,
                 preferredLanguages,
                 new ArrayList<>(apiSubs),

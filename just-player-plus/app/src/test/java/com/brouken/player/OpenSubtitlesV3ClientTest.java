@@ -49,10 +49,10 @@ public class OpenSubtitlesV3ClientTest {
                         new JSONObject().put("subtitles", subtitles).toString(),
                         new String[]{"ces", "eng", "slk"});
 
-        assertEquals(13, result.size());
+        assertEquals(20, result.size());
         assertEquals("ces", result.get(0).language);
-        assertEquals("eng", result.get(5).language);
-        assertEquals("slk", result.get(10).language);
+        assertEquals("eng", result.get(8).language);
+        assertEquals("slk", result.get(15).language);
     }
 
     @Test
@@ -101,6 +101,16 @@ public class OpenSubtitlesV3ClientTest {
         assertFalse(OpenSubtitlesV3Client.isLikelyReleaseMatch(
                 "Movie.2026.2160p.BluRay.Extended.HEVC-GROUP.mkv",
                 "Movie.2026.2160p.BluRay.Theatrical.HEVC-GROUP.srt"));
+    }
+
+    @Test
+    public void releaseConfidenceHandlesLanguageSuffixAndDoesNotHardRejectOtherGroup() {
+        assertTrue(OpenSubtitlesV3Client.isLikelyReleaseMatch(
+                "The.Matrix.1999.2160p.BluRay.REMUX.HEVC.HDR10-GROUP.mkv",
+                "The.Matrix.1999.2160p.BluRay.REMUX.HEVC.HDR10-OTHER.cze.srt"));
+        assertTrue(OpenSubtitlesV3Client.isLikelyReleaseMatch(
+                "The.Matrix.1999.2160p.BluRay.REMUX.HEVC-GROUP.mkv",
+                "The.Matrix.1999.1080p.BluRay.REMUX.HEVC-GROUP.eng.srt"));
     }
 
     private static JSONObject item(String language, String url, String id) throws Exception {

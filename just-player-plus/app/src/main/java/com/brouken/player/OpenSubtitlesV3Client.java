@@ -48,7 +48,7 @@ final class OpenSubtitlesV3Client {
     private static final int MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
     private static final int MAX_SERVER_RESULTS = 500;
     private static final int MAX_LABEL_LENGTH = 140;
-    private static final int LIKELY_RELEASE_THRESHOLD = 55;
+    private static final int LIKELY_RELEASE_THRESHOLD = 45;
 
     enum MatchConfidence {
         LIKELY(1), UNKNOWN(2);
@@ -67,6 +67,7 @@ final class OpenSubtitlesV3Client {
 
     static final class Candidate {
         final String url;
+        final String identifier;
         final String language;
         final String label;
         final String mimeType;
@@ -77,6 +78,7 @@ final class OpenSubtitlesV3Client {
         final int sourceOrder;
 
         Candidate(String url,
+                  String identifier,
                   String language,
                   String label,
                   String mimeType,
@@ -86,6 +88,7 @@ final class OpenSubtitlesV3Client {
                   int languageRank,
                   int sourceOrder) {
             this.url = url;
+            this.identifier = identifier;
             this.language = language;
             this.label = label;
             this.mimeType = mimeType;
@@ -94,6 +97,16 @@ final class OpenSubtitlesV3Client {
             this.confidence = confidence;
             this.languageRank = languageRank;
             this.sourceOrder = sourceOrder;
+        }
+    }
+
+    static final class ReleaseMatch {
+        final int score;
+        final String reason;
+
+        ReleaseMatch(int score, String reason) {
+            this.score = Math.max(0, Math.min(100, score));
+            this.reason = reason;
         }
     }
 
@@ -257,9 +270,16 @@ final class OpenSubtitlesV3Client {
     }
 
     static boolean isSupportedContent(@Nullable String type, @Nullable String id) {
-        return ("movie".equals(type) || "series".equals(type))
-                && id != null
-                && id.matches("tt\\d+(?::\\d+:\\d+)?");
+        if (id == null) {
+            return false;
+        }
+        if ("movie".equals(type)) {
+            return id.matches("tt\\d+");
+        }
+        if ("series".equals(type)) {
+            return id.matches("tt\\d+:\\d+:\\d+");
+        }
+        return false;
     }
 
     static boolean isOpenSubtitlesTrack(@Nullable String id) {
@@ -332,6 +352,7 @@ final class OpenSubtitlesV3Client {
 
             result.add(new Candidate(
                     url,
+                    identifier,
                     language,
                     buildLabel(language, identifier, name),
                     mimeType,
@@ -404,7 +425,11 @@ final class OpenSubtitlesV3Client {
             List<Candidate> candidates) {
         List<MediaItem.SubtitleConfiguration> result = new ArrayList<>();
         for (Candidate candidate : candidates) {
-            String id = TRACK_ID_PREFIX + shortHash(candidate.url);
+            String numericIdentifier = numericIdentifier(candidate.identifier);
+            String id = TRACK_ID_PREFIX
+                    + (numericIdentifier.isEmpty()
+                    ? "" : "osid-" + numericIdentifier + '-')
+                    + shortHash(candidate.url);
             SubtitleTrackIdentity.registerOpenSubtitlesMatch(
                     id,
                     candidate.language,
@@ -422,6 +447,21 @@ final class OpenSubtitlesV3Client {
                     .build());
         }
         return result;
+    }
+
+    private static String numericIdentifier(@Nullable String value) {
+        if (value == null) {
+            return "";
+        }
+        String trimmed = value.trim();
+        if (!trimmed.matches("[0-9]{1,20}")) {
+            return "";
+        }
+        int index = 0;
+        while (index < trimmed.length() - 1 && trimmed.charAt(index) == '0') {
+            index++;
+        }
+        return trimmed.substring(index);
     }
 
     static String normalizeLanguage(@Nullable String language) {
@@ -481,12 +521,12 @@ final class OpenSubtitlesV3Client {
 
     private static int limitForRank(int rank) {
         if (rank <= 1) {
-            return 5;
+            return 10;
         }
         if (rank == 2) {
-            return 3;
+            return 5;
         }
-        return 2;
+        return 3;
     }
 
     private static boolean isSafeSubtitleUrl(String value) {
@@ -524,48 +564,64 @@ final class OpenSubtitlesV3Client {
      * scoped to the current IMDb movie or episode. This is not a fuzzy movie-hash comparison.
      */
     static int releaseMatchScore(@Nullable String media, @Nullable String candidate) {
+        return evaluateReleaseMatch(media, candidate).score;
+    }
+
+    static ReleaseMatch evaluateReleaseMatch(
+            @Nullable String media, @Nullable String candidate) {
         String normalizedMedia = normalizeReleaseName(media);
         String normalizedCandidate = normalizeReleaseName(candidate);
         if (normalizedMedia.isEmpty() || normalizedCandidate.isEmpty()) {
-            return 0;
+            return new ReleaseMatch(0, "missing_name");
         }
         if (normalizedMedia.equals(normalizedCandidate)) {
-            return 100;
+            return new ReleaseMatch(100, "exact_name");
         }
         Set<String> mediaTokens = releaseTokens(media);
         Set<String> candidateTokens = releaseTokens(candidate);
-        if (mediaTokens.size() < 3
-                || candidateTokens.isEmpty()
-                || hasConflictingQuality(mediaTokens, candidateTokens)) {
-            return 0;
+        if (mediaTokens.size() < 3 || candidateTokens.isEmpty()) {
+            return new ReleaseMatch(0, "insufficient_tokens");
+        }
+        if (conflictsCategory(mediaTokens, candidateTokens, EDITIONS)) {
+            return new ReleaseMatch(0, "edition_conflict");
         }
 
         String mediaGroup = releaseGroup(media);
         String candidateGroup = releaseGroup(candidate);
-        if (!mediaGroup.isEmpty()
-                && !candidateGroup.isEmpty()
-                && !mediaGroup.equals(candidateGroup)) {
-            return 0;
-        }
-
         int score = 0;
+        StringBuilder reason = new StringBuilder();
         if (!mediaGroup.isEmpty() && mediaGroup.equals(candidateGroup)) {
-            score += 30;
+            score += 35;
+            appendReason(reason, "group");
+        } else if (!mediaGroup.isEmpty() && !candidateGroup.isEmpty()) {
+            score -= 12;
+            appendReason(reason, "group_conflict");
         }
         if (sharesCategory(mediaTokens, candidateTokens, RESOLUTIONS)) {
-            score += 15;
+            score += 10;
+            appendReason(reason, "resolution");
+        } else if (conflictsCategory(mediaTokens, candidateTokens, RESOLUTIONS)) {
+            score -= 6;
+            appendReason(reason, "resolution_conflict");
         }
         if (sharesSourceFamily(mediaTokens, candidateTokens)) {
-            score += 15;
+            score += 18;
+            appendReason(reason, "source");
+        } else if (conflictsSourceFamily(mediaTokens, candidateTokens)) {
+            score -= 18;
+            appendReason(reason, "source_conflict");
         }
         if (sharesCategory(mediaTokens, candidateTokens, CODECS)) {
-            score += 10;
+            score += 8;
+            appendReason(reason, "codec");
         }
         if (sharesCategory(mediaTokens, candidateTokens, HDR_FORMATS)) {
-            score += 8;
+            score += 4;
+            appendReason(reason, "hdr");
         }
         if (sharesCategory(mediaTokens, candidateTokens, EDITIONS)) {
-            score += 8;
+            score += 10;
+            appendReason(reason, "edition");
         }
 
         int ordinaryShared = 0;
@@ -579,9 +635,23 @@ final class OpenSubtitlesV3Client {
                 }
             }
         }
-        score += Math.min(12, extraTechnicalShared * 3);
-        score += Math.min(15, ordinaryShared * 3);
-        return Math.min(100, score);
+        int technicalScore = Math.min(15, extraTechnicalShared * 3);
+        int ordinaryScore = Math.min(18, ordinaryShared * 3);
+        score += technicalScore + ordinaryScore;
+        if (technicalScore > 0) {
+            appendReason(reason, "technical");
+        }
+        if (ordinaryScore > 0) {
+            appendReason(reason, "tokens");
+        }
+        return new ReleaseMatch(score, reason.length() == 0 ? "no_evidence" : reason.toString());
+    }
+
+    private static void appendReason(StringBuilder target, String value) {
+        if (target.length() > 0) {
+            target.append(',');
+        }
+        target.append(value);
     }
 
     private static Set<String> releaseTokens(@Nullable String value) {
@@ -637,13 +707,6 @@ final class OpenSubtitlesV3Client {
             "hdr", "hdr10", "dolby", "vision", "dv");
     private static final Set<String> EDITIONS = tokenSet(
             "extended", "criterion", "theatrical", "uncut", "directors", "final");
-
-    private static boolean hasConflictingQuality(
-            Set<String> first, Set<String> second) {
-        return conflictsCategory(first, second, RESOLUTIONS)
-                || conflictsSourceFamily(first, second)
-                || conflictsCategory(first, second, EDITIONS);
-    }
 
     private static boolean conflictsCategory(
             Set<String> first, Set<String> second, Set<String> category) {
@@ -710,7 +773,9 @@ final class OpenSubtitlesV3Client {
         }
         return value.trim()
                 .toLowerCase(Locale.ROOT)
-                .replaceAll("(?i)\\.(mkv|mp4|avi|mov|m4v|srt|vtt|ass|ssa)$", "")
+                .replaceAll("(?i)(?:\\.(?:mkv|mp4|avi|mov|m4v|srt|vtt|ass|ssa|sub"
+                        + "|en|eng|cs|cze|ces|sk|slo|slk|de|ger|deu|fr|fre|fra"
+                        + "|es|spa|it|ita|pl|pol|pt|por|hu|hun|ru|rus|uk|ukr))+$", "")
                 .replaceAll("[\\p{Cntrl}\\r\\n]+", " ")
                 .trim();
     }

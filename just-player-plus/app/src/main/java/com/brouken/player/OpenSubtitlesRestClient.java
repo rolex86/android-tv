@@ -51,6 +51,7 @@ final class OpenSubtitlesRestClient {
     private static final int MAX_JSON_BYTES = 2 * 1024 * 1024;
     private static final int MAX_SUBTITLE_BYTES = 4 * 1024 * 1024;
     private static final int MAX_RESULTS = 500;
+    private static final int MAX_SEARCH_PAGES = 3;
 
     interface Listener {
         void onEvent(String state, String detail);
@@ -127,6 +128,35 @@ final class OpenSubtitlesRestClient {
             this.trusted = trusted;
             this.downloads = downloads;
             this.releaseScore = releaseScore;
+        }
+    }
+
+    private static final class SearchPageStats {
+        final int rawResults;
+        final int preferredLanguageResults;
+        final int fileResults;
+        final int totalPages;
+        final int totalCount;
+        final int bestScore;
+        final String bestReason;
+        final String bestCandidate;
+
+        SearchPageStats(int rawResults,
+                        int preferredLanguageResults,
+                        int fileResults,
+                        int totalPages,
+                        int totalCount,
+                        int bestScore,
+                        String bestReason,
+                        String bestCandidate) {
+            this.rawResults = rawResults;
+            this.preferredLanguageResults = preferredLanguageResults;
+            this.fileResults = fileResults;
+            this.totalPages = totalPages;
+            this.totalCount = totalCount;
+            this.bestScore = bestScore;
+            this.bestReason = bestReason;
+            this.bestCandidate = bestCandidate;
         }
     }
 
@@ -220,28 +250,86 @@ final class OpenSubtitlesRestClient {
             listener.onEvent(
                     "search_started",
                     "size=" + fingerprint.size
-                            + " languages=" + preferredLanguages.length);
-            String searchJson = executeJson(
-                    token,
-                    searchRequest(
-                            credentials.apiKey,
-                            fingerprint.hash,
-                            fingerprint.size,
-                            preferredLanguages,
-                            contentType,
-                            contentId,
-                            mediaFilename));
-            List<Candidate> exactCandidates = parseExactCandidates(
-                    searchJson, preferredLanguages);
-            List<Candidate> likelyCandidates = parseLikelyCandidates(
-                    searchJson, preferredLanguages, mediaFilename);
+                            + " languages=" + preferredLanguages.length
+                            + " filename=" + filenameDiagnostic(mediaFilename));
+            List<Candidate> exactCandidates = new ArrayList<>();
+            List<Candidate> likelyCandidates = new ArrayList<>();
+            int rawResults = 0;
+            int preferredLanguageResults = 0;
+            int fileResults = 0;
+            int totalCount = 0;
+            int bestScore = 0;
+            String bestReason = releaseQuery(mediaFilename).isEmpty()
+                    ? "filename_unavailable" : "no_candidates";
+            String bestCandidate = "";
+            int totalPages = 1;
+            for (int page = 1;
+                 page <= Math.min(totalPages, MAX_SEARCH_PAGES);
+                 page++) {
+                String searchJson = executeJson(
+                        token,
+                        searchRequest(
+                                credentials.apiKey,
+                                fingerprint.hash,
+                                fingerprint.size,
+                                preferredLanguages,
+                                contentType,
+                                contentId,
+                                mediaFilename,
+                                page));
+                SearchPageStats stats = analyzeSearchPage(
+                        searchJson, preferredLanguages, mediaFilename);
+                totalPages = Math.max(1, stats.totalPages);
+                totalCount = Math.max(totalCount, stats.totalCount);
+                rawResults += stats.rawResults;
+                preferredLanguageResults += stats.preferredLanguageResults;
+                fileResults += stats.fileResults;
+                if (stats.bestScore > bestScore
+                        || (bestCandidate.isEmpty() && !stats.bestCandidate.isEmpty())) {
+                    bestScore = stats.bestScore;
+                    bestReason = stats.bestReason;
+                    bestCandidate = stats.bestCandidate;
+                }
+                List<Candidate> pageExact = parseExactCandidates(
+                        searchJson, preferredLanguages);
+                List<Candidate> pageLikely = parseLikelyCandidates(
+                        searchJson, preferredLanguages, mediaFilename);
+                exactCandidates.addAll(pageExact);
+                likelyCandidates.addAll(pageLikely);
+                listener.onEvent(
+                        "search_page",
+                        "page=" + page
+                                + " raw=" + stats.rawResults
+                                + " language=" + stats.preferredLanguageResults
+                                + " exact=" + pageExact.size()
+                                + " likely=" + pageLikely.size()
+                                + " best=" + stats.bestScore
+                                + " reason=" + stats.bestReason);
+                if (!isCurrent(token)) {
+                    return;
+                }
+                if (stats.rawResults == 0) {
+                    break;
+                }
+            }
+            exactCandidates = deduplicateCandidates(exactCandidates);
+            likelyCandidates = deduplicateCandidates(likelyCandidates);
             if (!isCurrent(token)) {
                 return;
             }
             listener.onEvent(
                     "search_complete",
-                    "exact=" + exactCandidates.size()
+                    "raw=" + rawResults
+                            + "/" + totalCount
+                            + " language=" + preferredLanguageResults
+                            + " files=" + fileResults
+                            + " exact=" + exactCandidates.size()
                             + " likely=" + likelyCandidates.size());
+            listener.onEvent(
+                    "search_best_release",
+                    "score=" + bestScore
+                            + " reason=" + bestReason
+                            + " candidate=" + bestCandidate);
             if (exactCandidates.isEmpty() && likelyCandidates.isEmpty()) {
                 listener.onResolved(new Result(0, 0, 0, 0, null));
                 return;
@@ -251,6 +339,11 @@ final class OpenSubtitlesRestClient {
             int verifiedExact = verifyExisting(
                     existing, exactCandidates, matchedCandidates);
             int verifiedLikely = verifyLikelyExisting(existing, likelyCandidates);
+            listener.onEvent(
+                    "mapping_complete",
+                    "tracks=" + existing.size()
+                            + " exact=" + verifiedExact + "/" + exactCandidates.size()
+                            + " likely=" + verifiedLikely + "/" + likelyCandidates.size());
             MediaItem.SubtitleConfiguration direct = null;
             if (!exactCandidates.isEmpty()
                     && !matchedCandidates.contains(exactCandidates.get(0))) {
@@ -310,6 +403,18 @@ final class OpenSubtitlesRestClient {
                                  String contentType,
                                  String contentId,
                                  @Nullable String mediaFilename) {
+        return searchRequest(
+                apiKey, hash, size, languages, contentType, contentId, mediaFilename, 1);
+    }
+
+    static Request searchRequest(String apiKey,
+                                 String hash,
+                                 long size,
+                                 String[] languages,
+                                 String contentType,
+                                 String contentId,
+                                 @Nullable String mediaFilename,
+                                 int page) {
         HttpUrl.Builder url = apiUrl("subtitles").newBuilder();
         StremioEpisodeId episode = "series".equals(contentType)
                 ? StremioEpisodeId.parse(contentId) : null;
@@ -327,14 +432,15 @@ final class OpenSubtitlesRestClient {
         // ordered URL with HTTP 301. Build the canonical form so secret-bearing API requests
         // never need to follow redirects. Do not send moviehash_match=include: include is the
         // server default and OpenSubtitles redirects that explicit value to a URL without it.
-        url.addQueryParameter("moviebytesize", Long.toString(size))
-                .addQueryParameter("moviehash", hash);
+        // REST v1 identifies an OpenSubtitles hash without moviebytesize. Keep filename matching
+        // local: combining a full release-name query with the stable IMDb/episode filters can
+        // hide otherwise valid releases that should be scored by the client.
+        url.addQueryParameter("moviehash", hash);
+        if (page > 1) {
+            url.addQueryParameter("page", Integer.toString(page));
+        }
         if (episode != null && !imdbId.isEmpty()) {
             url.addQueryParameter("parent_imdb_id", imdbId);
-        }
-        String query = releaseQuery(mediaFilename);
-        if (!query.isEmpty()) {
-            url.addEncodedQueryParameter("query", query);
         }
         if (episode != null) {
             url.addQueryParameter("season_number", Integer.toString(episode.season))
@@ -545,6 +651,77 @@ final class OpenSubtitlesRestClient {
         return parseCandidates(json, preferredLanguages, mediaFilename, false);
     }
 
+    private static SearchPageStats analyzeSearchPage(
+            String json,
+            String[] preferredLanguages,
+            @Nullable String mediaFilename) throws JSONException {
+        JSONObject response = new JSONObject(json);
+        JSONArray data = response.optJSONArray("data");
+        int rawResults = data == null ? 0 : Math.min(data.length(), MAX_RESULTS);
+        int totalPages = Math.max(1, response.optInt("total_pages", 1));
+        int totalCount = Math.max(rawResults, response.optInt("total_count", rawResults));
+        LinkedHashMap<String, Integer> ranks = languageRanks(preferredLanguages);
+        int preferredResults = 0;
+        int fileResults = 0;
+        int bestScore = 0;
+        String bestReason = releaseQuery(mediaFilename).isEmpty()
+                ? "filename_unavailable" : "no_release_metadata";
+        String bestCandidate = "";
+        if (data == null) {
+            return new SearchPageStats(
+                    0, 0, 0, totalPages, totalCount,
+                    bestScore, bestReason, bestCandidate);
+        }
+        for (int index = 0; index < rawResults; index++) {
+            JSONObject item = data.optJSONObject(index);
+            JSONObject attributes = item == null
+                    ? null : item.optJSONObject("attributes");
+            if (attributes == null) {
+                continue;
+            }
+            String language = OpenSubtitlesV3Client.normalizeLanguage(
+                    attributes.optString("language", ""));
+            if (!ranks.containsKey(language)) {
+                continue;
+            }
+            preferredResults++;
+            JSONArray files = attributes.optJSONArray("files");
+            if (files == null) {
+                continue;
+            }
+            fileResults += Math.min(files.length(), 20);
+            if (isMovieHashMatch(attributes) || releaseQuery(mediaFilename).isEmpty()) {
+                continue;
+            }
+            String release = cleanLabel(attributes.optString("release", ""));
+            OpenSubtitlesV3Client.ReleaseMatch releaseMatch =
+                    OpenSubtitlesV3Client.evaluateReleaseMatch(mediaFilename, release);
+            if (!release.isEmpty()
+                    && (bestCandidate.isEmpty() || releaseMatch.score > bestScore)) {
+                bestScore = releaseMatch.score;
+                bestReason = releaseMatch.reason;
+                bestCandidate = diagnosticText(release);
+            }
+            int fileLimit = Math.min(files.length(), 20);
+            for (int fileIndex = 0; fileIndex < fileLimit; fileIndex++) {
+                JSONObject file = files.optJSONObject(fileIndex);
+                String filename = cleanLabel(
+                        file == null ? "" : file.optString("file_name", ""));
+                OpenSubtitlesV3Client.ReleaseMatch fileMatch =
+                        OpenSubtitlesV3Client.evaluateReleaseMatch(mediaFilename, filename);
+                if (!filename.isEmpty()
+                        && (bestCandidate.isEmpty() || fileMatch.score > bestScore)) {
+                    bestScore = fileMatch.score;
+                    bestReason = fileMatch.reason;
+                    bestCandidate = diagnosticText(filename);
+                }
+            }
+        }
+        return new SearchPageStats(
+                rawResults, preferredResults, fileResults, totalPages, totalCount,
+                bestScore, bestReason, bestCandidate);
+    }
+
     private static List<Candidate> parseCandidates(
             String json,
             String[] preferredLanguages,
@@ -618,7 +795,25 @@ final class OpenSubtitlesRestClient {
                         releaseScore));
             }
         }
-        Collections.sort(result, new Comparator<Candidate>() {
+        sortCandidates(result);
+        return result;
+    }
+
+    private static List<Candidate> deduplicateCandidates(List<Candidate> candidates) {
+        LinkedHashMap<String, Candidate> unique = new LinkedHashMap<>();
+        for (Candidate candidate : candidates) {
+            Candidate previous = unique.get(candidate.fileId);
+            if (previous == null || candidate.releaseScore > previous.releaseScore) {
+                unique.put(candidate.fileId, candidate);
+            }
+        }
+        List<Candidate> result = new ArrayList<>(unique.values());
+        sortCandidates(result);
+        return result;
+    }
+
+    private static void sortCandidates(List<Candidate> candidates) {
+        Collections.sort(candidates, new Comparator<Candidate>() {
             @Override
             public int compare(Candidate first, Candidate second) {
                 int comparison = Integer.compare(first.languageRank, second.languageRank);
@@ -636,7 +831,6 @@ final class OpenSubtitlesRestClient {
                 return Integer.compare(second.downloads, first.downloads);
             }
         });
-        return result;
     }
 
     static int verifyExisting(
@@ -681,20 +875,13 @@ final class OpenSubtitlesRestClient {
                 new LinkedHashMap<>();
         LinkedHashMap<String, Candidate> bestCandidates = new LinkedHashMap<>();
         for (MediaItem.SubtitleConfiguration configuration : existing) {
-            if (!SubtitleTrackIdentity.isOpenSubtitles(
-                    configuration.id, configuration.label)) {
-                continue;
-            }
             Set<String> identifiers = configurationIdentifiers(configuration);
-            Candidate match = null;
-            for (Candidate candidate : candidates) {
-                if (candidate.language.equals(OpenSubtitlesV3Client.normalizeLanguage(
-                        configuration.language))
-                        && intersects(identifiers, candidate.identifiers)) {
-                    match = candidate;
-                    break;
-                }
-            }
+            Candidate match = findLikelyMatch(
+                    configuration.id,
+                    configuration.label,
+                    configuration.language,
+                    identifiers,
+                    candidates);
             if (match == null) {
                 continue;
             }
@@ -719,9 +906,30 @@ final class OpenSubtitlesRestClient {
         return bestConfigurations.size();
     }
 
+    @Nullable
+    static Candidate findLikelyMatch(
+            @Nullable String trackId,
+            @Nullable String label,
+            @Nullable String language,
+            Set<String> identifiers,
+            List<Candidate> candidates) {
+        if (!SubtitleTrackIdentity.isOpenSubtitles(trackId, label)) {
+            return null;
+        }
+        String normalizedLanguage = OpenSubtitlesV3Client.normalizeLanguage(language);
+        for (Candidate candidate : candidates) {
+            if (candidate.language.equals(normalizedLanguage)
+                    && intersects(identifiers, candidate.identifiers)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
     private static Set<String> configurationIdentifiers(
             MediaItem.SubtitleConfiguration configuration) {
         Set<String> result = new LinkedHashSet<>();
+        addIdentifier(result, encodedTrackIdentifier(configuration.id));
         if (configuration.label != null) {
             String detail = configuration.label;
             int separator = detail.lastIndexOf('·');
@@ -736,6 +944,20 @@ final class OpenSubtitlesRestClient {
             addIdentifier(result, segment);
         }
         return result;
+    }
+
+    static String encodedTrackIdentifier(@Nullable String trackId) {
+        String canonical = SubtitleTrackIdentity.canonicalId(trackId);
+        String marker = OpenSubtitlesV3Client.TRACK_ID_PREFIX + "osid-";
+        if (!canonical.startsWith(marker)) {
+            return "";
+        }
+        int start = marker.length();
+        int end = canonical.indexOf('-', start);
+        if (end <= start) {
+            return "";
+        }
+        return numericString(canonical.substring(start, end));
     }
 
     private static boolean intersects(Set<String> first, Set<String> second) {
@@ -883,6 +1105,23 @@ final class OpenSubtitlesRestClient {
         return value.replaceAll("[\\p{Cntrl}\\r\\n]+", " ")
                 .replaceAll("\\s+", " ")
                 .trim();
+    }
+
+    private static String filenameDiagnostic(@Nullable String value) {
+        if (releaseQuery(value).isEmpty()) {
+            return value == null || value.trim().isEmpty()
+                    ? "unavailable" : "synthetic";
+        }
+        return diagnosticText(value);
+    }
+
+    private static String diagnosticText(@Nullable String value) {
+        String cleaned = cleanLabel(value);
+        if (cleaned.isEmpty()) {
+            return "none";
+        }
+        return cleaned.length() <= 96
+                ? cleaned : cleaned.substring(0, 95) + "…";
     }
 
     private static String subtitleSuffix(@Nullable String filename) {

@@ -4,6 +4,9 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Test;
 
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 import okhttp3.Request;
@@ -79,9 +82,8 @@ public class OpenSubtitlesRestClientTest {
                 "tt0133093",
                 "The.Matrix.1999.2160p.BluRay.x265-GROUP.mkv");
         assertEquals(
-                "imdb_id=133093&languages=cs%2Cen&moviebytesize=1000000"
-                        + "&moviehash=efe600f792bf6a7f"
-                        + "&query=the+matrix+1999+2160p+bluray+x265+group&type=movie",
+                "imdb_id=133093&languages=cs%2Cen"
+                        + "&moviehash=efe600f792bf6a7f&type=movie",
                 hashRequest.url().encodedQuery());
 
         Request episodeRequest = OpenSubtitlesRestClient.searchRequest(
@@ -91,12 +93,23 @@ public class OpenSubtitlesRestClientTest {
                 "tt3107288:1:2",
                 "Show.S01E02.1080p.WEB-DL.x264-GROUP.mkv");
         assertEquals(
-                "episode_number=2&languages=cs&moviebytesize=2000000"
+                "episode_number=2&languages=cs"
                         + "&moviehash=0123456789abcdef"
                         + "&parent_imdb_id=3107288"
-                        + "&query=show+s01e02+1080p+web+dl+x264+group"
                         + "&season_number=1&type=episode",
                 episodeRequest.url().encodedQuery());
+
+        Request secondPageRequest = OpenSubtitlesRestClient.searchRequest(
+                "secret", "efe600f792bf6a7f", 1_000_000L,
+                new String[]{"eng", "ces"},
+                "movie",
+                "tt0133093",
+                "The.Matrix.1999.2160p.BluRay.x265-GROUP.mkv",
+                2);
+        assertEquals(
+                "imdb_id=133093&languages=cs%2Cen"
+                        + "&moviehash=efe600f792bf6a7f&page=2&type=movie",
+                secondPageRequest.url().encodedQuery());
 
         Request testRequest =
                 OpenSubtitlesRestClient.credentialsTestRequest("secret");
@@ -151,6 +164,36 @@ public class OpenSubtitlesRestClientTest {
                 new JSONObject().put("data", new JSONArray().put(result)).toString(),
                 new String[]{"ces"},
                 "file_a9bbacce74d64874").isEmpty());
+    }
+
+    @Test
+    public void probableRestCandidateMapsBackToVisibleV3Track() {
+        OpenSubtitlesRestClient.Candidate candidate =
+                new OpenSubtitlesRestClient.Candidate(
+                        "220",
+                        new LinkedHashSet<>(Arrays.asList("120", "220")),
+                        "ces",
+                        "The.Matrix.1999.2160p.BluRay.REMUX.HEVC-GROUP",
+                        "The.Matrix.1999.2160p.BluRay.REMUX.HEVC-GROUP.cze.srt",
+                        0,
+                        false,
+                        false,
+                        true,
+                        1_000,
+                        90);
+
+        OpenSubtitlesRestClient.Candidate match =
+                OpenSubtitlesRestClient.findLikelyMatch(
+                OpenSubtitlesV3Client.TRACK_ID_PREFIX + "osid-120-visible",
+                "OpenSubtitles v3 · CES · 120",
+                "ces",
+                new LinkedHashSet<>(Collections.singletonList(
+                        OpenSubtitlesRestClient.encodedTrackIdentifier(
+                                OpenSubtitlesV3Client.TRACK_ID_PREFIX
+                                        + "osid-120-visible"))),
+                Collections.singletonList(candidate));
+
+        assertEquals(candidate, match);
     }
 
     private static JSONObject result(String id,

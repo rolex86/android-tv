@@ -160,7 +160,7 @@ runtime_regression_anchors = (
     "aiSubtitleController.onTracksChanged();",
     "SelectedSubtitleResolver.AI_ID_PREFIX",
     "cancelRemoteJob(jobId)",
-    "requestOpenSubtitlesV3(session, content);",
+    "requestOpenSubtitlesV3WhenFilenameReady(session, content, 0);",
     "finishOpenSubtitlesAttach(tracks);",
     "OpenSubtitlesV3Client.hasOpenSubtitlesTrack",
 )
@@ -218,7 +218,9 @@ else:
         "movieMetadataUsesCinemetaName",
         "subtitleRequestRecoversEpisodeIdentityAndFilename",
         "subtitleFilenameFlowsFromConnectorEventIntoResolvedContent",
-        "subtitleRequestSupportsQueryExtrasAndRejectsMissingIdentity",
+        "subtitleRequestSupportsCurrentAndLegacyIdentityFormats",
+        "lateSubtitleRequestRefreshesAlreadyResolvedContent",
+        "filenameRefreshRejectsStaleEventsAndKeepsExistingIdentity",
     ):
         if test_name not in stremio_tests:
             errors.append(f"Missing Stremio metadata regression test: {test_name}")
@@ -250,6 +252,7 @@ else:
         "recognizesLikelyReleaseNamesButRejectsConflictingResolution",
         "releaseConfidenceDoesNotTreatTitleAndYearAsSynchronizationEvidence",
         "releaseConfidenceAcceptsSameSourceFingerprintWithoutExactText",
+        "releaseConfidenceHandlesLanguageSuffixAndDoesNotHardRejectOtherGroup",
     ):
         if test_name not in opensubtitles_tests:
             errors.append(f"Missing OpenSubtitles v3 regression test: {test_name}")
@@ -265,6 +268,7 @@ else:
         "buildsCanonicalApiUrlsWithoutRedirects",
         "acceptsOnlyConservativeReleaseMatchesOutsideExactHashResults",
         "syntheticFilenameCannotCreateProbableMatches",
+        "probableRestCandidateMapsBackToVisibleV3Track",
     ):
         if test_name not in opensubtitles_rest_tests:
             errors.append(f"Missing OpenSubtitles REST regression test: {test_name}")
