@@ -73,17 +73,12 @@ public class SmartSelectionPolicyTest {
     }
 
     @Test
-    public void exactRuntimeMatchOutranksLikelyAndUnknownTracks() {
+    public void likelyRuntimeMatchOutranksUnknownTracks() {
         SubtitleTrackIdentity.resetOpenSubtitlesMatches();
-        String exactId = "plus-external:opensubtitles-v3:exact";
         String likelyId = "plus-external:opensubtitles-v3:likely";
-        SubtitleTrackIdentity.registerOpenSubtitlesMatch(
-                exactId, "ces", 0, C.ROLE_FLAG_SUBTITLE, "Czech", 0);
         SubtitleTrackIdentity.registerOpenSubtitlesMatch(
                 likelyId, "ces", 0, C.ROLE_FLAG_SUBTITLE, "Czech", 1);
 
-        assertEquals(0, SmartSubtitleSelector.matchRank(
-                new Format.Builder().setId("2:" + exactId).build()));
         assertEquals(1, SmartSubtitleSelector.matchRank(
                 new Format.Builder().setId(likelyId).build()));
         assertEquals(2, SmartSubtitleSelector.matchRank(
@@ -91,20 +86,18 @@ public class SmartSelectionPolicyTest {
     }
 
     @Test
-    public void automaticSubtitleScorePrioritizesLanguageThenSourceThenExactMatch() {
-        long exact = SmartSubtitleSelector.candidateScore(0, 0, 0, 20);
+    public void automaticSubtitleScorePrioritizesLanguageThenSourceThenReleaseMatch() {
         long likely = SmartSubtitleSelector.candidateScore(0, 0, 1, 0);
         long unknown = SmartSubtitleSelector.candidateScore(0, 0, 2, 0);
         long preferredSourceUnknown =
                 SmartSubtitleSelector.candidateScore(0, 0, 2, 0);
-        long nonPreferredSourceExact =
-                SmartSubtitleSelector.candidateScore(0, 1, 0, 0);
-        long nextLanguageExact =
-                SmartSubtitleSelector.candidateScore(1, 0, 0, 0);
+        long nonPreferredSourceLikely =
+                SmartSubtitleSelector.candidateScore(0, 1, 1, 0);
+        long nextLanguageLikely =
+                SmartSubtitleSelector.candidateScore(1, 0, 1, 0);
 
-        assertTrue(exact < likely);
         assertTrue(likely < unknown);
-        assertTrue(preferredSourceUnknown < nonPreferredSourceExact);
-        assertTrue(nonPreferredSourceExact < nextLanguageExact);
+        assertTrue(preferredSourceUnknown < nonPreferredSourceLikely);
+        assertTrue(nonPreferredSourceLikely < nextLanguageLikely);
     }
 }

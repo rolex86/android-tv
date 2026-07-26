@@ -72,7 +72,7 @@ public class SelectedSubtitleResolverTest {
     }
 
     @Test
-    public void exposesRuntimeMatchIconsForOpenSubtitlesIds() {
+    public void exposesOnlyLikelyAndUnknownIconsForStremioOpenSubtitles() {
         SubtitleTrackIdentity.resetOpenSubtitlesMatches();
         String id = "plus-external:opensubtitles-v3:abc";
         SubtitleTrackIdentity.registerOpenSubtitlesMatch(
@@ -87,8 +87,8 @@ public class SelectedSubtitleResolverTest {
 
         SubtitleTrackIdentity.registerOpenSubtitlesMatch(
                 id, "eng", 0, C.ROLE_FLAG_SUBTITLE, "English Full", 0);
-        assertEquals(0, SubtitleTrackIdentity.openSubtitlesMatchRank(id));
-        assertEquals("✓", SubtitleTrackIdentity.matchIcon(id));
+        assertEquals(1, SubtitleTrackIdentity.openSubtitlesMatchRank(id));
+        assertEquals("≈", SubtitleTrackIdentity.matchIcon(id));
     }
 
     @Test
@@ -101,12 +101,12 @@ public class SelectedSubtitleResolverTest {
                 0,
                 C.ROLE_FLAG_SUBTITLE,
                 label,
-                0);
+                1);
 
         assertTrue(SubtitleTrackIdentity.isOpenSubtitlesV3("1:2", label));
-        assertEquals(0, SubtitleTrackIdentity.openSubtitlesMatchRank(
+        assertEquals(1, SubtitleTrackIdentity.openSubtitlesMatchRank(
                 "1:2", "ces", 0, C.ROLE_FLAG_SUBTITLE, label));
-        assertEquals("✓", SubtitleTrackIdentity.matchIcon(
+        assertEquals("≈", SubtitleTrackIdentity.matchIcon(
                 "1:2", "ces", 0, C.ROLE_FLAG_SUBTITLE, label));
     }
 

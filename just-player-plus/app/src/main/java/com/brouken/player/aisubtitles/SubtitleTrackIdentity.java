@@ -14,8 +14,6 @@ public final class SubtitleTrackIdentity {
     private static final String EXTERNAL_PREFIX = "plus-external:";
     private static final String OPEN_SUBTITLES_V3_PREFIX =
             "plus-external:opensubtitles-v3:";
-    private static final String OPEN_SUBTITLES_EXACT_PREFIX =
-            OPEN_SUBTITLES_V3_PREFIX + "exact:";
     private static final String OPEN_SUBTITLES_LIKELY_PREFIX =
             OPEN_SUBTITLES_V3_PREFIX + "likely:";
     private static final String OPEN_SUBTITLES_UNKNOWN_PREFIX =
@@ -87,14 +85,17 @@ public final class SubtitleTrackIdentity {
                                                   int roleFlags,
                                                   @Nullable String label,
                                                   int rank) {
+        // The public Stremio OpenSubtitles v3 add-on does not honor movie hashes. Never let its
+        // results claim an exact match; rank 0 is reserved for a future direct API integration.
+        int verifiedRank = Math.max(1, rank);
         String canonical = canonicalId(id);
         if (!canonical.isEmpty()) {
-            registerBestRank(OPEN_SUBTITLES_RANKS, canonical, rank);
+            registerBestRank(OPEN_SUBTITLES_RANKS, canonical, verifiedRank);
         }
         String signature = openSubtitlesSignature(
                 language, selectionFlags, roleFlags, label);
         if (!signature.isEmpty()) {
-            registerBestRank(OPEN_SUBTITLES_SIGNATURE_RANKS, signature, rank);
+            registerBestRank(OPEN_SUBTITLES_SIGNATURE_RANKS, signature, verifiedRank);
         }
     }
 
@@ -109,7 +110,7 @@ public final class SubtitleTrackIdentity {
         }
     }
 
-    /** 0 = exact movie-hash match, 1 = likely release match, 2 = unverified. */
+    /** 1 = likely release match, 2 = unverified. Rank 0 is reserved for direct API verification. */
     public static int openSubtitlesMatchRank(@Nullable String id) {
         String canonical = canonicalId(id);
         Integer registered = OPEN_SUBTITLES_RANKS.get(canonical);
@@ -117,9 +118,6 @@ public final class SubtitleTrackIdentity {
             return registered;
         }
         // Backward compatibility with the first experimental branch build.
-        if (canonical.startsWith(OPEN_SUBTITLES_EXACT_PREFIX)) {
-            return 0;
-        }
         if (canonical.startsWith(OPEN_SUBTITLES_LIKELY_PREFIX)) {
             return 1;
         }

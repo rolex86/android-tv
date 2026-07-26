@@ -31,9 +31,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 
 import okhttp3.Call;
 import okhttp3.Callback;
@@ -43,10 +40,7 @@ import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
-/**
- * Loads OpenSubtitles using the original non-blocking request path. File hashing runs only as an
- * independent background refinement and can never delay or cancel the initial subtitle list.
- */
+/** Loads and release-ranks subtitles exposed by the public Stremio OpenSubtitles v3 add-on. */
 final class OpenSubtitlesV3Client {
     static final String TRACK_ID_PREFIX = SmartSubtitleSelector.EXTERNAL_ID_PREFIX
             + "opensubtitles-v3:";
@@ -56,7 +50,7 @@ final class OpenSubtitlesV3Client {
     private static final int MAX_LABEL_LENGTH = 140;
 
     enum MatchConfidence {
-        EXACT(0), LIKELY(1), UNKNOWN(2);
+        LIKELY(1), UNKNOWN(2);
 
         final int rank;
 
@@ -67,12 +61,7 @@ final class OpenSubtitlesV3Client {
 
     interface Listener {
         void onLoaded(List<MediaItem.SubtitleConfiguration> subtitles);
-        void onRefined(List<MediaItem.SubtitleConfiguration> subtitles);
         void onFailure(String reason);
-    }
-
-    interface DiagnosticListener {
-        void onDiagnostic(String state, String detail);
     }
 
     static final class Candidate {
@@ -108,32 +97,12 @@ final class OpenSubtitlesV3Client {
     }
 
     private final OkHttpClient httpClient;
-    @Nullable private final DiagnosticListener diagnosticListener;
-    private final ExecutorService refinementExecutor = Executors.newSingleThreadExecutor();
     @Nullable private volatile Call activeInitialCall;
-    @Nullable private volatile Call activeRefinementCall;
-    @Nullable private volatile Future<?> activeRefinementTask;
-    @Nullable private Listener currentListener;
-    @Nullable private String currentType;
-    @Nullable private String currentId;
-    private String[] currentLanguages = new String[0];
-    private List<Candidate> currentGenericCandidates = new ArrayList<>();
-    @Nullable private List<Candidate> pendingExactCandidates;
-    private boolean genericFinished;
-    private boolean genericSucceeded;
-    private boolean refinementStarted;
-    private boolean exactDelivered;
     private volatile long operationToken;
     private volatile boolean released;
 
     OpenSubtitlesV3Client(OkHttpClient httpClient) {
-        this(httpClient, null);
-    }
-
-    OpenSubtitlesV3Client(
-            OkHttpClient httpClient, @Nullable DiagnosticListener diagnosticListener) {
         this.httpClient = httpClient;
-        this.diagnosticListener = diagnosticListener;
     }
 
     synchronized void fetch(String type,
@@ -154,19 +123,9 @@ final class OpenSubtitlesV3Client {
             return;
         }
 
-        currentListener = listener;
-        currentType = type;
-        currentId = id;
-        currentLanguages = languages;
-        currentGenericCandidates = new ArrayList<>();
-        pendingExactCandidates = null;
-        genericFinished = false;
-        genericSucceeded = false;
-        refinementStarted = false;
-        exactDelivered = false;
         final String filename = mediaFilename == null ? "" : mediaFilename;
         Request request = new Request.Builder()
-                .url(genericUrl(type, id))
+                .url(genericUrl(type, id, filename))
                 .header("Accept", "application/json")
                 .header("User-Agent", "JustPlayer Plus")
                 .build();
@@ -177,7 +136,7 @@ final class OpenSubtitlesV3Client {
             public void onFailure(@NonNull Call failedCall, @NonNull IOException error) {
                 if (isCurrent(token) && !failedCall.isCanceled()) {
                     activeInitialCall = null;
-                    reportGenericFailure(token, listener, "network");
+                    listener.onFailure("network");
                 }
             }
 
@@ -189,14 +148,13 @@ final class OpenSubtitlesV3Client {
                     }
                     if (!closeable.isSuccessful()) {
                         activeInitialCall = null;
-                        reportGenericFailure(
-                                token, listener, "http_" + closeable.code());
+                        listener.onFailure("http_" + closeable.code());
                         return;
                     }
                     ResponseBody body = closeable.body();
                     if (body == null) {
                         activeInitialCall = null;
-                        reportGenericFailure(token, listener, "invalid_body");
+                        listener.onFailure("invalid_body");
                         return;
                     }
                     String json = BoundedResponseBody.readUtf8(body, MAX_RESPONSE_BYTES);
@@ -210,153 +168,22 @@ final class OpenSubtitlesV3Client {
                         return;
                     }
                     activeInitialCall = null;
-                    deliverGeneric(token, genericCandidates, configurations, listener);
+                    if (isCurrent(token)) {
+                        listener.onLoaded(configurations);
+                    }
                 } catch (BoundedResponseBody.ResponseTooLargeException error) {
                     if (isCurrent(token)) {
                         activeInitialCall = null;
-                        reportGenericFailure(token, listener, "response_too_large");
+                        listener.onFailure("response_too_large");
                     }
                 } catch (IOException | JSONException | RuntimeException error) {
                     if (isCurrent(token)) {
                         activeInitialCall = null;
-                        reportGenericFailure(token, listener, "invalid_response");
+                        listener.onFailure("invalid_response");
                     }
                 }
             }
         });
-    }
-
-    /**
-     * Starts optional hash refinement after Player reaches READY. The MediaItem and track snapshot
-     * must be captured on Player's application thread; background work never calls Player methods.
-     */
-    synchronized void startRefinement(MediaItem mediaItem, @Nullable Tracks currentTracks) {
-        if (released || refinementStarted || currentListener == null
-                || currentType == null || currentId == null
-                || mediaItem.localConfiguration == null) {
-            return;
-        }
-        refinementStarted = true;
-        final long token = operationToken;
-        final String type = currentType;
-        final String id = currentId;
-        final Listener listener = currentListener;
-        final String[] languages = requestedLanguages(currentLanguages, currentTracks);
-        activeRefinementTask = refinementExecutor.submit(() -> {
-            OpenSubtitlesMediaFingerprint.Result fingerprint = fingerprint(token, mediaItem);
-            if (!isCurrent(token) || fingerprint == null) {
-                clearRefinementTask(token);
-                return;
-            }
-
-            try {
-                diagnostic("opensubtitles_v3_exact_started", "size=" + fingerprint.size);
-                String json = requestRefinementJson(token, exactUrl(type, id, fingerprint));
-                List<Candidate> exactCandidates = parseCandidatesInternal(
-                        json, languages, MatchConfidence.EXACT, fingerprint.filename);
-                if (exactCandidates.isEmpty()) {
-                    diagnostic("opensubtitles_v3_exact_empty", "count=0");
-                    return;
-                }
-                diagnostic(
-                        "opensubtitles_v3_exact_loaded",
-                        "count=" + exactCandidates.size());
-                deliverExact(token, exactCandidates, listener);
-            } catch (IOException ignored) {
-                if (isCurrent(token)) {
-                    diagnostic("opensubtitles_v3_exact_failed", "reason=io");
-                }
-                // Generic OpenSubtitles results, when available, remain usable.
-            } catch (JSONException ignored) {
-                if (isCurrent(token)) {
-                    diagnostic("opensubtitles_v3_exact_failed", "reason=invalid_json");
-                }
-                // Generic OpenSubtitles results, when available, remain usable.
-            } catch (RuntimeException ignored) {
-                if (isCurrent(token)) {
-                    diagnostic("opensubtitles_v3_exact_failed", "reason=runtime");
-                }
-                // Generic OpenSubtitles results, when available, remain usable.
-            } finally {
-                clearRefinementTask(token);
-            }
-        });
-    }
-
-    @Nullable
-    private OpenSubtitlesMediaFingerprint.Result fingerprint(long token, MediaItem mediaItem) {
-        try {
-            return OpenSubtitlesMediaFingerprint.fromMediaItem(httpClient, mediaItem,
-                    new OpenSubtitlesMediaFingerprint.CallObserver() {
-                        @Override
-                        public void onCallStarted(Call call) {
-                            activeRefinementCall = call;
-                            if (!isCurrent(token)) {
-                                call.cancel();
-                            }
-                        }
-
-                        @Override
-                        public void onCallFinished(Call call) {
-                            if (activeRefinementCall == call) {
-                                activeRefinementCall = null;
-                            }
-                        }
-
-                        @Override
-                        public void onFingerprintEvent(String state, String detail) {
-                            if (isCurrent(token)) {
-                                diagnostic(
-                                        "opensubtitles_v3_fingerprint_" + state, detail);
-                            }
-                        }
-                    });
-        } catch (IOException ignored) {
-            if (isCurrent(token)) {
-                diagnostic(
-                        "opensubtitles_v3_fingerprint_failed", "reason=io_exception");
-            }
-            return null;
-        } catch (RuntimeException ignored) {
-            if (isCurrent(token)) {
-                diagnostic(
-                        "opensubtitles_v3_fingerprint_failed", "reason=runtime_exception");
-            }
-            return null;
-        }
-    }
-
-    private String requestRefinementJson(long token, HttpUrl url) throws IOException {
-        if (!isCurrent(token)) {
-            throw new IOException("cancelled");
-        }
-        Call call = httpClient.newCall(new Request.Builder()
-                .url(url)
-                .header("Accept", "application/json")
-                .header("User-Agent", "JustPlayer Plus")
-                .build());
-        activeRefinementCall = call;
-        try (Response response = call.execute()) {
-            if (!isCurrent(token)) {
-                throw new IOException("cancelled");
-            }
-            if (!response.isSuccessful()) {
-                diagnostic(
-                        "opensubtitles_v3_exact_http", "code=" + response.code());
-                throw new IOException("http_" + response.code());
-            }
-            diagnostic(
-                    "opensubtitles_v3_exact_http", "code=" + response.code());
-            ResponseBody body = response.body();
-            if (body == null) {
-                throw new IOException("invalid_body");
-            }
-            return BoundedResponseBody.readUtf8(body, MAX_RESPONSE_BYTES);
-        } finally {
-            if (activeRefinementCall == call) {
-                activeRefinementCall = null;
-            }
-        }
     }
 
     private static String[] requestedLanguages(String[] preferred, @Nullable Tracks tracks) {
@@ -377,71 +204,6 @@ final class OpenSubtitlesV3Client {
         return result.toArray(new String[0]);
     }
 
-    private void deliverGeneric(
-            long token,
-            List<Candidate> candidates,
-            List<MediaItem.SubtitleConfiguration> configurations,
-            Listener listener) {
-        List<Candidate> pendingExact;
-        synchronized (this) {
-            if (!isCurrent(token) || exactDelivered) {
-                return;
-            }
-            currentGenericCandidates = new ArrayList<>(candidates);
-            genericFinished = true;
-            genericSucceeded = true;
-            pendingExact = pendingExactCandidates;
-            pendingExactCandidates = null;
-        }
-        if (pendingExact != null) {
-            deliverExact(token, pendingExact, listener);
-        } else if (isCurrent(token)) {
-            listener.onLoaded(configurations);
-        }
-    }
-
-    private void reportGenericFailure(
-            long token, Listener listener, String reason) {
-        List<Candidate> pendingExact;
-        synchronized (this) {
-            if (!isCurrent(token) || exactDelivered) {
-                return;
-            }
-            genericFinished = true;
-            genericSucceeded = false;
-            pendingExact = pendingExactCandidates;
-            pendingExactCandidates = null;
-        }
-        if (pendingExact != null) {
-            deliverExact(token, pendingExact, listener);
-        } else if (isCurrent(token)) {
-            listener.onFailure(reason);
-        }
-    }
-
-    private void deliverExact(long token,
-                              List<Candidate> exactCandidates,
-                              Listener listener) {
-        List<MediaItem.SubtitleConfiguration> configurations;
-        synchronized (this) {
-            if (!isCurrent(token) || exactDelivered) {
-                return;
-            }
-            if (!genericFinished) {
-                pendingExactCandidates = new ArrayList<>(exactCandidates);
-                return;
-            }
-            List<Candidate> merged = genericSucceeded
-                    ? mergeRefinedCandidates(currentGenericCandidates, exactCandidates)
-                    : sortAndLimit(new ArrayList<>(exactCandidates));
-            configurations = buildConfigurations(merged);
-            exactDelivered = true;
-        }
-        if (isCurrent(token)) {
-            listener.onRefined(configurations);
-        }
-    }
-
     private static void addLanguage(Set<String> target, @Nullable String language) {
         String normalized = normalizeLanguage(language);
         if (!normalized.isEmpty() && !"und".equals(normalized)) {
@@ -449,78 +211,28 @@ final class OpenSubtitlesV3Client {
         }
     }
 
-    private static HttpUrl genericUrl(String type, String id) {
-        return baseUrl().newBuilder()
+    private static HttpUrl genericUrl(String type, String id, @Nullable String filename) {
+        HttpUrl.Builder builder = baseUrl().newBuilder()
                 .addPathSegment("subtitles")
-                .addPathSegment(type)
-                .addPathSegment(id + ".json")
-                .build();
-    }
-
-    static HttpUrl exactUrl(String type,
-                            String videoId,
-                            OpenSubtitlesMediaFingerprint.Result fingerprint) {
-        String extra = "videoID=" + Uri.encode(videoId)
-                + "&videoSize=" + fingerprint.size
-                + "&filename=" + Uri.encode(fingerprint.filename) + ".json";
-        return baseUrl().newBuilder()
-                .addPathSegment("subtitles")
-                .addPathSegment(type)
-                .addPathSegment(fingerprint.hash)
-                .addEncodedPathSegment(extra)
-                .build();
+                .addPathSegment(type);
+        if (filename == null || filename.trim().isEmpty()) {
+            return builder.addPathSegment(id + ".json").build();
+        }
+        String extra = "filename=" + Uri.encode(filename.trim()) + ".json";
+        return builder.addPathSegment(id).addEncodedPathSegment(extra).build();
     }
 
     private static HttpUrl baseUrl() {
         return new Request.Builder().url(BASE_URL).build().url();
     }
 
-    private static void merge(Map<String, Candidate> target, List<Candidate> incoming) {
-        for (Candidate candidate : incoming) {
-            Candidate previous = target.get(candidate.url);
-            if (previous == null || candidate.confidence.rank < previous.confidence.rank) {
-                target.put(candidate.url, candidate);
-            }
-        }
-    }
-
-    static List<Candidate> mergeRefinedCandidates(List<Candidate> genericCandidates,
-                                                   List<Candidate> exactCandidates) {
-        LinkedHashMap<String, Candidate> merged = new LinkedHashMap<>();
-        merge(merged, genericCandidates);
-        merge(merged, exactCandidates);
-        return sortAndLimit(new ArrayList<>(merged.values()));
-    }
-
     synchronized void cancel() {
         operationToken++;
-        currentListener = null;
-        currentType = null;
-        currentId = null;
-        currentLanguages = new String[0];
-        currentGenericCandidates = new ArrayList<>();
-        pendingExactCandidates = null;
-        genericFinished = false;
-        genericSucceeded = false;
-        refinementStarted = false;
-        exactDelivered = false;
 
         Call initial = activeInitialCall;
         activeInitialCall = null;
         if (initial != null) {
             initial.cancel();
-        }
-
-        Call refinement = activeRefinementCall;
-        activeRefinementCall = null;
-        if (refinement != null) {
-            refinement.cancel();
-        }
-
-        Future<?> task = activeRefinementTask;
-        activeRefinementTask = null;
-        if (task != null) {
-            task.cancel(true);
         }
     }
 
@@ -530,22 +242,10 @@ final class OpenSubtitlesV3Client {
         }
         cancel();
         released = true;
-        refinementExecutor.shutdownNow();
     }
 
     private boolean isCurrent(long token) {
         return !released && token == operationToken;
-    }
-
-    private void diagnostic(String state, String detail) {
-        DiagnosticListener listener = diagnosticListener;
-        if (listener != null) {
-            try {
-                listener.onDiagnostic(state, detail);
-            } catch (RuntimeException ignored) {
-                // Diagnostics must never affect subtitle loading or playback.
-            }
-        }
     }
 
     @Nullable
@@ -553,12 +253,6 @@ final class OpenSubtitlesV3Client {
             long token,
             List<Candidate> candidates) {
         return isCurrent(token) ? buildConfigurations(candidates) : null;
-    }
-
-    private synchronized void clearRefinementTask(long token) {
-        if (operationToken == token) {
-            activeRefinementTask = null;
-        }
     }
 
     static boolean isSupportedContent(@Nullable String type, @Nullable String id) {
@@ -637,7 +331,7 @@ final class OpenSubtitlesV3Client {
                     : MimeTypes.APPLICATION_SUBRIP;
 
             MatchConfidence confidence = defaultConfidence;
-            if (confidence != MatchConfidence.EXACT
+            if (confidence == MatchConfidence.UNKNOWN
                     && isLikelyReleaseMatch(mediaFilename, identifier + " " + name)) {
                 confidence = MatchConfidence.LIKELY;
             }
