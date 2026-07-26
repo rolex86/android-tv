@@ -72,13 +72,13 @@ public class SelectedSubtitleResolverTest {
     }
 
     @Test
-    public void exposesOnlyLikelyAndUnknownIconsForStremioOpenSubtitles() {
+    public void exposesLikelyIconButLeavesUnverifiedTracksUnmarked() {
         SubtitleTrackIdentity.resetOpenSubtitlesMatches();
         String id = "plus-external:opensubtitles-v3:abc";
         SubtitleTrackIdentity.registerOpenSubtitlesMatch(
                 id, "eng", 0, C.ROLE_FLAG_SUBTITLE, "English Full", 2);
         assertEquals(2, SubtitleTrackIdentity.openSubtitlesMatchRank(id));
-        assertEquals("?", SubtitleTrackIdentity.matchIcon(id));
+        assertEquals("", SubtitleTrackIdentity.matchIcon(id));
 
         SubtitleTrackIdentity.registerOpenSubtitlesMatch(
                 id, "eng", 0, C.ROLE_FLAG_SUBTITLE, "English Full", 1);
@@ -89,6 +89,20 @@ public class SelectedSubtitleResolverTest {
                 id, "eng", 0, C.ROLE_FLAG_SUBTITLE, "English Full", 0);
         assertEquals(1, SubtitleTrackIdentity.openSubtitlesMatchRank(id));
         assertEquals("≈", SubtitleTrackIdentity.matchIcon(id));
+    }
+
+    @Test
+    public void exposesExactIconOnlyForDirectApiVerification() {
+        SubtitleTrackIdentity.resetOpenSubtitlesMatches();
+        String id = "plus-external:opensubtitles-rest:12345";
+        String label = "OpenSubtitles · CES · Movie.Release";
+
+        SubtitleTrackIdentity.registerVerifiedOpenSubtitlesMatch(
+                id, "ces", 0, C.ROLE_FLAG_SUBTITLE, label);
+
+        assertTrue(SubtitleTrackIdentity.isOpenSubtitles(id, label));
+        assertEquals(0, SubtitleTrackIdentity.openSubtitlesMatchRank(id));
+        assertEquals("✓", SubtitleTrackIdentity.matchIcon(id));
     }
 
     @Test

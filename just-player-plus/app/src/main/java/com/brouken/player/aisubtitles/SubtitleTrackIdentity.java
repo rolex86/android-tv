@@ -14,6 +14,8 @@ public final class SubtitleTrackIdentity {
     private static final String EXTERNAL_PREFIX = "plus-external:";
     private static final String OPEN_SUBTITLES_V3_PREFIX =
             "plus-external:opensubtitles-v3:";
+    private static final String OPEN_SUBTITLES_REST_PREFIX =
+            "plus-external:opensubtitles-rest:";
     private static final String OPEN_SUBTITLES_LIKELY_PREFIX =
             OPEN_SUBTITLES_V3_PREFIX + "likely:";
     private static final String OPEN_SUBTITLES_UNKNOWN_PREFIX =
@@ -70,6 +72,16 @@ public final class SubtitleTrackIdentity {
         return isOpenSubtitlesV3(id) || isOpenSubtitlesLabel(label);
     }
 
+    public static boolean isOpenSubtitles(@Nullable String id) {
+        String canonical = canonicalId(id);
+        return canonical.startsWith(OPEN_SUBTITLES_V3_PREFIX)
+                || canonical.startsWith(OPEN_SUBTITLES_REST_PREFIX);
+    }
+
+    public static boolean isOpenSubtitles(@Nullable String id, @Nullable String label) {
+        return isOpenSubtitles(id) || isOpenSubtitlesLabel(label);
+    }
+
     public static boolean isAi(@Nullable String id) {
         return canonicalId(id).startsWith(AI_PREFIX);
     }
@@ -99,6 +111,22 @@ public final class SubtitleTrackIdentity {
         }
     }
 
+    public static void registerVerifiedOpenSubtitlesMatch(@Nullable String id,
+                                                          @Nullable String language,
+                                                          int selectionFlags,
+                                                          int roleFlags,
+                                                          @Nullable String label) {
+        String canonical = canonicalId(id);
+        if (!canonical.isEmpty()) {
+            registerBestRank(OPEN_SUBTITLES_RANKS, canonical, 0);
+        }
+        String signature = openSubtitlesSignature(
+                language, selectionFlags, roleFlags, label);
+        if (!signature.isEmpty()) {
+            registerBestRank(OPEN_SUBTITLES_SIGNATURE_RANKS, signature, 0);
+        }
+    }
+
     private static void registerBestRank(Map<String, Integer> ranks,
                                          String key,
                                          int rank) {
@@ -122,7 +150,8 @@ public final class SubtitleTrackIdentity {
             return 1;
         }
         if (canonical.startsWith(OPEN_SUBTITLES_UNKNOWN_PREFIX)
-                || canonical.startsWith(OPEN_SUBTITLES_V3_PREFIX)) {
+                || canonical.startsWith(OPEN_SUBTITLES_V3_PREFIX)
+                || canonical.startsWith(OPEN_SUBTITLES_REST_PREFIX)) {
             return 2;
         }
         return Integer.MAX_VALUE;
@@ -161,9 +190,6 @@ public final class SubtitleTrackIdentity {
         }
         if (rank == 1) {
             return "≈";
-        }
-        if (rank == 2) {
-            return "?";
         }
         return "";
     }
@@ -204,7 +230,9 @@ public final class SubtitleTrackIdentity {
     }
 
     private static boolean isOpenSubtitlesLabel(@Nullable String label) {
-        return normalizeText(label).startsWith("opensubtitles v3");
+        String normalized = normalizeText(label);
+        return normalized.startsWith("opensubtitles v3")
+                || normalized.startsWith("opensubtitles ");
     }
 
     private static String inferLanguage(@Nullable String label) {

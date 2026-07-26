@@ -272,7 +272,7 @@ final class OpenSubtitlesV3Client {
             }
             for (int index = 0; index < group.getMediaTrackGroup().length; index++) {
                 Format format = group.getMediaTrackGroup().getFormat(index);
-                if (SubtitleTrackIdentity.isOpenSubtitlesV3(format.id, format.label)) {
+                if (SubtitleTrackIdentity.isOpenSubtitles(format.id, format.label)) {
                     return true;
                 }
             }

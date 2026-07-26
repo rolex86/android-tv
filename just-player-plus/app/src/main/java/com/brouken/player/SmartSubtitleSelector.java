@@ -136,7 +136,7 @@ final class SmartSubtitleSelector {
 
     static int sourceRank(Format format, String sourcePreference) {
         boolean external = SubtitleTrackIdentity.isExternal(format.id)
-                || SubtitleTrackIdentity.isOpenSubtitlesV3(format.id, format.label);
+                || SubtitleTrackIdentity.isOpenSubtitles(format.id, format.label);
         if ("external".equals(sourcePreference)) {
             return external ? 0 : 1;
         }
@@ -147,7 +147,7 @@ final class SmartSubtitleSelector {
     }
 
     static int matchRank(Format format) {
-        if (!SubtitleTrackIdentity.isOpenSubtitlesV3(format.id, format.label)) {
+        if (!SubtitleTrackIdentity.isOpenSubtitles(format.id, format.label)) {
             return OpenSubtitlesV3Client.MatchConfidence.UNKNOWN.rank;
         }
         return Math.min(

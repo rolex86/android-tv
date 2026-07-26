@@ -19,6 +19,7 @@ import android.text.InputType;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
+import android.widget.EditText;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -43,6 +44,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.MissingResourceException;
+import java.util.concurrent.TimeUnit;
+
+import okhttp3.OkHttpClient;
 
 public class SettingsActivity extends AppCompatActivity {
 
@@ -154,6 +158,7 @@ public class SettingsActivity extends AppCompatActivity {
             }
 
             setupAiSubtitlePreferences();
+            setupOpenSubtitlesPreferences();
 
             Preference diagnostics = findPreference("externalPlayerDiagnosticsView");
             if (diagnostics != null) {
@@ -286,6 +291,191 @@ public class SettingsActivity extends AppCompatActivity {
                 return true;
             });
             refreshVisibility.run();
+        }
+
+        private void setupOpenSubtitlesPreferences() {
+            Preference credentialsPreference = findPreference(
+                    PlusPrefs.KEY_OPENSUBTITLES_CREDENTIALS);
+            Preference testPreference = findPreference(
+                    PlusPrefs.KEY_OPENSUBTITLES_TEST);
+            if (credentialsPreference == null || testPreference == null) {
+                return;
+            }
+            OpenSubtitlesCredentialsStore store =
+                    new OpenSubtitlesCredentialsStore(requireContext());
+            Runnable refresh = () -> {
+                OpenSubtitlesCredentialsStore.Credentials credentials = store.load();
+                if (credentials == null) {
+                    credentialsPreference.setSummary(
+                            R.string.pref_opensubtitles_credentials_missing);
+                    testPreference.setEnabled(false);
+                } else if (credentials.hasAccount()) {
+                    credentialsPreference.setSummary(
+                            R.string.pref_opensubtitles_credentials_account);
+                    testPreference.setEnabled(true);
+                } else {
+                    credentialsPreference.setSummary(
+                            R.string.pref_opensubtitles_credentials_key_only);
+                    testPreference.setEnabled(true);
+                }
+            };
+            credentialsPreference.setOnPreferenceClickListener(preference -> {
+                showOpenSubtitlesCredentialsDialog(store, refresh);
+                return true;
+            });
+            testPreference.setOnPreferenceClickListener(preference -> {
+                testOpenSubtitlesCredentials(store);
+                return true;
+            });
+            refresh.run();
+        }
+
+        private void showOpenSubtitlesCredentialsDialog(
+                OpenSubtitlesCredentialsStore store, Runnable refresh) {
+            Context context = requireContext();
+            OpenSubtitlesCredentialsStore.Credentials existing = store.load();
+            int padding = Math.round(20f * getResources().getDisplayMetrics().density);
+
+            LinearLayout layout = new LinearLayout(context);
+            layout.setOrientation(LinearLayout.VERTICAL);
+            layout.setPadding(padding, padding / 2, padding, 0);
+
+            TextView explanation = new TextView(context);
+            explanation.setText(R.string.pref_opensubtitles_credentials_hint);
+            explanation.setPadding(0, 0, 0, padding / 2);
+            layout.addView(explanation);
+
+            EditText apiKey = credentialField(
+                    context, R.string.pref_opensubtitles_api_key, true);
+            EditText username = credentialField(
+                    context, R.string.pref_opensubtitles_username, false);
+            EditText password = credentialField(
+                    context, R.string.pref_opensubtitles_password, true);
+            if (existing != null) {
+                apiKey.setHint(getString(R.string.pref_opensubtitles_api_key) + " ••••••••");
+                if (!existing.username.isEmpty()) {
+                    username.setText(existing.username);
+                }
+                if (existing.hasAccount()) {
+                    password.setHint(
+                            getString(R.string.pref_opensubtitles_password) + " ••••••••");
+                }
+            }
+            layout.addView(apiKey);
+            layout.addView(username);
+            layout.addView(password);
+
+            AlertDialog dialog = new AlertDialog.Builder(context)
+                    .setTitle(R.string.pref_opensubtitles_credentials_dialog)
+                    .setView(layout)
+                    .setPositiveButton(R.string.pref_opensubtitles_save, null)
+                    .setNeutralButton(R.string.pref_opensubtitles_clear, null)
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .create();
+            dialog.setOnShowListener(ignored -> {
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+                    String enteredKey = apiKey.getText().toString().trim();
+                    String enteredUsername = username.getText().toString().trim();
+                    String enteredPassword = password.getText().toString();
+                    String resolvedKey = enteredKey.isEmpty() && existing != null
+                            ? existing.apiKey : enteredKey;
+                    String resolvedUsername;
+                    String resolvedPassword;
+                    if (enteredUsername.isEmpty() && enteredPassword.isEmpty()
+                            && existing != null && existing.hasAccount()) {
+                        resolvedUsername = existing.username;
+                        resolvedPassword = existing.password;
+                    } else {
+                        resolvedUsername = enteredUsername;
+                        resolvedPassword = enteredPassword;
+                    }
+                    OpenSubtitlesCredentialsStore.Credentials credentials =
+                            new OpenSubtitlesCredentialsStore.Credentials(
+                                    resolvedKey, resolvedUsername, resolvedPassword);
+                    if (!credentials.isValid()) {
+                        Toast.makeText(context,
+                                R.string.pref_opensubtitles_invalid,
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    if (!store.save(credentials)) {
+                        Toast.makeText(context,
+                                R.string.pref_opensubtitles_secure_store_failed,
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    refresh.run();
+                    Toast.makeText(context,
+                            R.string.pref_opensubtitles_saved,
+                            Toast.LENGTH_SHORT).show();
+                    dialog.dismiss();
+                });
+                dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(view -> {
+                    store.clear();
+                    refresh.run();
+                    Toast.makeText(context,
+                            R.string.pref_opensubtitles_cleared,
+                            Toast.LENGTH_SHORT).show();
+                    dialog.dismiss();
+                });
+            });
+            dialog.show();
+        }
+
+        private EditText credentialField(Context context, int hint, boolean secret) {
+            EditText field = new EditText(context);
+            field.setHint(hint);
+            field.setSingleLine(true);
+            field.setInputType(InputType.TYPE_CLASS_TEXT
+                    | (secret
+                    ? InputType.TYPE_TEXT_VARIATION_PASSWORD
+                    : InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS));
+            field.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT));
+            return field;
+        }
+
+        private void testOpenSubtitlesCredentials(OpenSubtitlesCredentialsStore store) {
+            Context context = requireContext();
+            OpenSubtitlesCredentialsStore.Credentials credentials = store.load();
+            if (credentials == null) {
+                Toast.makeText(context,
+                        R.string.pref_opensubtitles_credentials_missing,
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            Toast.makeText(context,
+                    R.string.pref_opensubtitles_test_running,
+                    Toast.LENGTH_SHORT).show();
+            new Thread(() -> {
+                OkHttpClient client = new OkHttpClient.Builder()
+                        .connectTimeout(10, TimeUnit.SECONDS)
+                        .readTimeout(15, TimeUnit.SECONDS)
+                        .build();
+                OpenSubtitlesRestClient.TestResult result =
+                        OpenSubtitlesRestClient.testCredentials(client, credentials);
+                if (!isAdded()) {
+                    return;
+                }
+                requireActivity().runOnUiThread(() -> {
+                    if (!isAdded()) {
+                        return;
+                    }
+                    if (result.success) {
+                        Toast.makeText(requireContext(),
+                                result.accountVerified
+                                        ? R.string.pref_opensubtitles_test_ok_account
+                                        : R.string.pref_opensubtitles_test_ok_key,
+                                Toast.LENGTH_LONG).show();
+                    } else {
+                        Toast.makeText(requireContext(),
+                                getString(R.string.pref_opensubtitles_test_failed,
+                                        result.reason),
+                                Toast.LENGTH_LONG).show();
+                    }
+                });
+            }, "opensubtitles-settings-test").start();
         }
 
         private void showDiagnostics() {
