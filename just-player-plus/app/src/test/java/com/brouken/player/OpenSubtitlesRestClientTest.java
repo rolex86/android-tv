@@ -74,16 +74,83 @@ public class OpenSubtitlesRestClientTest {
     public void buildsCanonicalApiUrlsWithoutRedirects() {
         Request hashRequest = OpenSubtitlesRestClient.searchRequest(
                 "secret", "efe600f792bf6a7f", 1_000_000L,
-                new String[]{"ces", "eng"});
+                new String[]{"eng", "ces"},
+                "movie",
+                "tt0133093",
+                "The.Matrix.1999.2160p.BluRay.x265-GROUP.mkv");
         assertEquals(
-                "languages=cs%2Cen&moviebytesize=1000000&moviehash=efe600f792bf6a7f",
+                "imdb_id=133093&languages=cs%2Cen&moviebytesize=1000000"
+                        + "&moviehash=efe600f792bf6a7f&moviehash_match=include"
+                        + "&query=the+matrix+1999+2160p+bluray+x265+group&type=movie",
                 hashRequest.url().encodedQuery());
+
+        Request episodeRequest = OpenSubtitlesRestClient.searchRequest(
+                "secret", "0123456789abcdef", 2_000_000L,
+                new String[]{"ces"},
+                "series",
+                "tt3107288:1:2",
+                "Show.S01E02.1080p.WEB-DL.x264-GROUP.mkv");
+        assertEquals(
+                "episode_number=2&languages=cs&moviebytesize=2000000"
+                        + "&moviehash=0123456789abcdef&moviehash_match=include"
+                        + "&parent_imdb_id=3107288"
+                        + "&query=show+s01e02+1080p+web+dl+x264+group"
+                        + "&season_number=1&type=episode",
+                episodeRequest.url().encodedQuery());
 
         Request testRequest =
                 OpenSubtitlesRestClient.credentialsTestRequest("secret");
         assertEquals(
                 "languages=en&query=the+matrix",
                 testRequest.url().encodedQuery());
+    }
+
+    @Test
+    public void acceptsOnlyConservativeReleaseMatchesOutsideExactHashResults()
+            throws Exception {
+        JSONObject likely = result(
+                "20", "cs", false, "feature", 120, 220,
+                "The.Matrix.1999.2160p.BluRay.REMUX.HEVC-GROUP.srt");
+        likely.getJSONObject("attributes").put(
+                "release", "The.Matrix.1999.2160p.BluRay.REMUX.HEVC-GROUP");
+        JSONObject titleOnly = result(
+                "21", "cs", false, "feature", 121, 221,
+                "The.Matrix.1999.srt");
+        titleOnly.getJSONObject("attributes").put(
+                "release", "The.Matrix.1999");
+        JSONObject conflicting = result(
+                "22", "cs", false, "feature", 122, 222,
+                "The.Matrix.1999.1080p.WEB-DL.x264-OTHER.srt");
+        conflicting.getJSONObject("attributes").put(
+                "release", "The.Matrix.1999.1080p.WEB-DL.x264-OTHER");
+        JSONObject exact = result(
+                "23", "cs", true, "moviehash", 123, 223,
+                "Different.Release.srt");
+
+        List<OpenSubtitlesRestClient.Candidate> candidates =
+                OpenSubtitlesRestClient.parseLikelyCandidates(
+                        new JSONObject().put("data", new JSONArray()
+                                .put(titleOnly)
+                                .put(conflicting)
+                                .put(exact)
+                                .put(likely)).toString(),
+                        new String[]{"ces"},
+                        "The.Matrix.1999.2160p.BluRay.REMUX.HEVC-GROUP.mkv");
+
+        assertEquals(1, candidates.size());
+        assertEquals("220", candidates.get(0).fileId);
+        assertTrue(candidates.get(0).releaseScore >= 55);
+    }
+
+    @Test
+    public void syntheticFilenameCannotCreateProbableMatches() throws Exception {
+        JSONObject result = result(
+                "30", "cs", false, "feature", 130, 230,
+                "file_a9bbacce74d64874.srt");
+        assertTrue(OpenSubtitlesRestClient.parseLikelyCandidates(
+                new JSONObject().put("data", new JSONArray().put(result)).toString(),
+                new String[]{"ces"},
+                "file_a9bbacce74d64874").isEmpty());
     }
 
     private static JSONObject result(String id,

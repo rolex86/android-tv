@@ -244,6 +244,9 @@ else:
         "normalizesStremioAndIsoLanguageVariants",
         "filtersDeduplicatesAndCapsPreferredLanguages",
         "preservesForcedAndSdhHintsForSmartSelection",
+        "recognizesLikelyReleaseNamesButRejectsConflictingResolution",
+        "releaseConfidenceDoesNotTreatTitleAndYearAsSynchronizationEvidence",
+        "releaseConfidenceAcceptsSameSourceFingerprintWithoutExactText",
     ):
         if test_name not in opensubtitles_tests:
             errors.append(f"Missing OpenSubtitles v3 regression test: {test_name}")
@@ -257,6 +260,8 @@ else:
         "prefersNormalTrustedPopularResultWithinLanguage",
         "credentialsRequireApiKeyAndCompleteOptionalAccount",
         "buildsCanonicalApiUrlsWithoutRedirects",
+        "acceptsOnlyConservativeReleaseMatchesOutsideExactHashResults",
+        "syntheticFilenameCannotCreateProbableMatches",
     ):
         if test_name not in opensubtitles_rest_tests:
             errors.append(f"Missing OpenSubtitles REST regression test: {test_name}")

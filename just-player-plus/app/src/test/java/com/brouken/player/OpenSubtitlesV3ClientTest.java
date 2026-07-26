@@ -80,6 +80,29 @@ public class OpenSubtitlesV3ClientTest {
                 "Movie.2026.1080p.WEB-DL.x264-OTHER.srt"));
     }
 
+    @Test
+    public void releaseConfidenceDoesNotTreatTitleAndYearAsSynchronizationEvidence() {
+        assertFalse(OpenSubtitlesV3Client.isLikelyReleaseMatch(
+                "The.Matrix.1999.2160p.BluRay.REMUX.HEVC-GROUP.mkv",
+                "The.Matrix.1999.srt"));
+        assertFalse(OpenSubtitlesV3Client.isLikelyReleaseMatch(
+                "The.Matrix.1999.2160p.BluRay.REMUX.HEVC-GROUP.mkv",
+                "The.Matrix.1999.2160p.BluRay.REMUX.HEVC-OTHER.srt"));
+    }
+
+    @Test
+    public void releaseConfidenceAcceptsSameSourceFingerprintWithoutExactText() {
+        assertTrue(OpenSubtitlesV3Client.isLikelyReleaseMatch(
+                "The.Matrix.1999.2160p.BluRay.REMUX.HEVC.HDR10-GROUP.mkv",
+                "Matrix.1999.UHD.2160p.BluRay.REMUX.H265.HDR10-GROUP.srt"));
+        assertTrue(OpenSubtitlesV3Client.isLikelyReleaseMatch(
+                "Movie.Name.2024.4K.WEB-DL.x265.DV.mkv",
+                "Movie Name 2024 2160p WEBRip H265 Dolby Vision.srt"));
+        assertFalse(OpenSubtitlesV3Client.isLikelyReleaseMatch(
+                "Movie.2026.2160p.BluRay.Extended.HEVC-GROUP.mkv",
+                "Movie.2026.2160p.BluRay.Theatrical.HEVC-GROUP.srt"));
+    }
+
     private static JSONObject item(String language, String url, String id) throws Exception {
         return new JSONObject().put("lang", language).put("url", url).put("id", id);
     }

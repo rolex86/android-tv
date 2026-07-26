@@ -48,6 +48,7 @@ final class OpenSubtitlesV3Client {
     private static final int MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
     private static final int MAX_SERVER_RESULTS = 500;
     private static final int MAX_LABEL_LENGTH = 140;
+    private static final int LIKELY_RELEASE_THRESHOLD = 55;
 
     enum MatchConfidence {
         LIKELY(1), UNKNOWN(2);
@@ -159,7 +160,7 @@ final class OpenSubtitlesV3Client {
                     }
                     String json = BoundedResponseBody.readUtf8(body, MAX_RESPONSE_BYTES);
                     List<Candidate> genericCandidates = parseCandidatesInternal(
-                            json, languages, MatchConfidence.UNKNOWN, filename);
+                            json, languages, MatchConfidence.UNKNOWN);
                     List<MediaItem.SubtitleConfiguration> configurations =
                             buildConfigurationsIfCurrent(
                                     token,
@@ -283,14 +284,13 @@ final class OpenSubtitlesV3Client {
     static List<Candidate> parseCandidates(String json, String[] languages)
             throws JSONException {
         return sortAndLimit(parseCandidatesInternal(
-                json, languages, MatchConfidence.UNKNOWN, null));
+                json, languages, MatchConfidence.UNKNOWN));
     }
 
     private static List<Candidate> parseCandidatesInternal(
             String json,
             String[] languages,
-            MatchConfidence defaultConfidence,
-            @Nullable String mediaFilename) throws JSONException {
+            MatchConfidence defaultConfidence) throws JSONException {
         LinkedHashMap<String, Integer> languageRanks = languageRanks(languages);
         JSONArray subtitles = new JSONObject(json).optJSONArray("subtitles");
         if (languageRanks.isEmpty() || subtitles == null) {
@@ -330,12 +330,6 @@ final class OpenSubtitlesV3Client {
                     ? MimeTypes.TEXT_VTT
                     : MimeTypes.APPLICATION_SUBRIP;
 
-            MatchConfidence confidence = defaultConfidence;
-            if (confidence == MatchConfidence.UNKNOWN
-                    && isLikelyReleaseMatch(mediaFilename, identifier + " " + name)) {
-                confidence = MatchConfidence.LIKELY;
-            }
-
             result.add(new Candidate(
                     url,
                     language,
@@ -343,7 +337,7 @@ final class OpenSubtitlesV3Client {
                     mimeType,
                     roleFlags,
                     selectionFlags,
-                    confidence,
+                    defaultConfidence,
                     languageRank,
                     index));
         }
@@ -522,37 +516,84 @@ final class OpenSubtitlesV3Client {
     }
 
     static boolean isLikelyReleaseMatch(@Nullable String media, @Nullable String candidate) {
+        return releaseMatchScore(media, candidate) >= LIKELY_RELEASE_THRESHOLD;
+    }
+
+    /**
+     * Conservative metadata confidence used only after the OpenSubtitles result has already been
+     * scoped to the current IMDb movie or episode. This is not a fuzzy movie-hash comparison.
+     */
+    static int releaseMatchScore(@Nullable String media, @Nullable String candidate) {
+        String normalizedMedia = normalizeReleaseName(media);
+        String normalizedCandidate = normalizeReleaseName(candidate);
+        if (normalizedMedia.isEmpty() || normalizedCandidate.isEmpty()) {
+            return 0;
+        }
+        if (normalizedMedia.equals(normalizedCandidate)) {
+            return 100;
+        }
         Set<String> mediaTokens = releaseTokens(media);
         Set<String> candidateTokens = releaseTokens(candidate);
         if (mediaTokens.size() < 3
                 || candidateTokens.isEmpty()
                 || hasConflictingQuality(mediaTokens, candidateTokens)) {
-            return false;
+            return 0;
         }
-        int shared = 0;
-        int distinctive = 0;
+
+        String mediaGroup = releaseGroup(media);
+        String candidateGroup = releaseGroup(candidate);
+        if (!mediaGroup.isEmpty()
+                && !candidateGroup.isEmpty()
+                && !mediaGroup.equals(candidateGroup)) {
+            return 0;
+        }
+
+        int score = 0;
+        if (!mediaGroup.isEmpty() && mediaGroup.equals(candidateGroup)) {
+            score += 30;
+        }
+        if (sharesCategory(mediaTokens, candidateTokens, RESOLUTIONS)) {
+            score += 15;
+        }
+        if (sharesSourceFamily(mediaTokens, candidateTokens)) {
+            score += 15;
+        }
+        if (sharesCategory(mediaTokens, candidateTokens, CODECS)) {
+            score += 10;
+        }
+        if (sharesCategory(mediaTokens, candidateTokens, HDR_FORMATS)) {
+            score += 8;
+        }
+        if (sharesCategory(mediaTokens, candidateTokens, EDITIONS)) {
+            score += 8;
+        }
+
+        int ordinaryShared = 0;
+        int extraTechnicalShared = 0;
         for (String token : mediaTokens) {
             if (candidateTokens.contains(token)) {
-                shared++;
                 if (isDistinctive(token)) {
-                    distinctive++;
+                    extraTechnicalShared++;
+                } else {
+                    ordinaryShared++;
                 }
             }
         }
-        return distinctive >= 2
-                || shared >= Math.max(3, Math.min(6, mediaTokens.size() / 2));
+        score += Math.min(12, extraTechnicalShared * 3);
+        score += Math.min(15, ordinaryShared * 3);
+        return Math.min(100, score);
     }
 
     private static Set<String> releaseTokens(@Nullable String value) {
-        if (value == null) {
-            return Collections.emptySet();
-        }
-        String normalized = value.toLowerCase(Locale.ROOT)
+        String normalized = normalizeReleaseName(value)
                 .replace("web-dl", "webdl")
                 .replace("web dl", "webdl")
                 .replace("blu-ray", "bluray")
                 .replace("blu ray", "bluray")
-                .replaceAll("\\.(mkv|mp4|avi|mov|m4v|srt|vtt)$", "")
+                .replace("x265", "hevc")
+                .replace("h265", "hevc")
+                .replace("x264", "h264")
+                .replaceAll("(?<![a-z0-9])4k(?![a-z0-9])", "2160p")
                 .replaceAll("[^a-z0-9]+", " ")
                 .trim();
         if (normalized.isEmpty()) {
@@ -560,7 +601,7 @@ final class OpenSubtitlesV3Client {
         }
         Set<String> result = new LinkedHashSet<>();
         for (String token : normalized.split("\\s+")) {
-            if (token.length() >= 3 && !isNoise(token)) {
+            if ((token.length() >= 3 || "dv".equals(token)) && !isNoise(token)) {
                 result.add(token);
             }
         }
@@ -580,34 +621,114 @@ final class OpenSubtitlesV3Client {
     private static boolean isDistinctive(String token) {
         return token.matches("(2160p|1080p|720p|480p|bluray|brrip|remux|webdl|webrip|hdtv|"
                 + "dvdrip|uhd|x264|x265|h264|h265|hevc|av1|hdr|hdr10|dolby|vision|atmos|"
-                + "proper|repack|extended|criterion)");
+                + "proper|repack|extended|criterion|theatrical|uncut|directors|final|dv|10bit)");
     }
 
-    private static boolean hasConflictingQuality(Set<String> first, Set<String> second) {
-        String firstResolution = first(first, "2160p", "1080p", "720p", "480p");
-        String secondResolution = first(second, "2160p", "1080p", "720p", "480p");
-        if (firstResolution != null
-                && secondResolution != null
-                && !firstResolution.equals(secondResolution)) {
-            return true;
+    private static final Set<String> RESOLUTIONS = tokenSet(
+            "2160p", "1080p", "720p", "480p");
+    private static final Set<String> DISC_SOURCES = tokenSet(
+            "bluray", "brrip", "remux", "uhd");
+    private static final Set<String> WEB_SOURCES = tokenSet("webdl", "webrip");
+    private static final Set<String> TV_SOURCES = tokenSet("hdtv");
+    private static final Set<String> DVD_SOURCES = tokenSet("dvdrip");
+    private static final Set<String> CODECS = tokenSet(
+            "h264", "hevc", "av1");
+    private static final Set<String> HDR_FORMATS = tokenSet(
+            "hdr", "hdr10", "dolby", "vision", "dv");
+    private static final Set<String> EDITIONS = tokenSet(
+            "extended", "criterion", "theatrical", "uncut", "directors", "final");
+
+    private static boolean hasConflictingQuality(
+            Set<String> first, Set<String> second) {
+        return conflictsCategory(first, second, RESOLUTIONS)
+                || conflictsSourceFamily(first, second)
+                || conflictsCategory(first, second, EDITIONS);
+    }
+
+    private static boolean conflictsCategory(
+            Set<String> first, Set<String> second, Set<String> category) {
+        String firstValue = firstInCategory(first, category);
+        String secondValue = firstInCategory(second, category);
+        return !firstValue.isEmpty()
+                && !secondValue.isEmpty()
+                && !firstValue.equals(secondValue);
+    }
+
+    private static boolean conflictsSourceFamily(Set<String> first, Set<String> second) {
+        String firstFamily = sourceFamily(first);
+        String secondFamily = sourceFamily(second);
+        return !firstFamily.isEmpty()
+                && !secondFamily.isEmpty()
+                && !firstFamily.equals(secondFamily);
+    }
+
+    private static boolean sharesSourceFamily(Set<String> first, Set<String> second) {
+        String firstFamily = sourceFamily(first);
+        return !firstFamily.isEmpty() && firstFamily.equals(sourceFamily(second));
+    }
+
+    private static String sourceFamily(Set<String> tokens) {
+        if (containsCategory(tokens, DISC_SOURCES)) return "disc";
+        if (containsCategory(tokens, WEB_SOURCES)) return "web";
+        if (containsCategory(tokens, TV_SOURCES)) return "tv";
+        if (containsCategory(tokens, DVD_SOURCES)) return "dvd";
+        return "";
+    }
+
+    private static boolean sharesCategory(
+            Set<String> first, Set<String> second, Set<String> category) {
+        for (String value : category) {
+            if (first.contains(value) && second.contains(value)) {
+                return true;
+            }
         }
-        String firstSource = first(first,
-                "remux", "bluray", "webdl", "webrip", "hdtv", "dvdrip");
-        String secondSource = first(second,
-                "remux", "bluray", "webdl", "webrip", "hdtv", "dvdrip");
-        return firstSource != null
-                && secondSource != null
-                && !firstSource.equals(secondSource);
+        return false;
     }
 
-    @Nullable
-    private static String first(Set<String> tokens, String... values) {
-        for (String value : values) {
+    private static boolean containsCategory(Set<String> tokens, Set<String> category) {
+        return !firstInCategory(tokens, category).isEmpty();
+    }
+
+    private static String firstInCategory(Set<String> tokens, Set<String> category) {
+        for (String value : category) {
             if (tokens.contains(value)) {
                 return value;
             }
         }
-        return null;
+        return "";
+    }
+
+    private static Set<String> tokenSet(String... values) {
+        Set<String> result = new LinkedHashSet<>();
+        Collections.addAll(result, values);
+        return Collections.unmodifiableSet(result);
+    }
+
+    private static String normalizeReleaseName(@Nullable String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.trim()
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("(?i)\\.(mkv|mp4|avi|mov|m4v|srt|vtt|ass|ssa)$", "")
+                .replaceAll("[\\p{Cntrl}\\r\\n]+", " ")
+                .trim();
+    }
+
+    private static String releaseGroup(@Nullable String value) {
+        String normalized = normalizeReleaseName(value);
+        int dash = normalized.lastIndexOf('-');
+        if (dash < 0 || dash == normalized.length() - 1) {
+            return "";
+        }
+        String group = normalized.substring(dash + 1);
+        if (!group.matches("[a-z0-9]{2,24}")
+                || "dl".equals(group)
+                || "ray".equals(group)
+                || "rip".equals(group)) {
+            return "";
+        }
+        return group;
     }
 
     private static String cleanText(String value) {

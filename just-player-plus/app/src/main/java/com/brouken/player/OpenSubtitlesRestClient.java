@@ -40,7 +40,7 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
-/** Direct OpenSubtitles REST API integration used only for real movie-hash matches. */
+/** Direct OpenSubtitles REST API integration for exact hash and conservative release matches. */
 final class OpenSubtitlesRestClient {
     static final String TRACK_ID_PREFIX = SmartSubtitleSelector.EXTERNAL_ID_PREFIX
             + "opensubtitles-rest:";
@@ -60,14 +60,22 @@ final class OpenSubtitlesRestClient {
 
     static final class Result {
         final int exactResults;
+        final int likelyResults;
+        final int verifiedExact;
+        final int verifiedLikely;
         final int verifiedExisting;
         @Nullable final MediaItem.SubtitleConfiguration directSubtitle;
 
         Result(int exactResults,
-               int verifiedExisting,
+               int likelyResults,
+               int verifiedExact,
+               int verifiedLikely,
                @Nullable MediaItem.SubtitleConfiguration directSubtitle) {
             this.exactResults = exactResults;
-            this.verifiedExisting = verifiedExisting;
+            this.likelyResults = likelyResults;
+            this.verifiedExact = verifiedExact;
+            this.verifiedLikely = verifiedLikely;
+            this.verifiedExisting = verifiedExact + verifiedLikely;
             this.directSubtitle = directSubtitle;
         }
     }
@@ -95,6 +103,7 @@ final class OpenSubtitlesRestClient {
         final boolean forced;
         final boolean trusted;
         final int downloads;
+        final int releaseScore;
 
         Candidate(String fileId,
                   Set<String> identifiers,
@@ -105,7 +114,8 @@ final class OpenSubtitlesRestClient {
                   boolean hearingImpaired,
                   boolean forced,
                   boolean trusted,
-                  int downloads) {
+                  int downloads,
+                  int releaseScore) {
             this.fileId = fileId;
             this.identifiers = identifiers;
             this.language = language;
@@ -116,6 +126,7 @@ final class OpenSubtitlesRestClient {
             this.forced = forced;
             this.trusted = trusted;
             this.downloads = downloads;
+            this.releaseScore = releaseScore;
         }
     }
 
@@ -136,6 +147,9 @@ final class OpenSubtitlesRestClient {
     }
 
     synchronized void resolve(MediaItem mediaItem,
+                              String contentType,
+                              String contentId,
+                              @Nullable String mediaFilename,
                               OpenSubtitlesCredentialsStore.Credentials credentials,
                               String[] preferredLanguages,
                               List<MediaItem.SubtitleConfiguration> existing,
@@ -151,6 +165,9 @@ final class OpenSubtitlesRestClient {
         activeTask = executor.submit(() -> runResolve(
                 token,
                 mediaItem,
+                contentType,
+                contentId,
+                mediaFilename,
                 credentials,
                 languageSnapshot,
                 existingSnapshot,
@@ -159,6 +176,9 @@ final class OpenSubtitlesRestClient {
 
     private void runResolve(long token,
                             MediaItem mediaItem,
+                            String contentType,
+                            String contentId,
+                            @Nullable String mediaFilename,
                             OpenSubtitlesCredentialsStore.Credentials credentials,
                             String[] preferredLanguages,
                             List<MediaItem.SubtitleConfiguration> existing,
@@ -207,23 +227,34 @@ final class OpenSubtitlesRestClient {
                             credentials.apiKey,
                             fingerprint.hash,
                             fingerprint.size,
-                            preferredLanguages));
-            List<Candidate> candidates = parseExactCandidates(
+                            preferredLanguages,
+                            contentType,
+                            contentId,
+                            mediaFilename));
+            List<Candidate> exactCandidates = parseExactCandidates(
                     searchJson, preferredLanguages);
+            List<Candidate> likelyCandidates = parseLikelyCandidates(
+                    searchJson, preferredLanguages, mediaFilename);
             if (!isCurrent(token)) {
                 return;
             }
-            listener.onEvent("search_complete", "exact=" + candidates.size());
-            if (candidates.isEmpty()) {
-                listener.onResolved(new Result(0, 0, null));
+            listener.onEvent(
+                    "search_complete",
+                    "exact=" + exactCandidates.size()
+                            + " likely=" + likelyCandidates.size());
+            if (exactCandidates.isEmpty() && likelyCandidates.isEmpty()) {
+                listener.onResolved(new Result(0, 0, 0, 0, null));
                 return;
             }
 
             Set<Candidate> matchedCandidates = new HashSet<>();
-            int verified = verifyExisting(existing, candidates, matchedCandidates);
-            Candidate best = candidates.get(0);
+            int verifiedExact = verifyExisting(
+                    existing, exactCandidates, matchedCandidates);
+            int verifiedLikely = verifyLikelyExisting(existing, likelyCandidates);
             MediaItem.SubtitleConfiguration direct = null;
-            if (!matchedCandidates.contains(best)) {
+            if (!exactCandidates.isEmpty()
+                    && !matchedCandidates.contains(exactCandidates.get(0))) {
+                Candidate best = exactCandidates.get(0);
                 if (credentials.hasAccount()) {
                     String tokenValue = login(token, credentials);
                     if (!isCurrent(token)) {
@@ -254,7 +285,12 @@ final class OpenSubtitlesRestClient {
                 }
             }
             if (isCurrent(token)) {
-                listener.onResolved(new Result(candidates.size(), verified, direct));
+                listener.onResolved(new Result(
+                        exactCandidates.size(),
+                        likelyCandidates.size(),
+                        verifiedExact,
+                        verifiedLikely,
+                        direct));
             }
         } catch (HttpFailure error) {
             if (isCurrent(token)) {
@@ -270,8 +306,19 @@ final class OpenSubtitlesRestClient {
     static Request searchRequest(String apiKey,
                                  String hash,
                                  long size,
-                                 String[] languages) {
+                                 String[] languages,
+                                 String contentType,
+                                 String contentId,
+                                 @Nullable String mediaFilename) {
         HttpUrl.Builder url = apiUrl("subtitles").newBuilder();
+        StremioEpisodeId episode = "series".equals(contentType)
+                ? StremioEpisodeId.parse(contentId) : null;
+        String imdbId = imdbDigits(episode == null ? contentId : episode.metaId);
+        if (episode != null) {
+            url.addQueryParameter("episode_number", Integer.toString(episode.episode));
+        } else if (!imdbId.isEmpty()) {
+            url.addQueryParameter("imdb_id", imdbId);
+        }
         String apiLanguages = apiLanguages(languages);
         if (!apiLanguages.isEmpty()) {
             url.addQueryParameter("languages", apiLanguages);
@@ -280,7 +327,21 @@ final class OpenSubtitlesRestClient {
         // ordered URL with HTTP 301. Build the canonical form so secret-bearing API requests
         // never need to follow redirects.
         url.addQueryParameter("moviebytesize", Long.toString(size))
-                .addQueryParameter("moviehash", hash);
+                .addQueryParameter("moviehash", hash)
+                .addQueryParameter("moviehash_match", "include");
+        if (episode != null && !imdbId.isEmpty()) {
+            url.addQueryParameter("parent_imdb_id", imdbId);
+        }
+        String query = releaseQuery(mediaFilename);
+        if (!query.isEmpty()) {
+            url.addEncodedQueryParameter("query", query);
+        }
+        if (episode != null) {
+            url.addQueryParameter("season_number", Integer.toString(episode.season))
+                    .addQueryParameter("type", "episode");
+        } else {
+            url.addQueryParameter("type", "movie");
+        }
         return apiRequest(url.build(), apiKey).get().build();
     }
 
@@ -471,6 +532,24 @@ final class OpenSubtitlesRestClient {
 
     static List<Candidate> parseExactCandidates(String json, String[] preferredLanguages)
             throws JSONException {
+        return parseCandidates(json, preferredLanguages, null, true);
+    }
+
+    static List<Candidate> parseLikelyCandidates(
+            String json,
+            String[] preferredLanguages,
+            @Nullable String mediaFilename) throws JSONException {
+        if (releaseQuery(mediaFilename).isEmpty()) {
+            return new ArrayList<>();
+        }
+        return parseCandidates(json, preferredLanguages, mediaFilename, false);
+    }
+
+    private static List<Candidate> parseCandidates(
+            String json,
+            String[] preferredLanguages,
+            @Nullable String mediaFilename,
+            boolean exactOnly) throws JSONException {
         LinkedHashMap<String, Integer> languageRanks = languageRanks(preferredLanguages);
         JSONArray data = new JSONObject(json).optJSONArray("data");
         if (data == null || languageRanks.isEmpty()) {
@@ -483,7 +562,8 @@ final class OpenSubtitlesRestClient {
             JSONObject item = data.optJSONObject(index);
             JSONObject attributes = item == null
                     ? null : item.optJSONObject("attributes");
-            if (attributes == null || !isMovieHashMatch(attributes)) {
+            boolean exactMatch = attributes != null && isMovieHashMatch(attributes);
+            if (attributes == null || exactOnly != exactMatch) {
                 continue;
             }
             String language = OpenSubtitlesV3Client.normalizeLanguage(
@@ -496,34 +576,54 @@ final class OpenSubtitlesRestClient {
             if (files == null || files.length() == 0) {
                 continue;
             }
-            JSONObject file = files.optJSONObject(0);
-            String fileId = numericString(file == null ? null : file.opt("file_id"));
-            if (fileId.isEmpty() || !seenFiles.add(fileId)) {
-                continue;
+            String release = cleanLabel(attributes.optString("release", ""));
+            int fileLimit = Math.min(files.length(), 20);
+            for (int fileIndex = 0; fileIndex < fileLimit; fileIndex++) {
+                JSONObject file = files.optJSONObject(fileIndex);
+                String fileId = numericString(file == null ? null : file.opt("file_id"));
+                if (fileId.isEmpty() || !seenFiles.add(fileId)) {
+                    continue;
+                }
+                String filename = cleanLabel(file.optString("file_name", ""));
+                int releaseScore = exactMatch
+                        ? 100 : Math.max(
+                                OpenSubtitlesV3Client.releaseMatchScore(
+                                        mediaFilename, release),
+                                OpenSubtitlesV3Client.releaseMatchScore(
+                                        mediaFilename, filename));
+                if (!exactMatch
+                        && !OpenSubtitlesV3Client.isLikelyReleaseMatch(
+                                mediaFilename, release)
+                        && !OpenSubtitlesV3Client.isLikelyReleaseMatch(
+                                mediaFilename, filename)) {
+                    continue;
+                }
+                Set<String> identifiers = new LinkedHashSet<>();
+                addIdentifier(identifiers, fileId);
+                addIdentifier(identifiers, numericString(attributes.opt("subtitle_id")));
+                addIdentifier(identifiers, numericString(
+                        attributes.opt("legacy_subtitle_id")));
+                addIdentifier(identifiers, item.optString("id", ""));
+                result.add(new Candidate(
+                        fileId,
+                        identifiers,
+                        language,
+                        release,
+                        filename,
+                        languageRank,
+                        attributes.optBoolean("hearing_impaired", false),
+                        attributes.optBoolean("foreign_parts_only", false),
+                        attributes.optBoolean("from_trusted", false),
+                        Math.max(0, attributes.optInt("download_count", 0)),
+                        releaseScore));
             }
-            Set<String> identifiers = new LinkedHashSet<>();
-            addIdentifier(identifiers, fileId);
-            addIdentifier(identifiers, numericString(attributes.opt("subtitle_id")));
-            addIdentifier(identifiers, numericString(
-                    attributes.opt("legacy_subtitle_id")));
-            String itemId = item.optString("id", "");
-            addIdentifier(identifiers, itemId);
-            result.add(new Candidate(
-                    fileId,
-                    identifiers,
-                    language,
-                    cleanLabel(attributes.optString("release", "")),
-                    cleanLabel(file.optString("file_name", "")),
-                    languageRank,
-                    attributes.optBoolean("hearing_impaired", false),
-                    attributes.optBoolean("foreign_parts_only", false),
-                    attributes.optBoolean("from_trusted", false),
-                    Math.max(0, attributes.optInt("download_count", 0))));
         }
         Collections.sort(result, new Comparator<Candidate>() {
             @Override
             public int compare(Candidate first, Candidate second) {
                 int comparison = Integer.compare(first.languageRank, second.languageRank);
+                if (comparison != 0) return comparison;
+                comparison = Integer.compare(second.releaseScore, first.releaseScore);
                 if (comparison != 0) return comparison;
                 comparison = Integer.compare(first.forced ? 1 : 0, second.forced ? 1 : 0);
                 if (comparison != 0) return comparison;
@@ -572,6 +672,51 @@ final class OpenSubtitlesRestClient {
             verified++;
         }
         return verified;
+    }
+
+    static int verifyLikelyExisting(
+            List<MediaItem.SubtitleConfiguration> existing,
+            List<Candidate> candidates) {
+        LinkedHashMap<String, MediaItem.SubtitleConfiguration> bestConfigurations =
+                new LinkedHashMap<>();
+        LinkedHashMap<String, Candidate> bestCandidates = new LinkedHashMap<>();
+        for (MediaItem.SubtitleConfiguration configuration : existing) {
+            if (!SubtitleTrackIdentity.isOpenSubtitles(
+                    configuration.id, configuration.label)) {
+                continue;
+            }
+            Set<String> identifiers = configurationIdentifiers(configuration);
+            Candidate match = null;
+            for (Candidate candidate : candidates) {
+                if (candidate.language.equals(OpenSubtitlesV3Client.normalizeLanguage(
+                        configuration.language))
+                        && intersects(identifiers, candidate.identifiers)) {
+                    match = candidate;
+                    break;
+                }
+            }
+            if (match == null) {
+                continue;
+            }
+            String kind = match.language
+                    + '|' + (((configuration.selectionFlags & C.SELECTION_FLAG_FORCED) != 0)
+                    ? 'F' : ((configuration.roleFlags & C.ROLE_FLAG_CAPTION) != 0) ? 'S' : 'N');
+            Candidate previous = bestCandidates.get(kind);
+            if (previous == null || match.releaseScore > previous.releaseScore) {
+                bestCandidates.put(kind, match);
+                bestConfigurations.put(kind, configuration);
+            }
+        }
+        for (MediaItem.SubtitleConfiguration configuration : bestConfigurations.values()) {
+            SubtitleTrackIdentity.registerOpenSubtitlesMatch(
+                    configuration.id,
+                    configuration.language,
+                    configuration.selectionFlags,
+                    configuration.roleFlags,
+                    configuration.label,
+                    OpenSubtitlesV3Client.MatchConfidence.LIKELY.rank);
+        }
+        return bestConfigurations.size();
     }
 
     private static Set<String> configurationIdentifiers(
@@ -628,14 +773,39 @@ final class OpenSubtitlesRestClient {
                 result.add(apiLanguage);
             }
         }
+        List<String> sorted = new ArrayList<>(result);
+        Collections.sort(sorted);
         StringBuilder joined = new StringBuilder();
-        for (String language : result) {
+        for (String language : sorted) {
             if (joined.length() > 0) {
                 joined.append(',');
             }
             joined.append(language);
         }
         return joined.toString();
+    }
+
+    private static String imdbDigits(@Nullable String value) {
+        if (value == null || !value.matches("tt\\d+")) {
+            return "";
+        }
+        return trimLeadingZeros(value.substring(2));
+    }
+
+    private static String releaseQuery(@Nullable String filename) {
+        if (filename == null) {
+            return "";
+        }
+        String normalized = filename.trim().toLowerCase(Locale.ROOT);
+        if (normalized.matches("file_[a-f0-9]{8,}(\\.[a-z0-9]{2,5})?")
+                || normalized.matches("[a-f0-9]{16,}(\\.[a-z0-9]{2,5})?")) {
+            return "";
+        }
+        normalized = normalized
+                .replaceAll("\\.(mkv|mp4|avi|mov|m4v)$", "")
+                .replaceAll("[^a-z0-9]+", " ")
+                .trim();
+        return normalized.length() < 3 ? "" : normalized.replace(" ", "+");
     }
 
     private static String toApiLanguage(String language) {

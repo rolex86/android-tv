@@ -1056,7 +1056,7 @@ public class PlayerActivity extends Activity {
                 ? null : Utils.getFileName(this, mPrefs.mediaUri);
         externalDiagnostics.recordStremioConnector(
                 "opensubtitles_v3_match_mode",
-                "release_name_only filename="
+                "listing_only filename="
                         + (mediaFilename == null || mediaFilename.trim().isEmpty()
                         ? "unavailable" : "available"));
         Tracks currentTracks = player == null ? null : player.getCurrentTracks();
@@ -1183,6 +1183,10 @@ public class PlayerActivity extends Activity {
                         + " account=" + credentials.hasAccount());
         client.resolve(
                 mediaItem,
+                content.type,
+                content.id,
+                mPrefs.mediaUri == null
+                        ? null : Utils.getFileName(this, mPrefs.mediaUri),
                 credentials,
                 preferredLanguages,
                 new ArrayList<>(apiSubs),
@@ -1225,8 +1229,10 @@ public class PlayerActivity extends Activity {
         }
         externalDiagnostics.recordStremioConnector(
                 "opensubtitles_exact_complete",
-                "results=" + result.exactResults
-                        + " verified=" + result.verifiedExisting
+                "exactResults=" + result.exactResults
+                        + " likelyResults=" + result.likelyResults
+                        + " exactVerified=" + result.verifiedExact
+                        + " likelyVerified=" + result.verifiedLikely
                         + " direct=" + (result.directSubtitle != null));
         if (result.directSubtitle != null) {
             boolean known = false;
