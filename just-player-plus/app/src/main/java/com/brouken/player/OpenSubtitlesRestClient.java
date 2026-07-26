@@ -325,10 +325,10 @@ final class OpenSubtitlesRestClient {
         }
         // OpenSubtitles canonicalizes query parameters alphabetically and answers a differently
         // ordered URL with HTTP 301. Build the canonical form so secret-bearing API requests
-        // never need to follow redirects.
+        // never need to follow redirects. Do not send moviehash_match=include: include is the
+        // server default and OpenSubtitles redirects that explicit value to a URL without it.
         url.addQueryParameter("moviebytesize", Long.toString(size))
-                .addQueryParameter("moviehash", hash)
-                .addQueryParameter("moviehash_match", "include");
+                .addQueryParameter("moviehash", hash);
         if (episode != null && !imdbId.isEmpty()) {
             url.addQueryParameter("parent_imdb_id", imdbId);
         }

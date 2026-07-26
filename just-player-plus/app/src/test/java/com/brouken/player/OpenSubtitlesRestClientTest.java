@@ -80,7 +80,7 @@ public class OpenSubtitlesRestClientTest {
                 "The.Matrix.1999.2160p.BluRay.x265-GROUP.mkv");
         assertEquals(
                 "imdb_id=133093&languages=cs%2Cen&moviebytesize=1000000"
-                        + "&moviehash=efe600f792bf6a7f&moviehash_match=include"
+                        + "&moviehash=efe600f792bf6a7f"
                         + "&query=the+matrix+1999+2160p+bluray+x265+group&type=movie",
                 hashRequest.url().encodedQuery());
 
@@ -92,7 +92,7 @@ public class OpenSubtitlesRestClientTest {
                 "Show.S01E02.1080p.WEB-DL.x264-GROUP.mkv");
         assertEquals(
                 "episode_number=2&languages=cs&moviebytesize=2000000"
-                        + "&moviehash=0123456789abcdef&moviehash_match=include"
+                        + "&moviehash=0123456789abcdef"
                         + "&parent_imdb_id=3107288"
                         + "&query=show+s01e02+1080p+web+dl+x264+group"
                         + "&season_number=1&type=episode",
