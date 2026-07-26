@@ -36,8 +36,6 @@ class PlusPrefs {
     static final String KEY_SUBTITLE_SCALE = "subtitleScale";
     static final String KEY_SUBTITLE_POSITION = "subtitlePosition";
     static final String KEY_OPENSUBTITLES_EXACT_MATCH = "openSubtitlesExactMatch";
-    static final String KEY_OPENSUBTITLES_CREDENTIALS = "openSubtitlesCredentials";
-    static final String KEY_OPENSUBTITLES_TEST = "openSubtitlesTest";
 
     static final String KEY_REMEMBER_TRACK_SCOPE = "rememberTrackScope";
     static final String KEY_RESIZE_DEFAULT = "resizeDefault";

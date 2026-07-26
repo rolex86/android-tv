@@ -103,6 +103,10 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     public static class SettingsFragment extends PreferenceFragmentCompat {
+        private static final String KEY_OPENSUBTITLES_CREDENTIALS =
+                "openSubtitlesCredentials";
+        private static final String KEY_OPENSUBTITLES_TEST = "openSubtitlesTest";
+
         @Override
         public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
             setPreferencesFromResource(R.xml.root_preferences, rootKey);
@@ -295,9 +299,9 @@ public class SettingsActivity extends AppCompatActivity {
 
         private void setupOpenSubtitlesPreferences() {
             Preference credentialsPreference = findPreference(
-                    PlusPrefs.KEY_OPENSUBTITLES_CREDENTIALS);
+                    KEY_OPENSUBTITLES_CREDENTIALS);
             Preference testPreference = findPreference(
-                    PlusPrefs.KEY_OPENSUBTITLES_TEST);
+                    KEY_OPENSUBTITLES_TEST);
             if (credentialsPreference == null || testPreference == null) {
                 return;
             }
