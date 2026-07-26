@@ -267,18 +267,29 @@ final class OpenSubtitlesRestClient {
         }
     }
 
-    private Request searchRequest(String apiKey,
-                                  String hash,
-                                  long size,
-                                  String[] languages) {
-        HttpUrl.Builder url = apiUrl("subtitles").newBuilder()
-                .addQueryParameter("moviehash", hash)
-                .addQueryParameter("moviebytesize", Long.toString(size));
+    static Request searchRequest(String apiKey,
+                                 String hash,
+                                 long size,
+                                 String[] languages) {
+        HttpUrl.Builder url = apiUrl("subtitles").newBuilder();
         String apiLanguages = apiLanguages(languages);
         if (!apiLanguages.isEmpty()) {
             url.addQueryParameter("languages", apiLanguages);
         }
+        // OpenSubtitles canonicalizes query parameters alphabetically and answers a differently
+        // ordered URL with HTTP 301. Build the canonical form so secret-bearing API requests
+        // never need to follow redirects.
+        url.addQueryParameter("moviebytesize", Long.toString(size))
+                .addQueryParameter("moviehash", hash);
         return apiRequest(url.build(), apiKey).get().build();
+    }
+
+    static Request credentialsTestRequest(String apiKey) {
+        HttpUrl url = apiUrl("subtitles").newBuilder()
+                .addQueryParameter("languages", "en")
+                .addEncodedQueryParameter("query", "the+matrix")
+                .build();
+        return apiRequest(url, apiKey).get().build();
     }
 
     private Request loginRequest(OpenSubtitlesCredentialsStore.Credentials credentials)
@@ -724,14 +735,7 @@ final class OpenSubtitlesRestClient {
         OpenSubtitlesRestClient temporary = null;
         try {
             temporary = new OpenSubtitlesRestClient(client);
-            Request search = temporary.apiRequest(
-                            temporary.apiUrl("subtitles"), credentials.apiKey)
-                    .url(temporary.apiUrl("subtitles").newBuilder()
-                            .addQueryParameter("query", "The Matrix")
-                            .addQueryParameter("languages", "en")
-                            .build())
-                    .get()
-                    .build();
+            Request search = credentialsTestRequest(credentials.apiKey);
             temporary.executeJson(temporary.operationToken, search);
             if (credentials.hasAccount()) {
                 temporary.login(temporary.operationToken, credentials);

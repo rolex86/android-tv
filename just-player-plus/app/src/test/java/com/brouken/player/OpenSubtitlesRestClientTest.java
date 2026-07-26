@@ -6,6 +6,8 @@ import org.junit.Test;
 
 import java.util.List;
 
+import okhttp3.Request;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -66,6 +68,22 @@ public class OpenSubtitlesRestClientTest {
                 "", "user", "password").isValid());
         assertFalse(new OpenSubtitlesCredentialsStore.Credentials(
                 "api-key", "user", "").isValid());
+    }
+
+    @Test
+    public void buildsCanonicalApiUrlsWithoutRedirects() {
+        Request hashRequest = OpenSubtitlesRestClient.searchRequest(
+                "secret", "efe600f792bf6a7f", 1_000_000L,
+                new String[]{"ces", "eng"});
+        assertEquals(
+                "languages=cs%2Cen&moviebytesize=1000000&moviehash=efe600f792bf6a7f",
+                hashRequest.url().encodedQuery());
+
+        Request testRequest =
+                OpenSubtitlesRestClient.credentialsTestRequest("secret");
+        assertEquals(
+                "languages=en&query=the+matrix",
+                testRequest.url().encodedQuery());
     }
 
     private static JSONObject result(String id,

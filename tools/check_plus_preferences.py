@@ -256,6 +256,7 @@ else:
         "acceptsOnlyExplicitMovieHashMatchesInPreferredLanguages",
         "prefersNormalTrustedPopularResultWithinLanguage",
         "credentialsRequireApiKeyAndCompleteOptionalAccount",
+        "buildsCanonicalApiUrlsWithoutRedirects",
     ):
         if test_name not in opensubtitles_rest_tests:
             errors.append(f"Missing OpenSubtitles REST regression test: {test_name}")
