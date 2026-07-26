@@ -1052,13 +1052,13 @@ public class PlayerActivity extends Activity {
         }
         externalDiagnostics.recordStremioConnector(
                 "opensubtitles_v3_started", content.type + "/" + content.id);
-        String mediaFilename = mPrefs.mediaUri == null
-                ? null : Utils.getFileName(this, mPrefs.mediaUri);
+        String mediaFilename = getOpenSubtitlesMediaFilename(content);
         externalDiagnostics.recordStremioConnector(
                 "opensubtitles_v3_match_mode",
                 "listing_only filename="
                         + (mediaFilename == null || mediaFilename.trim().isEmpty()
-                        ? "unavailable" : "available"));
+                        ? "unavailable" : content.mediaFilename != null
+                        ? "stremio" : "uri_fallback"));
         Tracks currentTracks = player == null ? null : player.getCurrentTracks();
         client.fetch(content.type, content.id, preferredLanguages, mediaFilename, currentTracks,
                 new OpenSubtitlesV3Client.Listener() {
@@ -1185,8 +1185,7 @@ public class PlayerActivity extends Activity {
                 mediaItem,
                 content.type,
                 content.id,
-                mPrefs.mediaUri == null
-                        ? null : Utils.getFileName(this, mPrefs.mediaUri),
+                getOpenSubtitlesMediaFilename(content),
                 credentials,
                 preferredLanguages,
                 new ArrayList<>(apiSubs),
@@ -1217,6 +1216,16 @@ public class PlayerActivity extends Activity {
                         }
                     }
                 });
+    }
+
+    @Nullable
+    private String getOpenSubtitlesMediaFilename(
+            StremioConnectorStore.Content content) {
+        if (content.mediaFilename != null && !content.mediaFilename.trim().isEmpty()) {
+            return content.mediaFilename;
+        }
+        return mPrefs.mediaUri == null
+                ? null : Utils.getFileName(this, mPrefs.mediaUri);
     }
 
     private void acceptOpenSubtitlesExactMatch(

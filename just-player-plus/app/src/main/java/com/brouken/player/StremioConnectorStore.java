@@ -38,9 +38,17 @@ final class StremioConnectorStore {
     }
 
     void record(String type, String id, long timestampMs) {
+        record(type, id, null, timestampMs);
+    }
+
+    private void record(String type,
+                        String id,
+                        @Nullable String mediaFilename,
+                        long timestampMs) {
         if (!isSupportedEvent(type, id)) {
             return;
         }
+        String normalizedFilename = normalizeFilename(mediaFilename);
         synchronized (LOCK) {
             List<Event> events = readEvents();
             if (!events.isEmpty()) {
@@ -50,10 +58,14 @@ final class StremioConnectorStore {
                         && last.id.equals(id)
                         && sinceLast >= 0L
                         && sinceLast <= DEDUPLICATE_WINDOW_MS) {
-                    return;
+                    if (normalizedFilename == null
+                            || normalizedFilename.equals(last.mediaFilename)) {
+                        return;
+                    }
+                    events.remove(events.size() - 1);
                 }
             }
-            events.add(new Event(type, id, timestampMs));
+            events.add(new Event(type, id, normalizedFilename, timestampMs));
             while (events.size() > MAX_EVENTS) {
                 events.remove(0);
             }
@@ -70,14 +82,14 @@ final class StremioConnectorStore {
         synchronized (LOCK) {
             List<Event> events = readEvents();
             Event event = findRecentEvent(events, nowMs);
+            StremioEpisodeId expected = claimExpectedEpisode(nowMs);
+            if (expected != null && (event == null || !expected.raw.equals(event.id))) {
+                Content content = Content.series(expected)
+                        .withCorrelation("expected_next", 0L);
+                rememberAssociation(launchIdentity, content, nowMs);
+                return content;
+            }
             if (event == null) {
-                StremioEpisodeId expected = claimExpectedEpisode(nowMs);
-                if (expected != null) {
-                    Content content = Content.series(expected)
-                            .withCorrelation("expected_next", 0L);
-                    rememberAssociation(launchIdentity, content, nowMs);
-                    return content;
-                }
                 return findAssociation(launchIdentity, nowMs);
             }
             String token = event.type + "\n" + event.id + "\n" + event.timestampMs;
@@ -112,16 +124,17 @@ final class StremioConnectorStore {
 
     void recordContentAssociation(String type,
                                   String id,
-                                  @Nullable String launchIdentity,
+                                  @Nullable String mediaFilename,
                                   long timestampMs) {
         if (!isSupportedEvent(type, id)) {
             return;
         }
         synchronized (LOCK) {
-            record(type, id, timestampMs);
+            record(type, id, mediaFilename, timestampMs);
             Content content = Content.fromValues(type, id);
             if (content != null) {
-                rememberAssociation(launchIdentity, content, timestampMs);
+                content = content.withMediaFilename(mediaFilename);
+                rememberAssociation(mediaFilename, content, timestampMs);
             }
         }
     }
@@ -141,6 +154,9 @@ final class StremioConnectorStore {
             current.put("type", content.type);
             current.put("id", content.id);
             current.put("timestamp", nowMs);
+            if (content.mediaFilename != null) {
+                current.put("filename", content.mediaFilename);
+            }
             updated.put(current);
 
             for (int index = 0;
@@ -182,7 +198,11 @@ final class StremioConnectorStore {
             }
             Content content = Content.fromValues(
                     item.optString("type", ""), item.optString("id", ""));
-            return content == null ? null : content.withCorrelation(
+            if (content == null) {
+                return null;
+            }
+            content = content.withMediaFilename(item.optString("filename", null));
+            return content.withCorrelation(
                     "remembered_association", Math.max(0L, nowMs - timestamp));
         }
         return null;
@@ -313,9 +333,10 @@ final class StremioConnectorStore {
                 }
                 String type = item.optString("type", "");
                 String id = item.optString("id", "");
+                String filename = item.optString("filename", null);
                 long timestamp = item.optLong("timestamp", 0L);
                 if (!type.isEmpty() && !id.isEmpty() && timestamp > 0L) {
-                    events.add(new Event(type, id, timestamp));
+                    events.add(new Event(type, id, filename, timestamp));
                 }
             }
         } catch (JSONException ignored) {
@@ -332,6 +353,9 @@ final class StremioConnectorStore {
                 item.put("type", event.type);
                 item.put("id", event.id);
                 item.put("timestamp", event.timestampMs);
+                if (event.mediaFilename != null) {
+                    item.put("filename", event.mediaFilename);
+                }
                 array.put(item);
             }
             preferences.edit().putString(KEY_EVENTS, array.toString()).apply();
@@ -343,11 +367,20 @@ final class StremioConnectorStore {
     static final class Event {
         final String type;
         final String id;
+        @Nullable final String mediaFilename;
         final long timestampMs;
 
         Event(String type, String id, long timestampMs) {
+            this(type, id, null, timestampMs);
+        }
+
+        Event(String type,
+              String id,
+              @Nullable String mediaFilename,
+              long timestampMs) {
             this.type = type;
             this.id = id;
+            this.mediaFilename = normalizeFilename(mediaFilename);
             this.timestampMs = timestampMs;
         }
     }
@@ -356,31 +389,41 @@ final class StremioConnectorStore {
         final String type;
         final String id;
         @Nullable final StremioEpisodeId episode;
+        @Nullable final String mediaFilename;
         final String correlationSource;
         final long correlationAgeMs;
 
         private Content(String type,
                         String id,
                         @Nullable StremioEpisodeId episode,
+                        @Nullable String mediaFilename,
                         String correlationSource,
                         long correlationAgeMs) {
             this.type = type;
             this.id = id;
             this.episode = episode;
+            this.mediaFilename = normalizeFilename(mediaFilename);
             this.correlationSource = correlationSource;
             this.correlationAgeMs = correlationAgeMs;
         }
 
         static Content series(StremioEpisodeId episode) {
-            return new Content("series", episode.raw, episode, "unspecified", -1L);
+            return new Content(
+                    "series", episode.raw, episode, null, "unspecified", -1L);
         }
 
         static Content movie(String id) {
-            return new Content("movie", id, null, "unspecified", -1L);
+            return new Content("movie", id, null, null, "unspecified", -1L);
         }
 
         Content withCorrelation(String source, long ageMs) {
-            return new Content(type, id, episode, source, ageMs);
+            return new Content(
+                    type, id, episode, mediaFilename, source, ageMs);
+        }
+
+        Content withMediaFilename(@Nullable String filename) {
+            return new Content(
+                    type, id, episode, filename, correlationSource, correlationAgeMs);
         }
 
         @Nullable
@@ -397,11 +440,27 @@ final class StremioConnectorStore {
 
         @Nullable
         static Content fromEvent(Event event) {
-            return fromValues(event.type, event.id);
+            Content content = fromValues(event.type, event.id);
+            return content == null
+                    ? null : content.withMediaFilename(event.mediaFilename);
         }
 
         boolean isSeries() {
             return episode != null;
         }
+    }
+
+    @Nullable
+    private static String normalizeFilename(@Nullable String value) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.replaceAll("[\\p{Cntrl}\\r\\n]+", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+        if (normalized.isEmpty()) {
+            return null;
+        }
+        return normalized.length() <= 512 ? normalized : normalized.substring(0, 512);
     }
 }

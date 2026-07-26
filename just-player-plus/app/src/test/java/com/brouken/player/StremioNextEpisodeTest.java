@@ -116,6 +116,25 @@ public class StremioNextEpisodeTest {
     }
 
     @Test
+    public void subtitleFilenameFlowsFromConnectorEventIntoResolvedContent() {
+        StremioConnectorStore.Content content =
+                StremioConnectorStore.Content.fromEvent(
+                        new StremioConnectorStore.Event(
+                                "movie",
+                                "tt0133093",
+                                "The.Matrix.1999.2160p.BluRay.x265-GROUP.mkv",
+                                1_000L));
+
+        assertNotNull(content);
+        assertEquals(
+                "The.Matrix.1999.2160p.BluRay.x265-GROUP.mkv",
+                content.mediaFilename);
+        assertEquals(
+                content.mediaFilename,
+                content.withCorrelation("test", 50L).mediaFilename);
+    }
+
+    @Test
     public void subtitleRequestSupportsQueryExtrasAndRejectsMissingIdentity() {
         StremioSubtitleRequest movie = StremioSubtitleRequest.parse(
                 "/subtitles/movie/hash.json"

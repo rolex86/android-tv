@@ -217,6 +217,7 @@ else:
         "rememberedContentRejectsMalformedTypesAndIds",
         "movieMetadataUsesCinemetaName",
         "subtitleRequestRecoversEpisodeIdentityAndFilename",
+        "subtitleFilenameFlowsFromConnectorEventIntoResolvedContent",
         "subtitleRequestSupportsQueryExtrasAndRejectsMissingIdentity",
     ):
         if test_name not in stremio_tests:
