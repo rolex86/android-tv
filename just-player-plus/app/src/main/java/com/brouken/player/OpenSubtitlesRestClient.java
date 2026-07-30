@@ -51,7 +51,9 @@ final class OpenSubtitlesRestClient {
     private static final int MAX_JSON_BYTES = 2 * 1024 * 1024;
     private static final int MAX_SUBTITLE_BYTES = 4 * 1024 * 1024;
     private static final int MAX_RESULTS = 500;
-    private static final int MAX_SEARCH_PAGES = 3;
+    private static final int MIN_SEARCH_PAGES = 3;
+    private static final int MAX_SEARCH_PAGES = 10;
+    private static final int STRONG_RELEASE_SCORE = 70;
 
     interface Listener {
         void onEvent(String state, String detail);
@@ -308,7 +310,12 @@ final class OpenSubtitlesRestClient {
                 if (!isCurrent(token)) {
                     return;
                 }
-                if (stats.rawResults == 0) {
+                if (stats.rawResults == 0
+                        || !shouldSearchNextPage(
+                                page,
+                                totalPages,
+                                !exactCandidates.isEmpty(),
+                                bestScore)) {
                     break;
                 }
             }
@@ -394,6 +401,20 @@ final class OpenSubtitlesRestClient {
                 listener.onFailure("invalid_response");
             }
         }
+    }
+
+    static boolean shouldSearchNextPage(int currentPage,
+                                        int totalPages,
+                                        boolean exactMatchFound,
+                                        int bestReleaseScore) {
+        int cappedPages = Math.min(Math.max(1, totalPages), MAX_SEARCH_PAGES);
+        if (currentPage >= cappedPages) {
+            return false;
+        }
+        if (currentPage < MIN_SEARCH_PAGES) {
+            return true;
+        }
+        return !exactMatchFound && bestReleaseScore < STRONG_RELEASE_SCORE;
     }
 
     static Request searchRequest(String apiKey,
@@ -871,30 +892,12 @@ final class OpenSubtitlesRestClient {
     static int verifyLikelyExisting(
             List<MediaItem.SubtitleConfiguration> existing,
             List<Candidate> candidates) {
-        LinkedHashMap<String, MediaItem.SubtitleConfiguration> bestConfigurations =
-                new LinkedHashMap<>();
-        LinkedHashMap<String, Candidate> bestCandidates = new LinkedHashMap<>();
+        int verified = 0;
         for (MediaItem.SubtitleConfiguration configuration : existing) {
-            Set<String> identifiers = configurationIdentifiers(configuration);
-            Candidate match = findLikelyMatch(
-                    configuration.id,
-                    configuration.label,
-                    configuration.language,
-                    identifiers,
-                    candidates);
+            Candidate match = findLikelyMatch(configuration, candidates);
             if (match == null) {
                 continue;
             }
-            String kind = match.language
-                    + '|' + (((configuration.selectionFlags & C.SELECTION_FLAG_FORCED) != 0)
-                    ? 'F' : ((configuration.roleFlags & C.ROLE_FLAG_CAPTION) != 0) ? 'S' : 'N');
-            Candidate previous = bestCandidates.get(kind);
-            if (previous == null || match.releaseScore > previous.releaseScore) {
-                bestCandidates.put(kind, match);
-                bestConfigurations.put(kind, configuration);
-            }
-        }
-        for (MediaItem.SubtitleConfiguration configuration : bestConfigurations.values()) {
             SubtitleTrackIdentity.registerOpenSubtitlesMatch(
                     configuration.id,
                     configuration.language,
@@ -902,8 +905,9 @@ final class OpenSubtitlesRestClient {
                     configuration.roleFlags,
                     configuration.label,
                     OpenSubtitlesV3Client.MatchConfidence.LIKELY.rank);
+            verified++;
         }
-        return bestConfigurations.size();
+        return verified;
     }
 
     @Nullable
@@ -912,6 +916,36 @@ final class OpenSubtitlesRestClient {
             @Nullable String label,
             @Nullable String language,
             Set<String> identifiers,
+            List<Candidate> candidates) {
+        Set<String> releaseNames = new LinkedHashSet<>();
+        addVisibleReleaseName(releaseNames, releaseNameFromLabel(label));
+        return findLikelyMatch(
+                trackId, label, language, identifiers, releaseNames, candidates);
+    }
+
+    @Nullable
+    private static Candidate findLikelyMatch(
+            MediaItem.SubtitleConfiguration configuration,
+            List<Candidate> candidates) {
+        Set<String> releaseNames = new LinkedHashSet<>();
+        addVisibleReleaseName(releaseNames, releaseNameFromLabel(configuration.label));
+        addVisibleReleaseName(releaseNames, configuration.uri.getLastPathSegment());
+        return findLikelyMatch(
+                configuration.id,
+                configuration.label,
+                configuration.language,
+                configurationIdentifiers(configuration),
+                releaseNames,
+                candidates);
+    }
+
+    @Nullable
+    private static Candidate findLikelyMatch(
+            @Nullable String trackId,
+            @Nullable String label,
+            @Nullable String language,
+            Set<String> identifiers,
+            Set<String> releaseNames,
             List<Candidate> candidates) {
         if (!SubtitleTrackIdentity.isOpenSubtitles(trackId, label)) {
             return null;
@@ -923,7 +957,47 @@ final class OpenSubtitlesRestClient {
                 return candidate;
             }
         }
-        return null;
+
+        Candidate best = null;
+        int bestScore = 0;
+        for (Candidate candidate : candidates) {
+            if (!candidate.language.equals(normalizedLanguage)) {
+                continue;
+            }
+            for (String releaseName : releaseNames) {
+                int releaseScore = OpenSubtitlesV3Client.releaseMatchScore(
+                        releaseName, candidate.release);
+                int filenameScore = OpenSubtitlesV3Client.releaseMatchScore(
+                        releaseName, candidate.filename);
+                int score = Math.max(releaseScore, filenameScore);
+                boolean likely = OpenSubtitlesV3Client.isLikelyReleaseMatch(
+                        releaseName, candidate.release)
+                        || OpenSubtitlesV3Client.isLikelyReleaseMatch(
+                                releaseName, candidate.filename);
+                if (likely && score > bestScore) {
+                    best = candidate;
+                    bestScore = score;
+                }
+            }
+        }
+        return best;
+    }
+
+    private static String releaseNameFromLabel(@Nullable String label) {
+        if (label == null) {
+            return "";
+        }
+        int separator = label.lastIndexOf('·');
+        String detail = separator >= 0 && separator + 1 < label.length()
+                ? label.substring(separator + 1) : label;
+        return cleanLabel(detail);
+    }
+
+    private static void addVisibleReleaseName(Set<String> target, @Nullable String value) {
+        String cleaned = cleanLabel(value);
+        if (!releaseQuery(cleaned).isEmpty() && !cleaned.matches("[0-9]+")) {
+            target.add(cleaned);
+        }
     }
 
     private static Set<String> configurationIdentifiers(
