@@ -76,31 +76,31 @@ public class OpenSubtitlesRestClientTest {
     @Test
     public void buildsCanonicalApiUrlsWithoutRedirects() {
         Request hashRequest = OpenSubtitlesRestClient.searchRequest(
-                "secret", "efe600f792bf6a7f", 1_000_000L,
+                "secret", "0000000000000000", 1_000_000L,
                 new String[]{"eng", "ces"},
                 "movie",
                 "tt0133093",
                 "The.Matrix.1999.2160p.BluRay.x265-GROUP.mkv");
         assertEquals(
                 "imdb_id=133093&languages=cs%2Cen"
-                        + "&moviehash=efe600f792bf6a7f&type=movie",
+                        + "&moviehash=0000000000000000&type=movie",
                 hashRequest.url().encodedQuery());
 
         Request episodeRequest = OpenSubtitlesRestClient.searchRequest(
-                "secret", "0123456789abcdef", 2_000_000L,
+                "secret", "1111111111111111", 2_000_000L,
                 new String[]{"ces"},
                 "series",
                 "tt3107288:1:2",
                 "Show.S01E02.1080p.WEB-DL.x264-GROUP.mkv");
         assertEquals(
                 "episode_number=2&languages=cs"
-                        + "&moviehash=0123456789abcdef"
+                        + "&moviehash=1111111111111111"
                         + "&parent_imdb_id=3107288"
                         + "&season_number=1&type=episode",
                 episodeRequest.url().encodedQuery());
 
         Request secondPageRequest = OpenSubtitlesRestClient.searchRequest(
-                "secret", "efe600f792bf6a7f", 1_000_000L,
+                "secret", "0000000000000000", 1_000_000L,
                 new String[]{"eng", "ces"},
                 "movie",
                 "tt0133093",
@@ -108,7 +108,7 @@ public class OpenSubtitlesRestClientTest {
                 2);
         assertEquals(
                 "imdb_id=133093&languages=cs%2Cen"
-                        + "&moviehash=efe600f792bf6a7f&page=2&type=movie",
+                        + "&moviehash=0000000000000000&page=2&type=movie",
                 secondPageRequest.url().encodedQuery());
 
         Request testRequest =
