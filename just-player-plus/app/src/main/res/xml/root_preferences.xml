@@ -162,6 +162,24 @@
             app:useSimpleSummaryProvider="true" />
 
         <SwitchPreferenceCompat
+            app:key="openSubtitlesExactMatch"
+            app:defaultValue="true"
+            app:summaryOn="@string/pref_opensubtitles_exact_match_on"
+            app:summaryOff="@string/pref_opensubtitles_exact_match_off"
+            app:title="@string/pref_opensubtitles_exact_match" />
+
+        <Preference
+            app:key="openSubtitlesCredentials"
+            app:dependency="openSubtitlesExactMatch"
+            app:title="@string/pref_opensubtitles_credentials" />
+
+        <Preference
+            app:key="openSubtitlesTest"
+            app:dependency="openSubtitlesExactMatch"
+            app:summary="@string/pref_opensubtitles_test_summary"
+            app:title="@string/pref_opensubtitles_test" />
+
+        <SwitchPreferenceCompat
             app:key="subtitleStyleEmbedded"
             app:defaultValue="true"
             app:summaryOn="@string/pref_subtitle_style_embedded_on"

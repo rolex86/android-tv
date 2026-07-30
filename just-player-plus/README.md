@@ -28,6 +28,19 @@ Actual format support depends on the Android device, installed system decoders, 
 
 Stremio and other external players may supply subtitle tracks with the playback intent. JustPlayer Plus treats those tracks as candidates together with embedded subtitle tracks. The final track is chosen by the user's JustPlayer Plus language, forced-subtitle and source-preference rules.
 
+## Optional OpenSubtitles hash verification
+
+When configured with the user's own OpenSubtitles API key, JustPlayer Plus can calculate the
+standard movie hash once per video and ask the official REST API which subtitle files are exact
+matches. Only a response explicitly marked as a movie-hash match receives the `✓` indicator;
+release-name estimates remain `≈` and unverified results have no icon.
+
+An API key is sufficient to verify matching tracks already supplied through Stremio. Optional
+OpenSubtitles account credentials allow the player to download the best exact match when Stremio
+did not supply it. Credentials are encrypted with a non-exportable Android Keystore key, stored in
+the app's no-backup directory, and never written to diagnostics or source control. Disabling the
+feature cancels any in-progress hash or API request.
+
 ## Optional AI subtitle translation
 
 The disabled-by-default **AI subtitles** setting can manually translate the currently selected

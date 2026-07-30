@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="plus_subtitle_mode_entries">
+        <item>Vypnuto</item>
+        <item>Pouze vynucené titulky</item>
+        <item>Preferované titulky pro cizojazyčný zvuk</item>
+        <item>Vždy použít preferované titulky</item>
+    </string-array>
+
+    <string-array name="plus_audio_quality_entries">
+        <item>Zachovat pořadí ve videu</item>
+        <item>Preferovat nejlepší formát a počet kanálů</item>
+    </string-array>
+
+    <string-array name="plus_subtitle_source_entries">
+        <item>Automaticky</item>
+        <item>Preferovat externí titulky</item>
+        <item>Preferovat vložené titulky</item>
+    </string-array>
+
+    <string-array name="plus_remember_scope_entries">
+        <item>Nepamatovat si ruční volby stop</item>
+        <item>Pamatovat pro tento titul</item>
+        <item>Pamatovat pro celou sérii</item>
+        <item>Použít poslední volbu globálně</item>
+    </string-array>
+
+    <string-array name="plus_subtitle_scale_entries">
+        <item>Použít systémovou velikost</item>
+        <item>75 %</item>
+        <item>100 %</item>
+        <item>125 %</item>
+        <item>150 %</item>
+    </string-array>
+
+    <string-array name="plus_subtitle_position_entries">
+        <item>Systémová pozice</item>
+        <item>Dole</item>
+        <item>Výše</item>
+    </string-array>
+
+    <string-array name="plus_resize_default_entries">
+        <item>Pamatovat poslední volbu</item>
+        <item>Přizpůsobit</item>
+        <item>Oříznout</item>
+    </string-array>
+
+    <string-array name="plus_speed_default_entries">
+        <item>Pamatovat poslední rychlost</item>
+        <item>0,50×</item>
+        <item>0,75×</item>
+        <item>1,00×</item>
+        <item>1,25×</item>
+        <item>1,50×</item>
+        <item>2,00×</item>
+    </string-array>
+
+    <string-array name="plus_seek_increment_entries">
+        <item>5 sekund</item>
+        <item>10 sekund</item>
+        <item>30 sekund</item>
+        <item>60 sekund</item>
+    </string-array>
+
+    <string-array name="plus_frame_rate_policy_entries">
+        <item>Použít původní nastavení Just Playeru</item>
+        <item>Nikdy nepřizpůsobovat snímkovou frekvenci</item>
+        <item>Přizpůsobovat u všech videí</item>
+        <item>Přizpůsobovat jen u dlouhých videí</item>
+    </string-array>
+
+    <string-array name="plus_back_button_entries">
+        <item>Nejdřív zobrazit ovládání, potom ukončit</item>
+        <item>Ukončit okamžitě</item>
+        <item>Před ukončením se zeptat</item>
+    </string-array>
+
+    <string-array name="plus_completion_entries">
+        <item>90 %</item>
+        <item>95 %</item>
+        <item>98 %</item>
+        <item>Když zbývá 5 minut</item>
+    </string-array>
+</resources>

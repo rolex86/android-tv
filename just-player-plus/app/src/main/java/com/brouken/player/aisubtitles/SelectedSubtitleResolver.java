@@ -12,13 +12,14 @@ import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
 
+import java.text.Normalizer;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
-/** Resolves the selected text track and maps it back to its external source URI. */
+/** Resolves the selected external text track to a readable source. */
 public final class SelectedSubtitleResolver {
     public static final String EXTERNAL_ID_PREFIX = "plus-external:";
     public static final String AI_ID_PREFIX = "plus-ai:";
@@ -63,13 +64,13 @@ public final class SelectedSubtitleResolver {
         List<MediaItem.SubtitleConfiguration> configurations = subtitleConfigurations(
                 player.getCurrentMediaItem());
 
-        Resolution overrideResolution = resolveTextOverride(
+        Resolution override = resolveTextOverride(
                 player.getTrackSelectionParameters(), configurations);
-        if (overrideResolution != null) {
-            return overrideResolution;
+        if (override != null) {
+            return override;
         }
 
-        boolean selectedEmbeddedTrackSeen = false;
+        boolean embeddedSeen = false;
         Issue externalFailure = null;
         for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
             if (group.getType() != C.TRACK_TYPE_TEXT) {
@@ -81,31 +82,30 @@ public final class SelectedSubtitleResolver {
                     continue;
                 }
                 Format format = trackGroup.getFormat(index);
-                MediaItem.SubtitleConfiguration configuration =
+                MediaItem.SubtitleConfiguration external =
                         findExternalConfiguration(configurations, format);
-                if (configuration == null) {
-                    selectedEmbeddedTrackSeen = true;
+                if (external == null) {
+                    embeddedSeen = true;
                     continue;
                 }
-                Resolution resolution = resolveConfiguration(
-                        configuration,
-                        configuration.id,
-                        format.label != null ? format.label : configuration.label,
-                        format.language != null ? format.language : configuration.language);
-                if (resolution.isReady()) {
-                    return resolution;
+                Resolution resolved = resolveConfiguration(
+                        external,
+                        external.id,
+                        format.label != null ? format.label : external.label,
+                        format.language != null ? format.language : external.language);
+                if (resolved.isReady()) {
+                    return resolved;
                 }
-                externalFailure = resolution.issue;
+                externalFailure = resolved.issue;
             }
         }
 
         if (externalFailure != null) {
             return Resolution.failed(externalFailure);
         }
-        if (selectedEmbeddedTrackSeen) {
-            return Resolution.failed(Issue.EMBEDDED);
-        }
-        return Resolution.failed(Issue.NONE_SELECTED);
+        return embeddedSeen
+                ? Resolution.failed(Issue.EMBEDDED)
+                : Resolution.failed(Issue.NONE_SELECTED);
     }
 
     @Nullable
@@ -124,16 +124,16 @@ public final class SelectedSubtitleResolver {
                     continue;
                 }
                 Format format = trackGroup.getFormat(index);
-                MediaItem.SubtitleConfiguration configuration =
+                MediaItem.SubtitleConfiguration external =
                         findExternalConfiguration(configurations, format);
-                if (configuration == null) {
+                if (external == null) {
                     return Resolution.failed(Issue.EMBEDDED);
                 }
                 return resolveConfiguration(
-                        configuration,
-                        configuration.id,
-                        format.label != null ? format.label : configuration.label,
-                        format.language != null ? format.language : configuration.language);
+                        external,
+                        external.id,
+                        format.label != null ? format.label : external.label,
+                        format.language != null ? format.language : external.language);
             }
         }
         return null;
@@ -249,8 +249,14 @@ public final class SelectedSubtitleResolver {
     }
 
     private static String normalizeText(@Nullable String value) {
-        return value == null ? "" : value.trim().replaceAll("\\s+", " ")
-                .toLowerCase(Locale.ROOT);
+        if (value == null) {
+            return "";
+        }
+        return Normalizer.normalize(value, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", " ")
+                .trim();
     }
 
     private static String normalizeLanguage(@Nullable String value) {
@@ -259,7 +265,26 @@ public final class SelectedSubtitleResolver {
         }
         String language = value.trim().toLowerCase(Locale.ROOT).replace('_', '-');
         int separator = language.indexOf('-');
-        return separator > 0 ? language.substring(0, separator) : language;
+        language = separator > 0 ? language.substring(0, separator) : language;
+        switch (language) {
+            case "cs":
+            case "cze":
+            case "ces":
+                return "ces";
+            case "sk":
+            case "slo":
+            case "slk":
+                return "slk";
+            case "en":
+            case "eng":
+                return "eng";
+            case "de":
+            case "ger":
+            case "deu":
+                return "deu";
+            default:
+                return language;
+        }
     }
 
     private static boolean languagesMatch(String first, String second) {

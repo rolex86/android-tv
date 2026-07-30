@@ -7,6 +7,8 @@ import androidx.media3.common.TrackGroup;
 import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.Tracks;
 
+import com.brouken.player.aisubtitles.SubtitleTrackIdentity;
+
 import java.text.Normalizer;
 import java.util.Collections;
 import java.util.Locale;
@@ -112,6 +114,7 @@ final class SmartSubtitleSelector {
                         trackIndex,
                         languageRank,
                         sourceRank(format, sourcePreference),
+                        matchRank(format),
                         sourceOrder++);
                 if (best == null || candidate.score < best.score) {
                     best = candidate;
@@ -131,8 +134,9 @@ final class SmartSubtitleSelector {
                 best.trackGroup, Collections.singletonList(best.trackIndex));
     }
 
-    private static int sourceRank(Format format, String sourcePreference) {
-        boolean external = format.id != null && format.id.startsWith(EXTERNAL_ID_PREFIX);
+    static int sourceRank(Format format, String sourcePreference) {
+        boolean external = SubtitleTrackIdentity.isExternal(format.id)
+                || SubtitleTrackIdentity.isOpenSubtitles(format.id, format.label);
         if ("external".equals(sourcePreference)) {
             return external ? 0 : 1;
         }
@@ -140,6 +144,30 @@ final class SmartSubtitleSelector {
             return external ? 1 : 0;
         }
         return 0;
+    }
+
+    static int matchRank(Format format) {
+        if (!SubtitleTrackIdentity.isOpenSubtitles(format.id, format.label)) {
+            return OpenSubtitlesV3Client.MatchConfidence.UNKNOWN.rank;
+        }
+        return Math.min(
+                SubtitleTrackIdentity.openSubtitlesMatchRank(
+                        format.id,
+                        format.language,
+                        format.selectionFlags,
+                        format.roleFlags,
+                        format.label),
+                OpenSubtitlesV3Client.MatchConfidence.UNKNOWN.rank);
+    }
+
+    static long candidateScore(int languageRank,
+                               int sourceRank,
+                               int matchRank,
+                               int sourceOrder) {
+        return ((long) languageRank * 1_000_000_000L)
+                + ((long) sourceRank * 100_000_000L)
+                + ((long) matchRank * 1_000_000L)
+                + sourceOrder;
     }
 
     static int languageRank(Format format, String[] selectionOrder) {
@@ -292,12 +320,12 @@ final class SmartSubtitleSelector {
                   int trackIndex,
                   int languageRank,
                   int sourceRank,
+                  int matchRank,
                   int sourceOrder) {
             this.trackGroup = trackGroup;
             this.trackIndex = trackIndex;
-            this.score = ((long) languageRank * 1_000_000L)
-                    + ((long) sourceRank * 100_000L)
-                    + sourceOrder;
+            this.score = candidateScore(
+                    languageRank, sourceRank, matchRank, sourceOrder);
         }
     }
 }

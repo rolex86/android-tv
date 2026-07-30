@@ -6,6 +6,7 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.media3.common.MediaItem;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
@@ -112,11 +113,12 @@ class SubtitleFetcher {
                 }
                 final ResponseBody responseBody = response.body();
 
-                if (responseBody == null || responseBody.contentLength() > 2_000_000) {
+                if (responseBody == null) {
                     return;
                 }
 
-                InputStream inputStream = responseBody.byteStream();
+                InputStream inputStream = new ByteArrayInputStream(
+                        BoundedResponseBody.readBytes(responseBody, 2_000_000));
                 Uri convertedSubtitleUri = Utils.convertInputStreamToUTF(activity, subtitleUri, inputStream);
 
                 if (convertedSubtitleUri == null) {

@@ -6,6 +6,9 @@ import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
 import androidx.media3.common.C;
+import androidx.media3.common.Format;
+
+import com.brouken.player.aisubtitles.SubtitleTrackIdentity;
 
 import org.junit.Test;
 
@@ -54,5 +57,47 @@ public class SmartSelectionPolicyTest {
         selection.subtitleAutomatic = true;
         assertEquals(changedAudio, selection.audioSignature());
         assertNotEquals(originalSubtitle, selection.subtitleSignature());
+    }
+
+    @Test
+    public void subtitleSourcePreferenceRecognizesMedia3PrefixedExternalIds() {
+        Format external = new Format.Builder()
+                .setId("1:plus-external:opensubtitles-v3:abc")
+                .build();
+        Format embedded = new Format.Builder().setId("1:embedded:ces").build();
+
+        assertEquals(0, SmartSubtitleSelector.sourceRank(external, "external"));
+        assertEquals(1, SmartSubtitleSelector.sourceRank(embedded, "external"));
+        assertEquals(1, SmartSubtitleSelector.sourceRank(external, "embedded"));
+        assertEquals(0, SmartSubtitleSelector.sourceRank(embedded, "embedded"));
+    }
+
+    @Test
+    public void likelyRuntimeMatchOutranksUnknownTracks() {
+        SubtitleTrackIdentity.resetOpenSubtitlesMatches();
+        String likelyId = "plus-external:opensubtitles-v3:likely";
+        SubtitleTrackIdentity.registerOpenSubtitlesMatch(
+                likelyId, "ces", 0, C.ROLE_FLAG_SUBTITLE, "Czech", 1);
+
+        assertEquals(1, SmartSubtitleSelector.matchRank(
+                new Format.Builder().setId(likelyId).build()));
+        assertEquals(2, SmartSubtitleSelector.matchRank(
+                new Format.Builder().setId("embedded:ces").build()));
+    }
+
+    @Test
+    public void automaticSubtitleScorePrioritizesLanguageThenSourceThenReleaseMatch() {
+        long likely = SmartSubtitleSelector.candidateScore(0, 0, 1, 0);
+        long unknown = SmartSubtitleSelector.candidateScore(0, 0, 2, 0);
+        long preferredSourceUnknown =
+                SmartSubtitleSelector.candidateScore(0, 0, 2, 0);
+        long nonPreferredSourceLikely =
+                SmartSubtitleSelector.candidateScore(0, 1, 1, 0);
+        long nextLanguageLikely =
+                SmartSubtitleSelector.candidateScore(1, 0, 1, 0);
+
+        assertTrue(likely < unknown);
+        assertTrue(preferredSourceUnknown < nonPreferredSourceLikely);
+        assertTrue(nonPreferredSourceLikely < nextLanguageLikely);
     }
 }

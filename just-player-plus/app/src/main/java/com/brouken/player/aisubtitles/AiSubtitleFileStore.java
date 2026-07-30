@@ -69,7 +69,12 @@ public final class AiSubtitleFileStore {
         if (files == null || files.length == 0) {
             return;
         }
-        Arrays.sort(files, Comparator.comparingLong(File::lastModified).reversed());
+        Arrays.sort(files, new Comparator<File>() {
+            @Override
+            public int compare(File first, File second) {
+                return Long.compare(second.lastModified(), first.lastModified());
+            }
+        });
         long cutoff = System.currentTimeMillis() - MAX_AGE_MS;
         for (int index = 0; index < files.length; index++) {
             if (index >= MAX_FILES || files[index].lastModified() < cutoff) {

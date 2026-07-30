@@ -35,6 +35,7 @@ class PlusPrefs {
     static final String KEY_SUBTITLE_DELAY_MS = "subtitleDelayMs";
     static final String KEY_SUBTITLE_SCALE = "subtitleScale";
     static final String KEY_SUBTITLE_POSITION = "subtitlePosition";
+    static final String KEY_OPENSUBTITLES_EXACT_MATCH = "openSubtitlesExactMatch";
 
     static final String KEY_REMEMBER_TRACK_SCOPE = "rememberTrackScope";
     static final String KEY_RESIZE_DEFAULT = "resizeDefault";
@@ -75,6 +76,7 @@ class PlusPrefs {
     int subtitleDelayMs;
     String subtitleScale;
     String subtitlePosition;
+    boolean openSubtitlesExactMatch;
 
     String rememberTrackScope;
     String resizeDefault;
@@ -126,6 +128,8 @@ class PlusPrefs {
         subtitleDelayMs = parseInt(KEY_SUBTITLE_DELAY_MS, 0);
         subtitleScale = preferences.getString(KEY_SUBTITLE_SCALE, "system");
         subtitlePosition = preferences.getString(KEY_SUBTITLE_POSITION, "system");
+        openSubtitlesExactMatch = preferences.getBoolean(
+                KEY_OPENSUBTITLES_EXACT_MATCH, true);
 
         rememberTrackScope = preferences.getString(KEY_REMEMBER_TRACK_SCOPE, "series");
         resizeDefault = preferences.getString(KEY_RESIZE_DEFAULT, "remember");

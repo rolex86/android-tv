@@ -107,6 +107,30 @@
     <string name="pref_subtitle_style_bold">Bold style</string>
     <string name="pref_subtitle_style_bold_on">Use bold typeface as regular</string>
     <string name="pref_subtitle_style_bold_off">Use default regular typeface</string>
+    <string name="pref_opensubtitles_exact_match">Rank OpenSubtitles synchronization</string>
+    <string name="pref_opensubtitles_exact_match_on">Marks exact video-hash matches and conservatively ranks likely release matches. Runs once per video.</string>
+    <string name="pref_opensubtitles_exact_match_off">No video hash or direct OpenSubtitles API request is made.</string>
+    <string name="pref_opensubtitles_credentials">OpenSubtitles API access</string>
+    <string name="pref_opensubtitles_credentials_missing">Not configured</string>
+    <string name="pref_opensubtitles_credentials_key_only">API key configured · exact and release verification</string>
+    <string name="pref_opensubtitles_credentials_account">API key and account configured · direct exact track available</string>
+    <string name="pref_opensubtitles_credentials_dialog">OpenSubtitles API access</string>
+    <string name="pref_opensubtitles_api_key">API key</string>
+    <string name="pref_opensubtitles_username">OpenSubtitles username (optional)</string>
+    <string name="pref_opensubtitles_password">OpenSubtitles password (optional)</string>
+    <string name="pref_opensubtitles_credentials_hint">The API key enables exact hash verification and conservative release matching. Account details are only needed to download an exact track missing from Stremio. Values are encrypted using Android Keystore and are never shown in diagnostics.</string>
+    <string name="pref_opensubtitles_save">Save</string>
+    <string name="pref_opensubtitles_clear">Clear</string>
+    <string name="pref_opensubtitles_saved">OpenSubtitles access saved securely.</string>
+    <string name="pref_opensubtitles_cleared">OpenSubtitles access removed.</string>
+    <string name="pref_opensubtitles_invalid">Enter an API key. Enter both account fields or leave both blank.</string>
+    <string name="pref_opensubtitles_secure_store_failed">The credentials could not be stored securely.</string>
+    <string name="pref_opensubtitles_test">Test OpenSubtitles access</string>
+    <string name="pref_opensubtitles_test_summary">Verify the API key and, when configured, the account login.</string>
+    <string name="pref_opensubtitles_test_running">Testing OpenSubtitles access…</string>
+    <string name="pref_opensubtitles_test_ok_key">API key works. Subtitle verification and ranking are ready.</string>
+    <string name="pref_opensubtitles_test_ok_account">API key and account login work. Direct exact tracks are ready.</string>
+    <string name="pref_opensubtitles_test_failed">OpenSubtitles access test failed: %1$s</string>
     <string name="pref_remember_track_scope">Remember manual audio and subtitle choices</string>
     <string name="pref_resize_default">Default resize mode</string>
     <string name="pref_speed_default">Default playback speed</string>
@@ -148,7 +172,7 @@
     <string name="ai_subtitle_target_czech">Czech</string>
     <string name="ai_subtitle_label_czech">Czech (AI)</string>
     <string name="ai_subtitle_select_external">First select an external text subtitle track.</string>
-    <string name="ai_subtitle_embedded_unsupported">The selected track is embedded in the video and cannot be translated yet.</string>
+    <string name="ai_subtitle_embedded_unsupported">The selected track is embedded in the video and cannot be translated.</string>
     <string name="ai_subtitle_image_unsupported">Image subtitles cannot be translated without OCR.</string>
     <string name="ai_subtitle_format_unsupported">The selected subtitle format is not supported.</string>
     <string name="ai_subtitle_uri_unreadable">The selected subtitle source cannot be read.</string>
@@ -161,5 +185,6 @@
     <string name="ai_subtitle_service_unavailable">The translation service is unavailable.</string>
     <string name="ai_subtitle_timeout">Translation is taking too long.</string>
     <string name="ai_subtitle_failed">Translation could not be completed.</string>
+    <string name="ai_subtitle_attach_failed">The translation finished, but the subtitle track could not be activated. Playback was restored.</string>
     <string name="ai_subtitle_too_large">The subtitle file is larger than 2 MB.</string>
 </resources>

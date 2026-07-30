@@ -27,8 +27,9 @@ final class StremioConnectorStore {
     private static final int MAX_EVENTS = 24;
     private static final int MAX_ASSOCIATIONS = 48;
     private static final long MAX_EVENT_AGE_MS = 15 * 60_000L;
+    private static final long MAX_FILENAME_REFRESH_AGE_MS = 5_000L;
     private static final long MAX_EXPECTED_AGE_MS = 30_000L;
-    private static final long MAX_ASSOCIATION_AGE_MS = 90L * 24L * 60L * 60_000L;
+    private static final long MAX_ASSOCIATION_AGE_MS = 24L * 60L * 60_000L;
     private static final long DEDUPLICATE_WINDOW_MS = 2_000L;
 
     private final SharedPreferences preferences;
@@ -38,9 +39,17 @@ final class StremioConnectorStore {
     }
 
     void record(String type, String id, long timestampMs) {
+        record(type, id, null, timestampMs);
+    }
+
+    private void record(String type,
+                        String id,
+                        @Nullable String mediaFilename,
+                        long timestampMs) {
         if (!isSupportedEvent(type, id)) {
             return;
         }
+        String normalizedFilename = normalizeFilename(mediaFilename);
         synchronized (LOCK) {
             List<Event> events = readEvents();
             if (!events.isEmpty()) {
@@ -50,10 +59,14 @@ final class StremioConnectorStore {
                         && last.id.equals(id)
                         && sinceLast >= 0L
                         && sinceLast <= DEDUPLICATE_WINDOW_MS) {
-                    return;
+                    if (normalizedFilename == null
+                            || normalizedFilename.equals(last.mediaFilename)) {
+                        return;
+                    }
+                    events.remove(events.size() - 1);
                 }
             }
-            events.add(new Event(type, id, timestampMs));
+            events.add(new Event(type, id, normalizedFilename, timestampMs));
             while (events.size() > MAX_EVENTS) {
                 events.remove(0);
             }
@@ -70,27 +83,37 @@ final class StremioConnectorStore {
         synchronized (LOCK) {
             List<Event> events = readEvents();
             Event event = findRecentEvent(events, nowMs);
+            StremioEpisodeId expected = claimExpectedEpisode(nowMs);
+            if (expected != null && (event == null || !expected.raw.equals(event.id))) {
+                Content content = Content.series(expected)
+                        .withCorrelation("expected_next", 0L);
+                rememberAssociation(launchIdentity, content, nowMs);
+                return content;
+            }
             if (event == null) {
-                StremioEpisodeId expected = claimExpectedEpisode(nowMs);
-                if (expected != null) {
-                    Content content = Content.series(expected);
-                    rememberAssociation(launchIdentity, content, nowMs);
-                    return content;
-                }
                 return findAssociation(launchIdentity, nowMs);
             }
             String token = event.type + "\n" + event.id + "\n" + event.timestampMs;
             if (token.equals(preferences.getString(KEY_CLAIMED_EPISODE, null))) {
-                return findAssociation(launchIdentity, nowMs);
+                Content repeated = Content.fromEvent(event);
+                if (repeated == null) {
+                    return findAssociation(launchIdentity, nowMs);
+                }
+                repeated = repeated.withCorrelation(
+                        "reused_request", Math.max(0L, nowMs - event.timestampMs));
+                rememberAssociation(launchIdentity, repeated, nowMs);
+                return repeated;
             }
             Content content = Content.fromEvent(event);
             if (content == null) {
                 return null;
             }
+            content = content.withCorrelation(
+                    "recent_request", Math.max(0L, nowMs - event.timestampMs));
 
-            // A single current request supersedes all older observations. A later Stremio
-            // launch will record a fresh event (including when it automatically continues).
-            writeEvents(new ArrayList<>());
+            // Keep the latest observation available while the same Stremio detail page reuses
+            // its cached stream list. A request for different content is appended later and wins
+            // because findRecentEvent() always scans from newest to oldest.
             preferences.edit()
                     .putString(KEY_CLAIMED_EPISODE, token)
                     .remove(KEY_EXPECTED_EPISODE)
@@ -98,6 +121,47 @@ final class StremioConnectorStore {
             rememberAssociation(launchIdentity, content, nowMs);
             return content;
         }
+    }
+
+    void recordContentAssociation(String type,
+                                  String id,
+                                  @Nullable String mediaFilename,
+                                  long timestampMs) {
+        if (!isSupportedEvent(type, id)) {
+            return;
+        }
+        synchronized (LOCK) {
+            record(type, id, mediaFilename, timestampMs);
+            Content content = Content.fromValues(type, id);
+            if (content != null) {
+                content = content.withMediaFilename(mediaFilename);
+                rememberAssociation(mediaFilename, content, timestampMs);
+            }
+        }
+    }
+
+    Content refreshContent(Content content, long nowMs) {
+        synchronized (LOCK) {
+            return refreshContent(readEvents(), content, nowMs);
+        }
+    }
+
+    static Content refreshContent(List<Event> events, Content content, long nowMs) {
+        if (content.mediaFilename != null) {
+            return content;
+        }
+        for (int index = events.size() - 1; index >= 0; index--) {
+            Event event = events.get(index);
+            if (event.timestampMs > nowMs + 10_000L
+                    || nowMs - event.timestampMs > MAX_FILENAME_REFRESH_AGE_MS
+                    || !content.type.equals(event.type)
+                    || !content.id.equals(event.id)
+                    || event.mediaFilename == null) {
+                continue;
+            }
+            return content.withMediaFilename(event.mediaFilename);
+        }
+        return content;
     }
 
     private void rememberAssociation(@Nullable String launchIdentity,
@@ -115,6 +179,9 @@ final class StremioConnectorStore {
             current.put("type", content.type);
             current.put("id", content.id);
             current.put("timestamp", nowMs);
+            if (content.mediaFilename != null) {
+                current.put("filename", content.mediaFilename);
+            }
             updated.put(current);
 
             for (int index = 0;
@@ -154,8 +221,14 @@ final class StremioConnectorStore {
                     || nowMs - timestamp > MAX_ASSOCIATION_AGE_MS) {
                 return null;
             }
-            return Content.fromValues(
+            Content content = Content.fromValues(
                     item.optString("type", ""), item.optString("id", ""));
+            if (content == null) {
+                return null;
+            }
+            content = content.withMediaFilename(item.optString("filename", null));
+            return content.withCorrelation(
+                    "remembered_association", Math.max(0L, nowMs - timestamp));
         }
         return null;
     }
@@ -285,9 +358,10 @@ final class StremioConnectorStore {
                 }
                 String type = item.optString("type", "");
                 String id = item.optString("id", "");
+                String filename = item.optString("filename", null);
                 long timestamp = item.optLong("timestamp", 0L);
                 if (!type.isEmpty() && !id.isEmpty() && timestamp > 0L) {
-                    events.add(new Event(type, id, timestamp));
+                    events.add(new Event(type, id, filename, timestamp));
                 }
             }
         } catch (JSONException ignored) {
@@ -304,6 +378,9 @@ final class StremioConnectorStore {
                 item.put("type", event.type);
                 item.put("id", event.id);
                 item.put("timestamp", event.timestampMs);
+                if (event.mediaFilename != null) {
+                    item.put("filename", event.mediaFilename);
+                }
                 array.put(item);
             }
             preferences.edit().putString(KEY_EVENTS, array.toString()).apply();
@@ -315,11 +392,20 @@ final class StremioConnectorStore {
     static final class Event {
         final String type;
         final String id;
+        @Nullable final String mediaFilename;
         final long timestampMs;
 
         Event(String type, String id, long timestampMs) {
+            this(type, id, null, timestampMs);
+        }
+
+        Event(String type,
+              String id,
+              @Nullable String mediaFilename,
+              long timestampMs) {
             this.type = type;
             this.id = id;
+            this.mediaFilename = normalizeFilename(mediaFilename);
             this.timestampMs = timestampMs;
         }
     }
@@ -328,19 +414,41 @@ final class StremioConnectorStore {
         final String type;
         final String id;
         @Nullable final StremioEpisodeId episode;
+        @Nullable final String mediaFilename;
+        final String correlationSource;
+        final long correlationAgeMs;
 
-        private Content(String type, String id, @Nullable StremioEpisodeId episode) {
+        private Content(String type,
+                        String id,
+                        @Nullable StremioEpisodeId episode,
+                        @Nullable String mediaFilename,
+                        String correlationSource,
+                        long correlationAgeMs) {
             this.type = type;
             this.id = id;
             this.episode = episode;
+            this.mediaFilename = normalizeFilename(mediaFilename);
+            this.correlationSource = correlationSource;
+            this.correlationAgeMs = correlationAgeMs;
         }
 
         static Content series(StremioEpisodeId episode) {
-            return new Content("series", episode.raw, episode);
+            return new Content(
+                    "series", episode.raw, episode, null, "unspecified", -1L);
         }
 
         static Content movie(String id) {
-            return new Content("movie", id, null);
+            return new Content("movie", id, null, null, "unspecified", -1L);
+        }
+
+        Content withCorrelation(String source, long ageMs) {
+            return new Content(
+                    type, id, episode, mediaFilename, source, ageMs);
+        }
+
+        Content withMediaFilename(@Nullable String filename) {
+            return new Content(
+                    type, id, episode, filename, correlationSource, correlationAgeMs);
         }
 
         @Nullable
@@ -357,11 +465,27 @@ final class StremioConnectorStore {
 
         @Nullable
         static Content fromEvent(Event event) {
-            return fromValues(event.type, event.id);
+            Content content = fromValues(event.type, event.id);
+            return content == null
+                    ? null : content.withMediaFilename(event.mediaFilename);
         }
 
         boolean isSeries() {
             return episode != null;
         }
+    }
+
+    @Nullable
+    private static String normalizeFilename(@Nullable String value) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.replaceAll("[\\p{Cntrl}\\r\\n]+", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+        if (normalized.isEmpty()) {
+            return null;
+        }
+        return normalized.length() <= 512 ? normalized : normalized.substring(0, 512);
     }
 }

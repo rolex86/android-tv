@@ -2,9 +2,12 @@ package com.brouken.player;
 
 import android.content.res.Resources;
 
+import androidx.media3.common.C;
 import androidx.media3.common.Format;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.ui.DefaultTrackNameProvider;
+
+import com.brouken.player.aisubtitles.SubtitleTrackIdentity;
 
 class CustomDefaultTrackNameProvider extends DefaultTrackNameProvider {
     public CustomDefaultTrackNameProvider(Resources resources) {
@@ -26,12 +29,28 @@ class CustomDefaultTrackNameProvider extends DefaultTrackNameProvider {
                 trackName += " (" + sampleFormat + ")";
             }
         }
-        if (format.label != null) {
-            if (!trackName.startsWith(format.label)) { // HACK
-                trackName += " - " + format.label;
+        if (format.label != null && !trackName.startsWith(format.label)) {
+            trackName += " - " + format.label;
+        }
+        if (MimeTypes.getTrackType(format.sampleMimeType) == C.TRACK_TYPE_TEXT) {
+            String icon = matchIcon(format);
+            if (!icon.isEmpty()) {
+                trackName = icon + " " + trackName;
             }
         }
         return trackName;
+    }
+
+    private static String matchIcon(Format format) {
+        if (SubtitleTrackIdentity.isOpenSubtitles(format.id, format.label)) {
+            return SubtitleTrackIdentity.matchIcon(
+                    format.id,
+                    format.language,
+                    format.selectionFlags,
+                    format.roleFlags,
+                    format.label);
+        }
+        return "";
     }
 
     private String formatNameFromMime(final String mimeType) {
@@ -82,7 +101,6 @@ class CustomDefaultTrackNameProvider extends DefaultTrackNameProvider {
             case MimeTypes.AUDIO_MPEGH_MHA1:
             case MimeTypes.AUDIO_MPEGH_MHM1:
                 return "MPEG-H";
-
             case MimeTypes.APPLICATION_PGS:
                 return "PGS";
             case MimeTypes.APPLICATION_SUBRIP:

@@ -24,6 +24,7 @@ AI_TEST_PATH = (
     / "com" / "brouken" / "player" / "aisubtitles" / "AiSubtitlePolicyTest.java"
 )
 OPEN_SUBTITLES_TEST_PATH = TEST_PATH.with_name("OpenSubtitlesV3ClientTest.java")
+OPEN_SUBTITLES_REST_TEST_PATH = TEST_PATH.with_name("OpenSubtitlesRestClientTest.java")
 
 plus_prefs = PREFS_PATH.read_text(encoding="utf-8")
 player = PLAYER_PATH.read_text(encoding="utf-8")
@@ -57,6 +58,7 @@ runtime_anchors = {
     "KEY_SUBTITLE_DELAY_MS": "mPlusPrefs.subtitleDelayMs",
     "KEY_SUBTITLE_SCALE": "mPlusPrefs.subtitleScale",
     "KEY_SUBTITLE_POSITION": "mPlusPrefs.subtitlePosition",
+    "KEY_OPENSUBTITLES_EXACT_MATCH": "mPlusPrefs.openSubtitlesExactMatch",
     "KEY_REMEMBER_TRACK_SCOPE": "mPlusPrefs.rememberTrackScope",
     "KEY_RESIZE_DEFAULT": "mPlusPrefs.resizeDefault",
     "KEY_SPEED_DEFAULT": "mPlusPrefs.speedDefault",
@@ -158,13 +160,20 @@ runtime_regression_anchors = (
     "aiSubtitleController.onTracksChanged();",
     "SelectedSubtitleResolver.AI_ID_PREFIX",
     "cancelRemoteJob(jobId)",
-    "requestOpenSubtitlesV3(session, content);",
+    "currentPlayer.setMediaItem(\n                    updatedItem, Math.max(0L, transaction.positionMs));",
+    "requestOpenSubtitlesV3WhenFilenameReady(session, content, 0);",
     "finishOpenSubtitlesAttach(tracks);",
     "OpenSubtitlesV3Client.hasOpenSubtitlesTrack",
 )
 for anchor in runtime_regression_anchors:
     if anchor not in external_java:
         errors.append(f"Missing regression fix runtime hook: {anchor}")
+
+if "replaceMediaItem(transaction.mediaItemIndex, updatedItem)" in player:
+    errors.append(
+        "AI subtitle attachment must rebuild MergingMediaSource; "
+        "replaceMediaItem silently drops newly added subtitle children"
+    )
 
 if not TEST_PATH.exists():
     errors.append("Smart-selection regression tests are missing")
@@ -214,6 +223,11 @@ else:
         "launchIdentityIsStableAndDoesNotStoreTheRawTitle",
         "rememberedContentRejectsMalformedTypesAndIds",
         "movieMetadataUsesCinemetaName",
+        "subtitleRequestRecoversEpisodeIdentityAndFilename",
+        "subtitleFilenameFlowsFromConnectorEventIntoResolvedContent",
+        "subtitleRequestSupportsCurrentAndLegacyIdentityFormats",
+        "lateSubtitleRequestRefreshesAlreadyResolvedContent",
+        "filenameRefreshRejectsStaleEventsAndKeepsExistingIdentity",
     ):
         if test_name not in stremio_tests:
             errors.append(f"Missing Stremio metadata regression test: {test_name}")
@@ -242,9 +256,41 @@ else:
         "normalizesStremioAndIsoLanguageVariants",
         "filtersDeduplicatesAndCapsPreferredLanguages",
         "preservesForcedAndSdhHintsForSmartSelection",
+        "recognizesLikelyReleaseNamesButRejectsConflictingResolution",
+        "releaseConfidenceDoesNotTreatTitleAndYearAsSynchronizationEvidence",
+        "releaseConfidenceAcceptsSameSourceFingerprintWithoutExactText",
+        "releaseConfidenceHandlesLanguageSuffixAndDoesNotHardRejectOtherGroup",
     ):
         if test_name not in opensubtitles_tests:
             errors.append(f"Missing OpenSubtitles v3 regression test: {test_name}")
+
+if not OPEN_SUBTITLES_REST_TEST_PATH.exists():
+    errors.append("OpenSubtitles REST regression tests are missing")
+else:
+    opensubtitles_rest_tests = OPEN_SUBTITLES_REST_TEST_PATH.read_text(encoding="utf-8")
+    for test_name in (
+        "acceptsOnlyExplicitMovieHashMatchesInPreferredLanguages",
+        "prefersNormalTrustedPopularResultWithinLanguage",
+        "credentialsRequireApiKeyAndCompleteOptionalAccount",
+        "buildsCanonicalApiUrlsWithoutRedirects",
+        "acceptsOnlyConservativeReleaseMatchesOutsideExactHashResults",
+        "syntheticFilenameCannotCreateProbableMatches",
+        "probableRestCandidateMapsBackToVisibleV3Track",
+    ):
+        if test_name not in opensubtitles_rest_tests:
+            errors.append(f"Missing OpenSubtitles REST regression test: {test_name}")
+
+for ui_key in ("openSubtitlesCredentials", "openSubtitlesTest"):
+    if preferences_xml.count(f'app:key="{ui_key}"') != 1:
+        errors.append(
+            f"OpenSubtitles UI action {ui_key} must occur exactly once in root_preferences.xml"
+        )
+for secure_hook in (
+    "new OpenSubtitlesCredentialsStore(requireContext())",
+    "OpenSubtitlesRestClient.testCredentials",
+):
+    if secure_hook not in external_java:
+        errors.append(f"OpenSubtitles UI action has no secure runtime hook: {secure_hook}")
 
 if preferences_xml.count('app:key="aiSubtitleApiToken"') != 1:
     errors.append("AI subtitle access token must occur exactly once in root_preferences.xml")

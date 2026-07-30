@@ -39,7 +39,7 @@
         <item>Preferred subtitles for foreign audio</item>
         <item>Always use preferred subtitles</item>
     </string-array>
-    <string-array name="plus_subtitle_mode_values">
+    <string-array name="plus_subtitle_mode_values" translatable="false">
         <item>off</item>
         <item>forced</item>
         <item>foreign_audio</item>
@@ -50,7 +50,7 @@
         <item>Keep media order</item>
         <item>Prefer best format and channel count</item>
     </string-array>
-    <string-array name="plus_audio_quality_values">
+    <string-array name="plus_audio_quality_values" translatable="false">
         <item>source</item>
         <item>best</item>
     </string-array>
@@ -60,7 +60,7 @@
         <item>Prefer external subtitles</item>
         <item>Prefer embedded subtitles</item>
     </string-array>
-    <string-array name="plus_subtitle_source_values">
+    <string-array name="plus_subtitle_source_values" translatable="false">
         <item>auto</item>
         <item>external</item>
         <item>embedded</item>
@@ -72,7 +72,7 @@
         <item>Remember for the whole series</item>
         <item>Use the last choice globally</item>
     </string-array>
-    <string-array name="plus_remember_scope_values">
+    <string-array name="plus_remember_scope_values" translatable="false">
         <item>off</item>
         <item>title</item>
         <item>series</item>
@@ -86,7 +86,7 @@
         <item>125%</item>
         <item>150%</item>
     </string-array>
-    <string-array name="plus_subtitle_scale_values">
+    <string-array name="plus_subtitle_scale_values" translatable="false">
         <item>system</item>
         <item>75</item>
         <item>100</item>
@@ -99,7 +99,7 @@
         <item>Bottom</item>
         <item>Raised</item>
     </string-array>
-    <string-array name="plus_subtitle_position_values">
+    <string-array name="plus_subtitle_position_values" translatable="false">
         <item>system</item>
         <item>bottom</item>
         <item>raised</item>
@@ -110,7 +110,7 @@
         <item>Fit</item>
         <item>Crop</item>
     </string-array>
-    <string-array name="plus_resize_default_values">
+    <string-array name="plus_resize_default_values" translatable="false">
         <item>remember</item>
         <item>fit</item>
         <item>crop</item>
@@ -125,7 +125,7 @@
         <item>1.50×</item>
         <item>2.00×</item>
     </string-array>
-    <string-array name="plus_speed_default_values">
+    <string-array name="plus_speed_default_values" translatable="false">
         <item>remember</item>
         <item>0.50</item>
         <item>0.75</item>
@@ -141,7 +141,7 @@
         <item>30 seconds</item>
         <item>60 seconds</item>
     </string-array>
-    <string-array name="plus_seek_increment_values">
+    <string-array name="plus_seek_increment_values" translatable="false">
         <item>5000</item>
         <item>10000</item>
         <item>30000</item>
@@ -154,7 +154,7 @@
         <item>Match all video</item>
         <item>Match long-form video only</item>
     </string-array>
-    <string-array name="plus_frame_rate_policy_values">
+    <string-array name="plus_frame_rate_policy_values" translatable="false">
         <item>legacy</item>
         <item>off</item>
         <item>all</item>
@@ -166,7 +166,7 @@
         <item>Exit immediately</item>
         <item>Confirm before exit</item>
     </string-array>
-    <string-array name="plus_back_button_values">
+    <string-array name="plus_back_button_values" translatable="false">
         <item>controls_then_exit</item>
         <item>immediate</item>
         <item>confirm</item>
@@ -178,7 +178,7 @@
         <item>98%</item>
         <item>When 5 minutes remain</item>
     </string-array>
-    <string-array name="plus_completion_values">
+    <string-array name="plus_completion_values" translatable="false">
         <item>percent_90</item>
         <item>percent_95</item>
         <item>percent_98</item>

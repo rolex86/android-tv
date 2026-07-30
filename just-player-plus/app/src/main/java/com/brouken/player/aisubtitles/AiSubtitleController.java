@@ -31,7 +31,6 @@ import com.brouken.player.BuildConfig;
 import com.brouken.player.R;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
@@ -43,6 +42,11 @@ import okhttp3.OkHttpClient;
 
 /** Owns the opt-in UI flow and all disposable state for one player session. */
 public final class AiSubtitleController {
+    public interface AttachmentCallback {
+        void onAttached();
+        void onFailure();
+    }
+
     public interface Host {
         Activity activity();
         @Nullable Player player();
@@ -52,6 +56,8 @@ public final class AiSubtitleController {
         boolean aiSubtitlesEnabled();
         String backendUrl();
         String targetLanguage();
+        void attachAiSubtitle(MediaItem.SubtitleConfiguration configuration,
+                              AttachmentCallback callback);
     }
 
     private static final class Session {
@@ -123,21 +129,7 @@ public final class AiSubtitleController {
 
     public static boolean isTranslationAvailable(@Nullable Player player) {
         SelectedSubtitleResolver.Resolution selected = SelectedSubtitleResolver.resolve(player);
-        if (selected.isReady()) {
-            return true;
-        }
-        if (player == null || player.getCurrentMediaItem() == null) {
-            return false;
-        }
-        for (MediaItem.SubtitleConfiguration configuration
-                : SelectedSubtitleResolver.subtitleConfigurations(player.getCurrentMediaItem())) {
-            if (SubtitleTrackIdentity.isExternal(configuration.id)
-                    && SelectedSubtitleResolver.isSupportedMime(configuration.mimeType)
-                    && SelectedSubtitleResolver.hasReadableScheme(configuration.uri)) {
-                return true;
-            }
-        }
-        return false;
+        return selected.isReady();
     }
 
     public void startTranslation() {
@@ -408,24 +400,36 @@ public final class AiSubtitleController {
             }
         }
 
-        boolean preserveManualSelection = manualSubtitleSelectionChanged;
-        activeSession = null;
         translationProgress = 100;
-        resumeAfterTrackSelection = !session.backgroundMode
-                && session.resumePlaybackAfterDialog;
         if (!session.backgroundMode) {
             updateProgressDialog(100);
         }
 
-        if (!duplicate) {
-            List<MediaItem.SubtitleConfiguration> updated = new ArrayList<>(existing);
-            updated.add(configuration);
-            MediaItem updatedItem = mediaItem.buildUpon()
-                    .setSubtitleConfigurations(updated)
-                    .build();
-            player.setMediaItem(updatedItem, false);
+        if (duplicate) {
+            completeSubtitleAttachment(session, configuration.id);
+            return;
         }
-        if (preserveManualSelection) {
+        currentHost.attachAiSubtitle(configuration, new AttachmentCallback() {
+            @Override
+            public void onAttached() {
+                if (isSessionCurrent(session)) {
+                    completeSubtitleAttachment(session, configuration.id);
+                }
+            }
+
+            @Override
+            public void onFailure() {
+                failSession(session, R.string.ai_subtitle_attach_failed);
+            }
+        });
+    }
+
+    private void completeSubtitleAttachment(Session session, String subtitleId) {
+        if (!isSessionCurrent(session)) {
+            return;
+        }
+        if (manualSubtitleSelectionChanged) {
+            activeSession = null;
             pendingAiSubtitleId = null;
             translating = false;
             manualSubtitleSelectionChanged = false;
@@ -435,7 +439,9 @@ public final class AiSubtitleController {
             updateButtonState();
             return;
         }
-        pendingAiSubtitleId = configuration.id;
+        resumeAfterTrackSelection = !session.backgroundMode
+                && session.resumePlaybackAfterDialog;
+        pendingAiSubtitleId = subtitleId;
         selectPendingTrack();
         mainHandler.postDelayed(this::selectPendingTrack, 150L);
         mainHandler.postDelayed(this::selectPendingTrack, 400L);
@@ -468,6 +474,7 @@ public final class AiSubtitleController {
                                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
                                 .setOverrideForType(override)
                                 .build());
+                activeSession = null;
                 translating = false;
                 manualSubtitleSelectionChanged = false;
                 dismissProgressDialog();

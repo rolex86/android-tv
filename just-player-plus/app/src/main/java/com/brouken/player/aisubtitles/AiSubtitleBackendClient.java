@@ -7,6 +7,8 @@ import android.os.SystemClock;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import com.brouken.player.BoundedResponseBody;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -184,15 +186,12 @@ public final class AiSubtitleBackendClient {
                         return;
                     }
                     ResponseBody responseBody = closeable.body();
-                    if (responseBody == null || responseBody.contentLength() > MAX_RESPONSE_BYTES) {
+                    if (responseBody == null) {
                         handler.post(() -> fail(token, Failure.TRANSLATION_FAILED, null));
                         return;
                     }
-                    String json = responseBody.string();
-                    if (json.getBytes(StandardCharsets.UTF_8).length > MAX_RESPONSE_BYTES) {
-                        handler.post(() -> fail(token, Failure.TRANSLATION_FAILED, null));
-                        return;
-                    }
+                    String json = BoundedResponseBody.readUtf8(
+                            responseBody, MAX_RESPONSE_BYTES);
                     JSONObject payload = new JSONObject(json);
                     handler.post(() -> handlePayload(token, payload));
                 } catch (IOException | JSONException error) {
