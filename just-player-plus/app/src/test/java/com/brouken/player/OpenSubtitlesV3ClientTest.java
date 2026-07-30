@@ -104,6 +104,16 @@ public class OpenSubtitlesV3ClientTest {
     }
 
     @Test
+    public void releaseConfidenceNormalizesCommonSourceAliases() {
+        assertTrue(OpenSubtitlesV3Client.isLikelyReleaseMatch(
+                "Movie.2024.2160p.BDRemux.DOVI.HEVC-SOURCE.mkv",
+                "Movie.2024.4K.BluRay.REMUX.DolbyVision.H265-OTHER.srt"));
+        assertTrue(OpenSubtitlesV3Client.isLikelyReleaseMatch(
+                "Movie.2024.2160p.AMZN.WEB-DL.HEVC.HDR10-GROUP.mkv",
+                "Movie.2024.4K.Amazon.WEBRip.H265.HDR10-GROUP.srt"));
+    }
+
+    @Test
     public void releaseConfidenceHandlesLanguageSuffixAndDoesNotHardRejectOtherGroup() {
         assertTrue(OpenSubtitlesV3Client.isLikelyReleaseMatch(
                 "The.Matrix.1999.2160p.BluRay.REMUX.HEVC.HDR10-GROUP.mkv",
