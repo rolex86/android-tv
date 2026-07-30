@@ -110,7 +110,7 @@ public class OpenSubtitlesV3ClientTest {
                 "Movie.2024.4K.BluRay.REMUX.DolbyVision.H265-OTHER.srt"));
         assertTrue(OpenSubtitlesV3Client.isLikelyReleaseMatch(
                 "Movie.2024.2160p.AMZN.WEB-DL.HEVC.HDR10-GROUP.mkv",
-                "Movie.2024.4K.Amazon.WEBRip.H265.HDR10-GROUP.srt"));
+                "Movie.2024.4K.Amazon.WEBRip.H265.HDR10-OTHER.srt"));
     }
 
     @Test
