@@ -2391,6 +2391,23 @@ public class PlayerActivity extends Activity {
                         continue;
                     }
                     Uri subtitle = (Uri) subtitles[i];
+                    StremioIdentitySubtitle.Identity identity =
+                            StremioIdentitySubtitle.parse(subtitle.toString());
+                    if (identity != null) {
+                        if (mPlusPrefs.stremioConnectorEnabled) {
+                            new StremioConnectorStore(this).recordContentAssociation(
+                                    identity.type,
+                                    identity.videoId,
+                                    identity.filename,
+                                    System.currentTimeMillis());
+                            externalDiagnostics.recordStremioConnector(
+                                    "launch_identity_subtitle",
+                                    identity.type + "/" + identity.videoId
+                                            + " filename=" + (identity.filename == null
+                                            ? "unavailable" : "available"));
+                        }
+                        continue;
+                    }
                     String name = subtitleNames != null && subtitleNames.length > i
                             ? subtitleNames[i] : null;
                     apiSubs.add(SubtitleUtils.buildSubtitle(
