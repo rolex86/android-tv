@@ -1,11 +1,14 @@
 package com.brouken.player;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 import org.json.JSONException;
+import org.json.JSONObject;
 import org.junit.Test;
 
 import java.util.Arrays;
@@ -200,6 +203,49 @@ public class StremioNextEpisodeTest {
                 "/subtitles/movie/hash/filename=Movie.mkv.json"));
         assertNull(StremioSubtitleRequest.parse(
                 "/subtitles/series/hash/videoID=tt0133093.json"));
+    }
+
+    @Test
+    public void identitySubtitleCarriesMovieAndFilenameThroughCachedResponse()
+            throws JSONException {
+        StremioSubtitleRequest request = StremioSubtitleRequest.parse(
+                "/subtitles/movie/tt0133093/"
+                        + "filename=The.Matrix.1999.2160p.BluRay.x265-GROUP.mkv.json");
+
+        assertNotNull(request);
+        JSONObject response = new JSONObject(StremioIdentitySubtitle.responseJson(request));
+        JSONObject marker = response.getJSONArray("subtitles").getJSONObject(0);
+        StremioIdentitySubtitle.Identity identity =
+                StremioIdentitySubtitle.parse(marker.getString("url"));
+
+        assertEquals("zxx", marker.getString("lang"));
+        assertNotNull(identity);
+        assertEquals("movie", identity.type);
+        assertEquals("tt0133093", identity.videoId);
+        assertEquals(
+                "The.Matrix.1999.2160p.BluRay.x265-GROUP.mkv",
+                identity.filename);
+    }
+
+    @Test
+    public void identitySubtitleCarriesSeriesAndRejectsForeignUrls() {
+        String marker = StremioIdentitySubtitle.buildUrl(
+                "series", "tt3107288:1:2", null);
+        StremioIdentitySubtitle.Identity identity = StremioIdentitySubtitle.parse(marker);
+
+        assertNotNull(identity);
+        assertEquals("series", identity.type);
+        assertEquals("tt3107288:1:2", identity.videoId);
+        assertNull(identity.filename);
+        assertTrue(StremioIdentitySubtitle.isMarkerPath(
+                "/identity/v1/series/tt3107288%3A1%3A2.vtt"));
+        assertFalse(StremioIdentitySubtitle.isMarkerPath(
+                "/identity/v1/movie/not-an-imdb-id.vtt"));
+        assertNull(StremioIdentitySubtitle.parse(marker.replace(
+                "127.0.0.1:16745", "example.com:16745")));
+        assertNull(StremioIdentitySubtitle.parse(marker.replace(
+                "127.0.0.1:16745", "127.0.0.1:16746")));
+        assertNull(StremioIdentitySubtitle.parse(marker.replace("http://", "https://")));
     }
 
     @Test
