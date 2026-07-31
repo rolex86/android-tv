@@ -1,5 +1,17 @@
 # JustPlayer Plus changelog
 
+## Step 20 — Cache-safe Stremio identity handoff
+
+- The local Connector now returns a valid empty metadata subtitle carrying the Cinemeta `tt` ID
+  and release filename in a loopback-only URL.
+- JustPlayer removes the marker before attaching real subtitles and records its identity as a fresh
+  correlation event, so cached Stremio responses remain usable across Torrentio, Comet,
+  MediaFusion and other stream providers.
+- Movie/episode title resolution and OpenSubtitles lookup no longer require Stremio to repeat the
+  Connector request immediately before every external-player launch.
+- Marker parsing accepts only the versioned `127.0.0.1` Connector URL and validated movie/series
+  IDs; foreign, malformed and wrong-port URLs are ignored.
+
 ## Step 19 — On-demand AI subtitle translation
 
 - Added a disabled-by-default, manually triggered AI translation branch for selected external
