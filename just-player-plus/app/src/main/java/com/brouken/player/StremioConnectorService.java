@@ -41,7 +41,7 @@ public final class StremioConnectorService extends Service {
     private static final int NOTIFICATION_ID = 16745;
     private static final String MANIFEST = "{"
             + "\"id\":\"com.justplayerplus.connector\","
-            + "\"version\":\"1.4.0\","
+            + "\"version\":\"1.5.0\","
             + "\"name\":\"JustPlayer Plus Connector\","
             + "\"description\":\"Local metadata bridge for JustPlayer Plus\","
             + "\"resources\":["
@@ -235,8 +235,15 @@ public final class StremioConnectorService extends Service {
                 recordStreamRequest(path, "movie");
                 writeResponse(writer, 200, "application/json", "{\"streams\":[]}");
             } else if (path.startsWith("/subtitles/") && path.endsWith(".json")) {
-                recordSubtitleRequest(requestTarget);
-                writeResponse(writer, 200, "application/json", "{\"subtitles\":[]}");
+                StremioSubtitleRequest request = recordSubtitleRequest(requestTarget);
+                String body = request == null
+                        ? "{\"subtitles\":[]}"
+                        : StremioIdentitySubtitle.responseJson(request);
+                writeResponse(writer, 200, "application/json", body,
+                        request == null ? "no-store" : "private, max-age=31536000, immutable");
+            } else if (StremioIdentitySubtitle.isMarkerPath(path)) {
+                writeResponse(writer, 200, "text/vtt", "WEBVTT\n\n",
+                        "private, max-age=31536000, immutable");
             } else {
                 writeResponse(writer, 404, "application/json", "{\"error\":\"not found\"}");
             }
@@ -273,12 +280,13 @@ public final class StremioConnectorService extends Service {
         diagnostics.recordStremioConnector("stream_request", type + "/" + id);
     }
 
-    private void recordSubtitleRequest(String requestTarget) {
+    @Nullable
+    private StremioSubtitleRequest recordSubtitleRequest(String requestTarget) {
         StremioSubtitleRequest request = StremioSubtitleRequest.parse(requestTarget);
         if (request == null) {
             diagnostics.recordStremioConnector(
                     "subtitle_request_ignored", "missing_or_invalid_video_id");
-            return;
+            return null;
         }
         long now = System.currentTimeMillis();
         store.recordContentAssociation(
@@ -288,10 +296,19 @@ public final class StremioConnectorService extends Service {
                 request.type + "/" + request.videoId
                         + " filename=" + (request.filename == null
                         ? "unavailable" : "available"));
+        return request;
     }
 
     private static void writeResponse(BufferedWriter writer, int code, String type, String body)
             throws IOException {
+        writeResponse(writer, code, type, body, "no-store");
+    }
+
+    private static void writeResponse(BufferedWriter writer,
+                                      int code,
+                                      String type,
+                                      String body,
+                                      String cacheControl) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         String status = code == 200 ? "OK" : code == 204 ? "No Content"
                 : code == 400 ? "Bad Request" : code == 405 ? "Method Not Allowed" : "Not Found";
@@ -300,7 +317,7 @@ public final class StremioConnectorService extends Service {
         writer.write("Content-Length: " + bytes.length + "\r\n");
         writer.write("Access-Control-Allow-Origin: *\r\n");
         writer.write("Access-Control-Allow-Methods: GET, OPTIONS\r\n");
-        writer.write("Cache-Control: no-store\r\n");
+        writer.write("Cache-Control: " + cacheControl + "\r\n");
         writer.write("Connection: close\r\n\r\n");
         writer.write(body);
         writer.flush();
