@@ -26,6 +26,14 @@ final class StremioConnectorOpenSubtitles {
         this.httpClient = httpClient;
     }
 
+    static OkHttpClient newHttpClient() {
+        return new OkHttpClient.Builder()
+                .connectTimeout(1, TimeUnit.SECONDS)
+                .readTimeout(LOOKUP_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .callTimeout(LOOKUP_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .build();
+    }
+
     Result load(StremioSubtitleRequest request, String[] preferredLanguages) {
         if (preferredLanguages == null || preferredLanguages.length == 0) {
             return new Result(new ArrayList<>(), "no_languages");

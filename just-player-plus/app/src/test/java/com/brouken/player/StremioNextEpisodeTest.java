@@ -312,6 +312,94 @@ public class StremioNextEpisodeTest {
     }
 
     @Test
+    public void localPreloadCacheSurvivesMissingExternalPlayerSubtitleExtras() {
+        long now = 1_000_000L;
+        StremioSubtitleRequest request = StremioSubtitleRequest.parse(
+                "/subtitles/movie/tt0133093/filename=The.Matrix.1999.mkv.json");
+        OpenSubtitlesV3Client.Candidate candidate = candidate(
+                "42", "ces", "The.Matrix.1999");
+
+        assertNotNull(request);
+        String encoded = StremioSubtitlePreloadCache.update(
+                null,
+                request,
+                new String[]{"cs", "sk"},
+                java.util.Collections.singletonList(candidate),
+                now);
+        StremioSubtitlePreloadCache.Lookup lookup = StremioSubtitlePreloadCache.find(
+                encoded,
+                StremioConnectorStore.Content.movie("tt0133093")
+                        .withMediaFilename("The.Matrix.1999.mkv"),
+                new String[]{"ces", "slk"},
+                now + 500L);
+
+        assertNotNull(lookup);
+        assertEquals("exact_filename", lookup.match);
+        assertEquals(500L, lookup.ageMs);
+        assertEquals(1, lookup.tracks.size());
+        assertEquals(candidate.url, lookup.tracks.get(0).sourceUrl);
+    }
+
+    @Test
+    public void localPreloadCachePrefersExactReleaseOverNewerContentFallback() {
+        long now = 2_000_000L;
+        StremioSubtitleRequest firstRequest = StremioSubtitleRequest.parse(
+                "/subtitles/movie/tt0133093/filename=Release.A.mkv.json");
+        StremioSubtitleRequest secondRequest = StremioSubtitleRequest.parse(
+                "/subtitles/movie/tt0133093/filename=Release.B.mkv.json");
+        assertNotNull(firstRequest);
+        assertNotNull(secondRequest);
+
+        String encoded = StremioSubtitlePreloadCache.update(
+                null,
+                firstRequest,
+                new String[]{"cs"},
+                java.util.Collections.singletonList(candidate("100", "ces", "Release.A")),
+                now);
+        encoded = StremioSubtitlePreloadCache.update(
+                encoded,
+                secondRequest,
+                new String[]{"cs"},
+                java.util.Collections.singletonList(candidate("200", "ces", "Release.B")),
+                now + 1_000L);
+
+        StremioSubtitlePreloadCache.Lookup exact = StremioSubtitlePreloadCache.find(
+                encoded,
+                StremioConnectorStore.Content.movie("tt0133093")
+                        .withMediaFilename("release.a.mkv"),
+                new String[]{"ces"},
+                now + 2_000L);
+
+        assertNotNull(exact);
+        assertEquals("exact_filename", exact.match);
+        assertTrue(exact.tracks.get(0).sourceUrl.endsWith("/100"));
+    }
+
+    @Test
+    public void localPreloadCacheRejectsExpiredOrDifferentLanguageOrder() {
+        long now = 3_000_000L;
+        StremioSubtitleRequest request = StremioSubtitleRequest.parse(
+                "/subtitles/movie/tt0133093/filename=The.Matrix.1999.mkv.json");
+        assertNotNull(request);
+        String encoded = StremioSubtitlePreloadCache.update(
+                null,
+                request,
+                new String[]{"cs", "sk"},
+                java.util.Collections.singletonList(candidate("42", "ces", "The.Matrix")),
+                now);
+        StremioConnectorStore.Content content = StremioConnectorStore.Content.movie(
+                "tt0133093");
+
+        assertNull(StremioSubtitlePreloadCache.find(
+                encoded, content, new String[]{"en"}, now + 1_000L));
+        assertNull(StremioSubtitlePreloadCache.find(
+                encoded,
+                content,
+                new String[]{"cs", "sk"},
+                now + StremioSubtitlePreloadCache.MAX_AGE_MS + 1L));
+    }
+
+    @Test
     public void metadataDerivesNextEpisodeFromCurrentOnly() throws JSONException {
         StremioEpisodeId current = StremioEpisodeId.parse("tt123:1:1");
         String json = "{\"meta\":{\"name\":\"Bluey\","
@@ -370,6 +458,21 @@ public class StremioNextEpisodeTest {
 
     private static StremioConnectorStore.Event event(String id, long timestamp) {
         return new StremioConnectorStore.Event("series", id, timestamp);
+    }
+
+    private static OpenSubtitlesV3Client.Candidate candidate(
+            String id, String language, String release) {
+        return new OpenSubtitlesV3Client.Candidate(
+                "https://subs5.strem.io/en/download/file/" + id,
+                id,
+                language,
+                "OpenSubtitles v3 · " + language.toUpperCase() + " · " + release,
+                MimeTypes.APPLICATION_SUBRIP,
+                C.ROLE_FLAG_SUBTITLE,
+                0,
+                OpenSubtitlesV3Client.MatchConfidence.UNKNOWN,
+                0,
+                0);
     }
 
     private static List<StremioConnectorStore.Event> events(

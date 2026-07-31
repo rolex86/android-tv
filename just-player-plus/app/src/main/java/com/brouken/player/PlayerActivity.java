@@ -116,9 +116,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
@@ -153,6 +155,11 @@ public class PlayerActivity extends Activity {
     @Nullable private String[] pendingOpenSubtitlesExactLanguages;
     private boolean openSubtitlesExactStartScheduled;
     private int preloadedOpenSubtitlesCount;
+    private int startupSubtitlePreloadToken;
+    private boolean startupSubtitlePreloadPending;
+    private boolean startupPlayerInitializationDeferred;
+    private boolean startupMetadataResolutionDeferred;
+    private boolean startupLaunchDiagnosticsDeferred;
     private int nextEpisodeSession;
     private boolean nextEpisodeDismissed;
     private boolean nextEpisodeShown;
@@ -942,6 +949,11 @@ public class PlayerActivity extends Activity {
     }
 
     private void startNextEpisodeResolution() {
+        if (startupSubtitlePreloadPending) {
+            startupMetadataResolutionDeferred = true;
+            return;
+        }
+        startupMetadataResolutionDeferred = false;
         if (!isNextEpisodeFeatureEnabled()) {
             return;
         }
@@ -1029,6 +1041,178 @@ public class PlayerActivity extends Activity {
         }
         return mPrefs.mediaUri == null
                 ? null : Utils.getFileName(this, mPrefs.mediaUri);
+    }
+
+    private void prepareStartupOpenSubtitles() {
+        mPlusPrefs.reload();
+        if (!mPlusPrefs.stremioConnectorEnabled
+                || !isExternalPlayerLaunch()
+                || preloadedOpenSubtitlesCount > 0) {
+            return;
+        }
+        String[] preferredLanguages = mPlusPrefs.getPreferredSubtitleLanguages();
+        if (preferredLanguages.length == 0) {
+            return;
+        }
+
+        long nowMs = System.currentTimeMillis();
+        StremioConnectorStore store = new StremioConnectorStore(
+                getApplicationContext());
+        StremioConnectorStore.Content content = store.findLaunchContent(
+                nowMs, getStremioLaunchIdentity());
+        if (content == null) {
+            externalDiagnostics.recordStremioConnector(
+                    "opensubtitles_startup_skipped", "content_identity_unavailable");
+            return;
+        }
+
+        StremioSubtitlePreloadCache.Lookup cached = store.findPreloadedSubtitles(
+                content, preferredLanguages, nowMs);
+        if (cached != null) {
+            int added = appendPreloadedOpenSubtitles(cached.tracks);
+            if (added > 0) {
+                externalDiagnostics.recordStremioConnector(
+                        "opensubtitles_startup_cache_hit",
+                        content.type + "/" + content.id
+                                + " count=" + added
+                                + " match=" + cached.match
+                                + " ageMs=" + cached.ageMs);
+                return;
+            }
+        }
+
+        StremioSubtitleRequest request = StremioSubtitleRequest.forContent(content);
+        if (request == null) {
+            externalDiagnostics.recordStremioConnector(
+                    "opensubtitles_startup_skipped", "invalid_content_identity");
+            return;
+        }
+        startStartupOpenSubtitlesLookup(request, preferredLanguages);
+    }
+
+    private void startStartupOpenSubtitlesLookup(
+            StremioSubtitleRequest request,
+            String[] preferredLanguages) {
+        final int token = ++startupSubtitlePreloadToken;
+        startupSubtitlePreloadPending = true;
+        final long startedAt = System.currentTimeMillis();
+        externalDiagnostics.recordStremioConnector(
+                "opensubtitles_startup_started",
+                request.type + "/" + request.videoId);
+
+        Thread lookupThread = new Thread(() -> {
+            OkHttpClient client = null;
+            StremioConnectorOpenSubtitles.Result result =
+                    new StremioConnectorOpenSubtitles.Result(
+                            Collections.emptyList(), "service_unavailable");
+            try {
+                client = StremioConnectorOpenSubtitles.newHttpClient();
+                result = new StremioConnectorOpenSubtitles(client).load(
+                        request, preferredLanguages);
+                if ("loaded".equals(result.state)) {
+                    try {
+                        new StremioConnectorStore(getApplicationContext())
+                                .recordPreloadedSubtitles(
+                                        request,
+                                        preferredLanguages,
+                                        result.candidates,
+                                        System.currentTimeMillis());
+                    } catch (RuntimeException ignored) {
+                        // The in-memory result is still safe to use for this launch.
+                    }
+                }
+            } catch (RuntimeException error) {
+                result = new StremioConnectorOpenSubtitles.Result(
+                        Collections.emptyList(), "invalid_response");
+            } finally {
+                if (client != null) {
+                    client.dispatcher().cancelAll();
+                    client.connectionPool().evictAll();
+                }
+            }
+
+            List<StremioPreloadedSubtitle.Parsed> parsed = new ArrayList<>();
+            for (OpenSubtitlesV3Client.Candidate candidate : result.candidates) {
+                StremioPreloadedSubtitle.Parsed subtitle =
+                        StremioPreloadedSubtitle.parse(
+                                StremioPreloadedSubtitle.buildUrl(candidate));
+                if (subtitle != null) {
+                    parsed.add(subtitle);
+                }
+            }
+            StremioConnectorOpenSubtitles.Result completedResult = result;
+            runOnUiThread(() -> completeStartupOpenSubtitlesLookup(
+                    token,
+                    request,
+                    completedResult.state,
+                    parsed,
+                    System.currentTimeMillis() - startedAt));
+        }, "stremio-opensubtitles-startup");
+        try {
+            lookupThread.start();
+        } catch (RuntimeException error) {
+            startupSubtitlePreloadPending = false;
+            externalDiagnostics.recordStremioConnector(
+                    "opensubtitles_startup_thread_unavailable",
+                    request.type + "/" + request.videoId);
+        }
+    }
+
+    private void completeStartupOpenSubtitlesLookup(
+            int token,
+            StremioSubtitleRequest request,
+            String state,
+            List<StremioPreloadedSubtitle.Parsed> parsed,
+            long durationMs) {
+        if (token != startupSubtitlePreloadToken) {
+            return;
+        }
+        startupSubtitlePreloadPending = false;
+        int added = appendPreloadedOpenSubtitles(parsed);
+        externalDiagnostics.recordStremioConnector(
+                "opensubtitles_startup_" + state,
+                request.type + "/" + request.videoId
+                        + " count=" + added
+                        + " durationMs=" + durationMs);
+
+        if (apiSubs.isEmpty()) {
+            searchSubtitles();
+        }
+        if (startupLaunchDiagnosticsDeferred) {
+            recordExternalLaunch();
+        }
+        if (startupMetadataResolutionDeferred && !isFinishing()) {
+            startNextEpisodeResolution();
+        }
+        if (startupPlayerInitializationDeferred && alive && !isFinishing()) {
+            initializePlayer();
+        }
+    }
+
+    private int appendPreloadedOpenSubtitles(
+            List<StremioPreloadedSubtitle.Parsed> subtitles) {
+        Set<String> sources = new HashSet<>();
+        for (MediaItem.SubtitleConfiguration existing : apiSubs) {
+            sources.add(existing.uri.toString());
+        }
+        int added = 0;
+        for (StremioPreloadedSubtitle.Parsed subtitle : subtitles) {
+            if (!sources.add(subtitle.sourceUrl)) {
+                continue;
+            }
+            apiSubs.add(subtitle.toConfiguration(false));
+            preloadedOpenSubtitlesCount++;
+            added++;
+        }
+        return added;
+    }
+
+    private void cancelStartupSubtitlePreload() {
+        startupSubtitlePreloadToken++;
+        startupSubtitlePreloadPending = false;
+        startupPlayerInitializationDeferred = false;
+        startupMetadataResolutionDeferred = false;
+        startupLaunchDiagnosticsDeferred = false;
     }
 
     private void requestOpenSubtitlesExactMatch(
@@ -1413,6 +1597,7 @@ public class PlayerActivity extends Activity {
     }
 
     private void resetNextEpisodeSession() {
+        cancelStartupSubtitlePreload();
         nextEpisodeSession++;
         if (openSubtitlesRestClient != null) {
             openSubtitlesRestClient.cancel();
@@ -1988,6 +2173,7 @@ public class PlayerActivity extends Activity {
     }
 
     void resetApiAccess() {
+        cancelStartupSubtitlePreload();
         apiAccess = false;
         apiAccessPartial = false;
         apiTitle = null;
@@ -2090,12 +2276,18 @@ public class PlayerActivity extends Activity {
             }
         }
 
-        if (apiSubs.isEmpty()) {
+        prepareStartupOpenSubtitles();
+        if (apiSubs.isEmpty() && !startupSubtitlePreloadPending) {
             searchSubtitles();
         }
     }
 
     private void recordExternalLaunch() {
+        if (startupSubtitlePreloadPending) {
+            startupLaunchDiagnosticsDeferred = true;
+            return;
+        }
+        startupLaunchDiagnosticsDeferred = false;
         long requestedPosition = mPrefs.mediaUri != null
                 ? mPrefs.getPosition() : C.TIME_UNSET;
         externalDiagnostics.recordLaunch(
@@ -2255,6 +2447,11 @@ public class PlayerActivity extends Activity {
     }
 
     public void initializePlayer() {
+        if (startupSubtitlePreloadPending) {
+            startupPlayerInitializationDeferred = true;
+            return;
+        }
+        startupPlayerInitializationDeferred = false;
         releaseAiSubtitleController();
         abandonAiSubtitleAttach();
         if (frameRateSwitchThread != null) {

@@ -22,6 +22,15 @@ final class StremioSubtitleRequest {
     }
 
     @Nullable
+    static StremioSubtitleRequest forContent(StremioConnectorStore.Content content) {
+        if (content == null || !isSupportedVideoId(content.type, content.id)) {
+            return null;
+        }
+        return new StremioSubtitleRequest(
+                content.type, content.id, content.mediaFilename);
+    }
+
+    @Nullable
     static StremioSubtitleRequest parse(@Nullable String requestTarget) {
         if (requestTarget == null || requestTarget.length() > 4_096) {
             return null;

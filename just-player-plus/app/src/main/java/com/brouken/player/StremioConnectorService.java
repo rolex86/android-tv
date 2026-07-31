@@ -28,7 +28,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
 
@@ -44,7 +43,7 @@ public final class StremioConnectorService extends Service {
     private static final int NOTIFICATION_ID = 16745;
     private static final String MANIFEST = "{"
             + "\"id\":\"com.justplayerplus.connector\","
-            + "\"version\":\"1.6.0\","
+            + "\"version\":\"1.7.0\","
             + "\"name\":\"JustPlayer Plus Connector\","
             + "\"description\":\"Local metadata bridge for JustPlayer Plus\","
             + "\"resources\":["
@@ -84,13 +83,7 @@ public final class StremioConnectorService extends Service {
         super.onCreate();
         store = new StremioConnectorStore(this);
         diagnostics = new ExternalPlayerDiagnostics(this);
-        subtitleHttpClient = new OkHttpClient.Builder()
-                .connectTimeout(1, TimeUnit.SECONDS)
-                .readTimeout(StremioConnectorOpenSubtitles.LOOKUP_TIMEOUT_MS,
-                        TimeUnit.MILLISECONDS)
-                .callTimeout(StremioConnectorOpenSubtitles.LOOKUP_TIMEOUT_MS,
-                        TimeUnit.MILLISECONDS)
-                .build();
+        subtitleHttpClient = StremioConnectorOpenSubtitles.newHttpClient();
         openSubtitles = new StremioConnectorOpenSubtitles(subtitleHttpClient);
         createNotificationChannel();
         startForeground(NOTIFICATION_ID, buildNotification());
@@ -261,11 +254,19 @@ public final class StremioConnectorService extends Service {
                 } else {
                     long startedAt = System.currentTimeMillis();
                     PlusPrefs plusPrefs = new PlusPrefs(this);
+                    String[] preferredLanguages = plusPrefs.getPreferredSubtitleLanguages();
                     StremioConnectorOpenSubtitles.Result preload = openSubtitles == null
                             ? new StremioConnectorOpenSubtitles.Result(
                             java.util.Collections.emptyList(), "service_unavailable")
                             : openSubtitles.load(
-                                    request, plusPrefs.getPreferredSubtitleLanguages());
+                                    request, preferredLanguages);
+                    if ("loaded".equals(preload.state)) {
+                        store.recordPreloadedSubtitles(
+                                request,
+                                preferredLanguages,
+                                preload.candidates,
+                                System.currentTimeMillis());
+                    }
                     diagnostics.recordStremioConnector(
                             "opensubtitles_preload_" + preload.state,
                             request.type + "/" + request.videoId

@@ -1,5 +1,19 @@
 # JustPlayer Plus changelog
 
+## Step 22 — Stremio-independent startup subtitle handoff
+
+- The Connector now stores its bounded OpenSubtitles listing in a private, validated cache keyed
+  by content ID, release filename and the configured language order.
+- JustPlayer reads that cache before constructing the first media item, so OpenSubtitles remain
+  available even when Stremio launches the external player with `suppliedSubtitles=0`.
+- A cache miss performs one background startup lookup with the same hard 1.5-second deadline;
+  playback initialization waits only for that bounded preflight and then proceeds on every result.
+- Embedded-source preference still affects only automatic track selection. It never hides cached
+  OpenSubtitles tracks from the subtitle list.
+- No subtitle path replaces an active media item, reconnects the video source or discards its
+  buffer. Title enrichment remains late and UI-only.
+- Raised the application version code to 256 and the Connector manifest to 1.7.0.
+
 ## Step 21 — Playback-immutable OpenSubtitles preload
 
 - The local Connector performs the public OpenSubtitles listing while Stremio is still resolving

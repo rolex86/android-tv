@@ -164,7 +164,10 @@ runtime_regression_anchors = (
     "StremioIdentitySubtitle.parse(subtitle.toString())",
     "StremioPreloadedSubtitle.parse(subtitle.toString())",
     "StremioIdentitySubtitle.responseJson(\n                            request, preload.candidates)",
-    "StremioConnectorOpenSubtitles.LOOKUP_TIMEOUT_MS",
+    "call.timeout().timeout(LOOKUP_TIMEOUT_MS",
+    "StremioConnectorOpenSubtitles.newHttpClient()",
+    "findPreloadedSubtitles(",
+    "startupSubtitlePreloadPending",
     "opensubtitles_preload_unavailable",
     "playback_media_item_kept_immutable",
 )
