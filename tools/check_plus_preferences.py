@@ -161,13 +161,12 @@ runtime_regression_anchors = (
     "SelectedSubtitleResolver.AI_ID_PREFIX",
     "cancelRemoteJob(jobId)",
     "currentPlayer.setMediaItem(\n                    updatedItem, Math.max(0L, transaction.positionMs));",
-    "requestOpenSubtitlesV3WhenFilenameReady(session, content, 0);",
     "StremioIdentitySubtitle.parse(subtitle.toString())",
-    "StremioIdentitySubtitle.responseJson(request)",
-    "opensubtitles_attach_deferred\", \"waiting_for_playback_ready",
-    "if (openSubtitlesAttachWaitingForReady) {",
-    "finishOpenSubtitlesAttach(tracks);",
-    "OpenSubtitlesV3Client.hasOpenSubtitlesTrack",
+    "StremioPreloadedSubtitle.parse(subtitle.toString())",
+    "StremioIdentitySubtitle.responseJson(\n                            request, preload.candidates)",
+    "StremioConnectorOpenSubtitles.LOOKUP_TIMEOUT_MS",
+    "opensubtitles_preload_unavailable",
+    "playback_media_item_kept_immutable",
 )
 for anchor in runtime_regression_anchors:
     if anchor not in external_java:
@@ -178,6 +177,16 @@ if "replaceMediaItem(transaction.mediaItemIndex, updatedItem)" in player:
         "AI subtitle attachment must rebuild MergingMediaSource; "
         "replaceMediaItem silently drops newly added subtitle children"
     )
+
+for forbidden in (
+    "attachOpenSubtitles(",
+    "opensubtitles_attached",
+    "currentPlayer.setMediaItem(updatedItem, false)",
+):
+    if forbidden in player:
+        errors.append(
+            "Late OpenSubtitles must not rebuild the active media item: " + forbidden
+        )
 
 if not TEST_PATH.exists():
     errors.append("Smart-selection regression tests are missing")
@@ -234,6 +243,8 @@ else:
         "filenameRefreshRejectsStaleEventsAndKeepsExistingIdentity",
         "identitySubtitleCarriesMovieAndFilenameThroughCachedResponse",
         "identitySubtitleCarriesSeriesAndRejectsForeignUrls",
+        "preloadedOpenSubtitlesRoundTripWithIdentityMarker",
+        "preloadedOpenSubtitlesRejectForeignLoopbackAndSourceHosts",
     ):
         if test_name not in stremio_tests:
             errors.append(f"Missing Stremio metadata regression test: {test_name}")

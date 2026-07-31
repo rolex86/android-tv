@@ -1,5 +1,18 @@
 # JustPlayer Plus changelog
 
+## Step 21 — Playback-immutable OpenSubtitles preload
+
+- The local Connector performs the public OpenSubtitles listing while Stremio is still resolving
+  its subtitle add-ons and gives up after a hard 1.5-second deadline.
+- Successful results travel through cache-safe loopback URLs that preserve language, label and
+  match metadata; JustPlayer unwraps them into standard Media3 subtitle configurations.
+- Every available subtitle is now part of the first media item. Late lookup and automatic
+  `setMediaItem` rebuilding were removed, so subtitle enrichment cannot reset the duration,
+  discard the video buffer or reconnect the active stream.
+- Timeout, network failure or an empty result returns only the identity marker and never delays
+  playback beyond the fixed deadline.
+- Raised the application version code to 255 and the Connector manifest to 1.6.0.
+
 ## Step 20 — Cache-safe Stremio identity handoff
 
 - The local Connector now returns a valid empty metadata subtitle carrying the Cinemeta `tt` ID
@@ -9,8 +22,6 @@
   MediaFusion and other stream providers.
 - Movie/episode title resolution and OpenSubtitles lookup no longer require Stremio to repeat the
   Connector request immediately before every external-player launch.
-- Late OpenSubtitles results never replace the active media item before playback reaches `READY`;
-  stream startup therefore remains the priority and pending subtitles attach only afterwards.
 - Marker parsing accepts only the versioned `127.0.0.1` Connector URL and validated movie/series
   IDs; foreign, malformed and wrong-port URLs are ignored.
 

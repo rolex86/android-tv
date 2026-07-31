@@ -28,8 +28,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 
-/** Loopback-only Stremio addon that observes content identity requests and returns no media. */
+import okhttp3.OkHttpClient;
+
+/** Loopback-only Stremio addon that observes content identity and preloads subtitle listings. */
 public final class StremioConnectorService extends Service {
     static final int PORT = 16745;
     static final String HTTP_MANIFEST_URL =
@@ -41,7 +44,7 @@ public final class StremioConnectorService extends Service {
     private static final int NOTIFICATION_ID = 16745;
     private static final String MANIFEST = "{"
             + "\"id\":\"com.justplayerplus.connector\","
-            + "\"version\":\"1.5.0\","
+            + "\"version\":\"1.6.0\","
             + "\"name\":\"JustPlayer Plus Connector\","
             + "\"description\":\"Local metadata bridge for JustPlayer Plus\","
             + "\"resources\":["
@@ -59,6 +62,8 @@ public final class StremioConnectorService extends Service {
     private Thread acceptThread;
     private StremioConnectorStore store;
     private ExternalPlayerDiagnostics diagnostics;
+    private OkHttpClient subtitleHttpClient;
+    private StremioConnectorOpenSubtitles openSubtitles;
 
     static boolean start(Context context) {
         try {
@@ -79,6 +84,14 @@ public final class StremioConnectorService extends Service {
         super.onCreate();
         store = new StremioConnectorStore(this);
         diagnostics = new ExternalPlayerDiagnostics(this);
+        subtitleHttpClient = new OkHttpClient.Builder()
+                .connectTimeout(1, TimeUnit.SECONDS)
+                .readTimeout(StremioConnectorOpenSubtitles.LOOKUP_TIMEOUT_MS,
+                        TimeUnit.MILLISECONDS)
+                .callTimeout(StremioConnectorOpenSubtitles.LOOKUP_TIMEOUT_MS,
+                        TimeUnit.MILLISECONDS)
+                .build();
+        openSubtitles = new StremioConnectorOpenSubtitles(subtitleHttpClient);
         createNotificationChannel();
         startForeground(NOTIFICATION_ID, buildNotification());
         startServer();
@@ -106,6 +119,12 @@ public final class StremioConnectorService extends Service {
     public void onDestroy() {
         stopServer();
         clients.shutdownNow();
+        openSubtitles = null;
+        if (subtitleHttpClient != null) {
+            subtitleHttpClient.dispatcher().cancelAll();
+            subtitleHttpClient.connectionPool().evictAll();
+            subtitleHttpClient = null;
+        }
         super.onDestroy();
     }
 
@@ -236,11 +255,36 @@ public final class StremioConnectorService extends Service {
                 writeResponse(writer, 200, "application/json", "{\"streams\":[]}");
             } else if (path.startsWith("/subtitles/") && path.endsWith(".json")) {
                 StremioSubtitleRequest request = recordSubtitleRequest(requestTarget);
-                String body = request == null
-                        ? "{\"subtitles\":[]}"
-                        : StremioIdentitySubtitle.responseJson(request);
+                String body;
+                if (request == null) {
+                    body = "{\"subtitles\":[]}";
+                } else {
+                    long startedAt = System.currentTimeMillis();
+                    PlusPrefs plusPrefs = new PlusPrefs(this);
+                    StremioConnectorOpenSubtitles.Result preload = openSubtitles == null
+                            ? new StremioConnectorOpenSubtitles.Result(
+                            java.util.Collections.emptyList(), "service_unavailable")
+                            : openSubtitles.load(
+                                    request, plusPrefs.getPreferredSubtitleLanguages());
+                    diagnostics.recordStremioConnector(
+                            "opensubtitles_preload_" + preload.state,
+                            request.type + "/" + request.videoId
+                                    + " count=" + preload.candidates.size()
+                                    + " durationMs="
+                                    + (System.currentTimeMillis() - startedAt));
+                    body = StremioIdentitySubtitle.responseJson(
+                            request, preload.candidates);
+                }
                 writeResponse(writer, 200, "application/json", body,
                         request == null ? "no-store" : "private, max-age=31536000, immutable");
+            } else if (StremioPreloadedSubtitle.isPath(path)) {
+                StremioPreloadedSubtitle.Parsed subtitle =
+                        StremioPreloadedSubtitle.parseRequestTarget(requestTarget);
+                if (subtitle == null) {
+                    writeResponse(writer, 404, "application/json", "{\"error\":\"not found\"}");
+                } else {
+                    writeRedirect(writer, subtitle.sourceUrl);
+                }
             } else if (StremioIdentitySubtitle.isMarkerPath(path)) {
                 writeResponse(writer, 200, "text/vtt", "WEBVTT\n\n",
                         "private, max-age=31536000, immutable");
@@ -320,6 +364,16 @@ public final class StremioConnectorService extends Service {
         writer.write("Cache-Control: " + cacheControl + "\r\n");
         writer.write("Connection: close\r\n\r\n");
         writer.write(body);
+        writer.flush();
+    }
+
+    private static void writeRedirect(BufferedWriter writer, String location) throws IOException {
+        writer.write("HTTP/1.1 307 Temporary Redirect\r\n");
+        writer.write("Location: " + location + "\r\n");
+        writer.write("Access-Control-Allow-Origin: *\r\n");
+        writer.write("Cache-Control: private, max-age=31536000, immutable\r\n");
+        writer.write("Content-Length: 0\r\n");
+        writer.write("Connection: close\r\n\r\n");
         writer.flush();
     }
 

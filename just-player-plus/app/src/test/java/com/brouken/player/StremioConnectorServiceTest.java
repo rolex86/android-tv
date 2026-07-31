@@ -1,6 +1,7 @@
 package com.brouken.player;
 
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
@@ -11,6 +12,11 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 public class StremioConnectorServiceTest {
+
+    @Test
+    public void subtitlePreloadHasHardStartupDeadline() {
+        assertEquals(1_500L, StremioConnectorOpenSubtitles.LOOKUP_TIMEOUT_MS);
+    }
 
     @Test
     public void dispatchClientReturnsFalseAfterExecutorShutdown() {

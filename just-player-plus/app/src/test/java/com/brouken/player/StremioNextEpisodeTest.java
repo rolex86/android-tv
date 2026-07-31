@@ -7,6 +7,10 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import androidx.media3.common.C;
+import androidx.media3.common.MimeTypes;
+
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.junit.Test;
@@ -246,6 +250,65 @@ public class StremioNextEpisodeTest {
         assertNull(StremioIdentitySubtitle.parse(marker.replace(
                 "127.0.0.1:16745", "127.0.0.1:16746")));
         assertNull(StremioIdentitySubtitle.parse(marker.replace("http://", "https://")));
+    }
+
+    @Test
+    public void preloadedOpenSubtitlesRoundTripWithIdentityMarker() throws Exception {
+        StremioSubtitleRequest request = StremioSubtitleRequest.parse(
+                "/subtitles/movie/tt0133093/filename=The.Matrix.1999.mkv.json");
+        OpenSubtitlesV3Client.Candidate candidate = new OpenSubtitlesV3Client.Candidate(
+                "https://subs5.strem.io/en/download/subencoding-stremio-utf8/src-api/file/42",
+                "42",
+                "ces",
+                "OpenSubtitles v3 · CES · The.Matrix.1999",
+                MimeTypes.APPLICATION_SUBRIP,
+                C.ROLE_FLAG_SUBTITLE,
+                0,
+                OpenSubtitlesV3Client.MatchConfidence.UNKNOWN,
+                0,
+                0);
+
+        JSONObject response = new JSONObject(StremioIdentitySubtitle.responseJson(
+                request, java.util.Collections.singletonList(candidate)));
+        JSONArray subtitles = response.getJSONArray("subtitles");
+        StremioPreloadedSubtitle.Parsed preloaded = StremioPreloadedSubtitle.parse(
+                subtitles.getJSONObject(0).getString("url"));
+        StremioIdentitySubtitle.Identity marker = StremioIdentitySubtitle.parse(
+                subtitles.getJSONObject(1).getString("url"));
+
+        assertEquals(2, subtitles.length());
+        assertNotNull(preloaded);
+        assertEquals(candidate.url, preloaded.sourceUrl);
+        assertEquals("ces", preloaded.language);
+        assertEquals(candidate.label, preloaded.label);
+        assertNotNull(marker);
+        assertEquals("tt0133093", marker.videoId);
+    }
+
+    @Test
+    public void preloadedOpenSubtitlesRejectForeignLoopbackAndSourceHosts() {
+        OpenSubtitlesV3Client.Candidate candidate = new OpenSubtitlesV3Client.Candidate(
+                "https://subs5.strem.io/en/download/file/42",
+                "42",
+                "ces",
+                "OpenSubtitles v3 · CES · 42",
+                MimeTypes.APPLICATION_SUBRIP,
+                C.ROLE_FLAG_SUBTITLE,
+                0,
+                OpenSubtitlesV3Client.MatchConfidence.UNKNOWN,
+                0,
+                0);
+        String url = StremioPreloadedSubtitle.buildUrl(candidate);
+
+        assertNotNull(StremioPreloadedSubtitle.parse(url));
+        assertTrue(StremioPreloadedSubtitle.isPath(
+                "/opensubtitles/v1/ces/42.srt"));
+        assertNull(StremioPreloadedSubtitle.parse(url.replace(
+                "127.0.0.1:16745", "example.com:16745")));
+        assertNull(StremioPreloadedSubtitle.parse(url.replace(
+                "127.0.0.1:16745", "127.0.0.1:16746")));
+        assertNull(StremioPreloadedSubtitle.parse(url.replace(
+                "subs5.strem.io", "example.test")));
     }
 
     @Test

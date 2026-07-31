@@ -3,6 +3,7 @@ package com.brouken.player;
 import androidx.annotation.Nullable;
 
 import org.json.JSONException;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.UnsupportedEncodingException;
@@ -11,6 +12,8 @@ import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * Carries Stremio content identity through its cached subtitle response into the external-player
@@ -28,15 +31,32 @@ final class StremioIdentitySubtitle {
     }
 
     static String responseJson(StremioSubtitleRequest request) {
-        JSONObject subtitle = new JSONObject();
+        return responseJson(request, Collections.emptyList());
+    }
+
+    static String responseJson(
+            StremioSubtitleRequest request,
+            List<OpenSubtitlesV3Client.Candidate> candidates) {
         JSONObject response = new JSONObject();
         try {
-            subtitle.put("id", SUBTITLE_ID);
-            subtitle.put("url", buildUrl(request.type, request.videoId, request.filename));
+            JSONArray subtitles = new JSONArray();
+            int index = 0;
+            for (OpenSubtitlesV3Client.Candidate candidate : candidates) {
+                JSONObject subtitle = new JSONObject();
+                subtitle.put("id", "justplayer-plus-opensubtitles-v3-" + index++);
+                subtitle.put("url", StremioPreloadedSubtitle.buildUrl(candidate));
+                subtitle.put("lang", candidate.language);
+                subtitle.put("name", candidate.label);
+                subtitles.put(subtitle);
+            }
+            JSONObject marker = new JSONObject();
+            marker.put("id", SUBTITLE_ID);
+            marker.put("url", buildUrl(request.type, request.videoId, request.filename));
             // ISO 639-2 "zxx" means no linguistic content and prevents the empty marker from
             // becoming a preferred human-language subtitle in Stremio's internal player.
-            subtitle.put("lang", SUBTITLE_LANGUAGE);
-            response.put("subtitles", new org.json.JSONArray().put(subtitle));
+            marker.put("lang", SUBTITLE_LANGUAGE);
+            subtitles.put(marker);
+            response.put("subtitles", subtitles);
             return response.toString();
         } catch (JSONException impossible) {
             return "{\"subtitles\":[]}";
