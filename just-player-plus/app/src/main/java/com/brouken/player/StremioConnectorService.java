@@ -27,6 +27,7 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 
 /** Loopback-only Stremio addon that observes content identity requests and returns no media. */
 public final class StremioConnectorService extends Service {
@@ -103,21 +104,21 @@ public final class StremioConnectorService extends Service {
 
     @Override
     public void onDestroy() {
+        stopServer();
+        clients.shutdownNow();
+        super.onDestroy();
+    }
+
+    private synchronized void stopServer() {
         running = false;
         ServerSocket socket = serverSocket;
         serverSocket = null;
-        if (socket != null) {
-            try {
-                socket.close();
-            } catch (IOException ignored) {
-            }
+        closeQuietly(socket);
+        Thread thread = acceptThread;
+        acceptThread = null;
+        if (thread != null) {
+            thread.interrupt();
         }
-        if (acceptThread != null) {
-            acceptThread.interrupt();
-            acceptThread = null;
-        }
-        clients.shutdownNow();
-        super.onDestroy();
     }
 
     private synchronized void startServer() {
@@ -141,9 +142,13 @@ public final class StremioConnectorService extends Service {
 
     private void acceptLoop() {
         while (running) {
+            ServerSocket listener = serverSocket;
+            if (listener == null) {
+                return;
+            }
+            Socket socket;
             try {
-                Socket socket = serverSocket.accept();
-                clients.execute(() -> handle(socket));
+                socket = listener.accept();
             } catch (SocketException error) {
                 if (running) {
                     stopSelf();
@@ -151,7 +156,45 @@ public final class StremioConnectorService extends Service {
                 return;
             } catch (IOException ignored) {
                 // A malformed/aborted local request must not terminate the connector.
+                continue;
             }
+            if (!running) {
+                closeQuietly(socket);
+                return;
+            }
+            if (!dispatchClient(clients, () -> handle(socket))) {
+                closeQuietly(socket);
+                return;
+            }
+        }
+    }
+
+    static boolean dispatchClient(ExecutorService executor, Runnable task) {
+        try {
+            executor.execute(task);
+            return true;
+        } catch (RejectedExecutionException ignored) {
+            return false;
+        }
+    }
+
+    private static void closeQuietly(@Nullable ServerSocket socket) {
+        if (socket == null) {
+            return;
+        }
+        try {
+            socket.close();
+        } catch (IOException ignored) {
+        }
+    }
+
+    private static void closeQuietly(@Nullable Socket socket) {
+        if (socket == null) {
+            return;
+        }
+        try {
+            socket.close();
+        } catch (IOException ignored) {
         }
     }
 
