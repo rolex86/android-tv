@@ -155,6 +155,7 @@ public class PlayerActivity extends Activity {
     private boolean openSubtitlesExactStartScheduled;
     private RememberedTrackStore.Selection openSubtitlesSelectionBeforeAttach;
     private boolean openSubtitlesAttachPending;
+    private boolean openSubtitlesAttachWaitingForReady;
     private int openSubtitlesAttachGeneration;
     private boolean openSubtitlesAudioExplicitBeforeAttach;
     private boolean openSubtitlesSubtitleExplicitBeforeAttach;
@@ -1421,13 +1422,16 @@ public class PlayerActivity extends Activity {
         }
         Player currentPlayer = player;
         MediaItem mediaItem = currentPlayer == null ? null : currentPlayer.getCurrentMediaItem();
-        if (currentPlayer == null || mediaItem == null) {
-            if (attempt < 4 && playerView != null) {
-                playerView.postDelayed(() -> attachOpenSubtitles(
-                        session, attempt + 1), 250L);
+        if (currentPlayer == null || mediaItem == null
+                || currentPlayer.getPlaybackState() != Player.STATE_READY) {
+            if (!openSubtitlesAttachWaitingForReady) {
+                externalDiagnostics.recordStremioConnector(
+                        "opensubtitles_attach_deferred", "waiting_for_playback_ready");
             }
+            openSubtitlesAttachWaitingForReady = true;
             return;
         }
+        openSubtitlesAttachWaitingForReady = false;
 
         List<MediaItem.SubtitleConfiguration> existing =
                 mediaItem.localConfiguration == null
@@ -1582,6 +1586,7 @@ public class PlayerActivity extends Activity {
     private void clearOpenSubtitlesAttachState() {
         openSubtitlesAttachGeneration++;
         openSubtitlesAttachPending = false;
+        openSubtitlesAttachWaitingForReady = false;
         openSubtitlesSelectionBeforeAttach = null;
         openSubtitlesAudioExplicitBeforeAttach = false;
         openSubtitlesSubtitleExplicitBeforeAttach = false;
@@ -3040,6 +3045,9 @@ public class PlayerActivity extends Activity {
 
             if (state == Player.STATE_READY) {
                 completeAiSubtitleAttachIfReady();
+                if (openSubtitlesAttachWaitingForReady) {
+                    attachOpenSubtitles(nextEpisodeSession, 0);
+                }
                 scheduleOpenSubtitlesExactMatch(nextEpisodeSession);
                 frameRendered = true;
 

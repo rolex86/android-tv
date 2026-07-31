@@ -164,6 +164,8 @@ runtime_regression_anchors = (
     "requestOpenSubtitlesV3WhenFilenameReady(session, content, 0);",
     "StremioIdentitySubtitle.parse(subtitle.toString())",
     "StremioIdentitySubtitle.responseJson(request)",
+    "opensubtitles_attach_deferred\", \"waiting_for_playback_ready",
+    "if (openSubtitlesAttachWaitingForReady) {",
     "finishOpenSubtitlesAttach(tracks);",
     "OpenSubtitlesV3Client.hasOpenSubtitlesTrack",
 )

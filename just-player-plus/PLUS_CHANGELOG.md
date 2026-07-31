@@ -9,6 +9,8 @@
   MediaFusion and other stream providers.
 - Movie/episode title resolution and OpenSubtitles lookup no longer require Stremio to repeat the
   Connector request immediately before every external-player launch.
+- Late OpenSubtitles results never replace the active media item before playback reaches `READY`;
+  stream startup therefore remains the priority and pending subtitles attach only afterwards.
 - Marker parsing accepts only the versioned `127.0.0.1` Connector URL and validated movie/series
   IDs; foreign, malformed and wrong-port URLs are ignored.
 
