@@ -162,6 +162,8 @@ runtime_regression_anchors = (
     "cancelRemoteJob(jobId)",
     "currentPlayer.setMediaItem(\n                    updatedItem, Math.max(0L, transaction.positionMs));",
     "requestOpenSubtitlesV3WhenFilenameReady(session, content, 0);",
+    "StremioIdentitySubtitle.parse(subtitle.toString())",
+    "StremioIdentitySubtitle.responseJson(request)",
     "finishOpenSubtitlesAttach(tracks);",
     "OpenSubtitlesV3Client.hasOpenSubtitlesTrack",
 )
@@ -228,6 +230,8 @@ else:
         "subtitleRequestSupportsCurrentAndLegacyIdentityFormats",
         "lateSubtitleRequestRefreshesAlreadyResolvedContent",
         "filenameRefreshRejectsStaleEventsAndKeepsExistingIdentity",
+        "identitySubtitleCarriesMovieAndFilenameThroughCachedResponse",
+        "identitySubtitleCarriesSeriesAndRejectsForeignUrls",
     ):
         if test_name not in stremio_tests:
             errors.append(f"Missing Stremio metadata regression test: {test_name}")
