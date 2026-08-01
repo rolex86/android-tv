@@ -1,5 +1,18 @@
 # JustPlayer Plus changelog
 
+## Step 23 — Reliable next-episode popup fallback
+
+- Kept the precise Media3 position message as the primary next-episode popup trigger.
+- Added a series-only fallback watchdog after the next episode has been resolved, protecting
+  against VOD streams that replace or adjust their timeline after the position message is armed.
+- The watchdog checks every 30 seconds far from the popup, every 5 seconds while approaching it,
+  and once per second only during the final minute before the configured notice window.
+- Pause, dismissal, playback completion, player release and session replacement immediately stop
+  the watchdog; timeline changes re-arm both triggers without allowing a duplicate card.
+- Diagnostics now identify whether the card was triggered by Media3, a direct position check or
+  the watchdog. Movies never start the watchdog.
+- Raised the application version code to 257.
+
 ## Step 22 — Stremio-independent startup subtitle handoff
 
 - The Connector now stores its bounded OpenSubtitles listing in a private, validated cache keyed

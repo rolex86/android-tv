@@ -21,6 +21,29 @@ import java.util.List;
 public class StremioNextEpisodeTest {
 
     @Test
+    public void nextEpisodeWatchdogPollsSparselyUntilPlaybackApproachesPopup() {
+        long durationMs = 60 * 60_000L;
+        long noticeMs = 30_000L;
+
+        assertEquals(NextEpisodePopupWatchdog.FAR_INTERVAL_MS,
+                NextEpisodePopupWatchdog.nextDelayMs(durationMs, 0L, noticeMs));
+        assertEquals(NextEpisodePopupWatchdog.APPROACHING_INTERVAL_MS,
+                NextEpisodePopupWatchdog.nextDelayMs(durationMs,
+                        durationMs - noticeMs - 4 * 60_000L, noticeMs));
+        assertEquals(NextEpisodePopupWatchdog.NEAR_INTERVAL_MS,
+                NextEpisodePopupWatchdog.nextDelayMs(durationMs,
+                        durationMs - noticeMs - 45_000L, noticeMs));
+        assertEquals(0L, NextEpisodePopupWatchdog.nextDelayMs(
+                durationMs, durationMs - noticeMs, noticeMs));
+    }
+
+    @Test
+    public void nextEpisodeWatchdogRetriesWhenDurationIsNotKnownYet() {
+        assertEquals(NextEpisodePopupWatchdog.RETRY_WITHOUT_DURATION_MS,
+                NextEpisodePopupWatchdog.nextDelayMs(C.TIME_UNSET, 0L, 30_000L));
+    }
+
+    @Test
     public void episodeIdUsesLastTwoSegments() {
         StremioEpisodeId id = StremioEpisodeId.parse("custom:meta:2:7");
 

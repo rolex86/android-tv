@@ -74,6 +74,7 @@ import androidx.media3.common.MimeTypes;
 import androidx.media3.common.PlaybackParameters;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
+import androidx.media3.common.Timeline;
 import androidx.media3.common.TrackGroup;
 import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.TrackSelectionParameters;
@@ -266,6 +267,7 @@ public class PlayerActivity extends Activity {
     private PlayerMessage nextEpisodePopupMessage;
     private int nextEpisodePopupScheduleGeneration;
     private long nextEpisodeNoticeMs = TimeUnit.SECONDS.toMillis(30L);
+    private final Runnable nextEpisodePopupWatchdog = this::runNextEpisodePopupWatchdog;
     private static final long AI_SUBTITLE_ATTACH_TIMEOUT_MS = 30_000L;
 
     private static final class AiSubtitleAttachTransaction {
@@ -1607,6 +1609,7 @@ public class PlayerActivity extends Activity {
         pendingOpenSubtitlesExactLanguages = null;
         openSubtitlesExactStartScheduled = false;
         cancelNextEpisodePopupMessage();
+        cancelNextEpisodePopupWatchdog();
         nextEpisodeInfo = null;
         nextEpisodeDismissed = false;
         nextEpisodeShown = false;
@@ -1627,6 +1630,47 @@ public class PlayerActivity extends Activity {
         }
     }
 
+    private void cancelNextEpisodePopupWatchdog() {
+        if (playerView != null) {
+            playerView.removeCallbacks(nextEpisodePopupWatchdog);
+        }
+    }
+
+    private void scheduleNextEpisodePopupWatchdog() {
+        cancelNextEpisodePopupWatchdog();
+        if (playerView == null || player == null || nextEpisodeInfo == null
+                || nextEpisodeDismissed || nextEpisodeShown || isFinishing()
+                || player.isCurrentMediaItemLive() || nextEpisodeOverlay == null
+                || !player.isPlaying()) {
+            return;
+        }
+
+        long delayMs = NextEpisodePopupWatchdog.nextDelayMs(
+                player.getDuration(), player.getCurrentPosition(), nextEpisodeNoticeMs);
+        if (delayMs == 0L) {
+            showNextEpisodePopup(nextEpisodeSession, "watchdog");
+            return;
+        }
+        playerView.postDelayed(nextEpisodePopupWatchdog, delayMs);
+    }
+
+    private void runNextEpisodePopupWatchdog() {
+        if (playerView == null || player == null || nextEpisodeInfo == null
+                || nextEpisodeDismissed || nextEpisodeShown || isFinishing()
+                || player.isCurrentMediaItemLive() || nextEpisodeOverlay == null
+                || !player.isPlaying()) {
+            return;
+        }
+
+        long delayMs = NextEpisodePopupWatchdog.nextDelayMs(
+                player.getDuration(), player.getCurrentPosition(), nextEpisodeNoticeMs);
+        if (delayMs == 0L) {
+            showNextEpisodePopup(nextEpisodeSession, "watchdog");
+        } else {
+            playerView.postDelayed(nextEpisodePopupWatchdog, delayMs);
+        }
+    }
+
     /**
      * Arms a Media3 position message instead of polling playback position. Media3 delivers the
      * message only when playback reaches the configured media timestamp, automatically accounting
@@ -1634,6 +1678,7 @@ public class PlayerActivity extends Activity {
      */
     private void scheduleNextEpisodePopup() {
         cancelNextEpisodePopupMessage();
+        cancelNextEpisodePopupWatchdog();
         if (!isNextEpisodeFeatureEnabled()) {
             releaseNextEpisodeFeature();
             return;
@@ -1645,15 +1690,16 @@ public class PlayerActivity extends Activity {
         }
         long duration = player.getDuration();
         long position = player.getCurrentPosition();
+        mPlusPrefs.reload();
+        nextEpisodeNoticeMs = TimeUnit.SECONDS.toMillis(mPlusPrefs.nextEpisodeNoticeSeconds);
         if (duration == C.TIME_UNSET || duration <= 0L || position < 0L) {
+            scheduleNextEpisodePopupWatchdog();
             return;
         }
 
-        mPlusPrefs.reload();
-        nextEpisodeNoticeMs = TimeUnit.SECONDS.toMillis(mPlusPrefs.nextEpisodeNoticeSeconds);
         long triggerPosition = Math.max(0L, duration - nextEpisodeNoticeMs);
         if (position >= triggerPosition) {
-            showNextEpisodePopup(nextEpisodeSession);
+            showNextEpisodePopup(nextEpisodeSession, "position_check");
             return;
         }
 
@@ -1666,7 +1712,7 @@ public class PlayerActivity extends Activity {
                         if (session == nextEpisodeSession
                                 && scheduleGeneration == nextEpisodePopupScheduleGeneration) {
                             nextEpisodePopupMessage = null;
-                            showNextEpisodePopup(session);
+                            showNextEpisodePopup(session, "player_message");
                         }
                     });
                 }
@@ -1674,9 +1720,10 @@ public class PlayerActivity extends Activity {
         } catch (IllegalStateException ignored) {
             // STATE_READY or a later timeline update will arm the message once duration is known.
         }
+        scheduleNextEpisodePopupWatchdog();
     }
 
-    private void showNextEpisodePopup(int session) {
+    private void showNextEpisodePopup(int session, String trigger) {
         if (!isNextEpisodeFeatureEnabled()) {
             releaseNextEpisodeFeature();
             return;
@@ -1701,8 +1748,13 @@ public class PlayerActivity extends Activity {
         }
 
         nextEpisodeShown = true;
+        cancelNextEpisodePopupMessage();
+        cancelNextEpisodePopupWatchdog();
         playerView.hideController();
         nextEpisodeOverlay.show(nextEpisodeInfo);
+        externalDiagnostics.recordStremioConnector(
+                "next_episode_popup_trigger",
+                "source=" + trigger + " remainingMs=" + Math.max(0L, duration - position));
         externalDiagnostics.recordNextEpisode(
                 nextEpisodeInfo.current.raw,
                 nextEpisodeInfo.next.raw,
@@ -1714,6 +1766,7 @@ public class PlayerActivity extends Activity {
     private void dismissNextEpisode() {
         nextEpisodeDismissed = true;
         cancelNextEpisodePopupMessage();
+        cancelNextEpisodePopupWatchdog();
         if (nextEpisodeInfo != null) {
             externalDiagnostics.recordNextEpisode(
                     nextEpisodeInfo.current.raw,
@@ -1745,6 +1798,8 @@ public class PlayerActivity extends Activity {
             return;
         }
         nextEpisodeDismissed = true;
+        cancelNextEpisodePopupMessage();
+        cancelNextEpisodePopupWatchdog();
         if (nextEpisodeOverlay != null) {
             nextEpisodeOverlay.hide(false);
         }
@@ -2730,6 +2785,7 @@ public class PlayerActivity extends Activity {
         releaseAiSubtitleController();
         abandonAiSubtitleAttach();
         cancelNextEpisodePopupMessage();
+        cancelNextEpisodePopupWatchdog();
         trackMemoryArmed = false;
         trackSelectionChangePending = false;
         if (save) {
@@ -2876,6 +2932,13 @@ public class PlayerActivity extends Activity {
                                             @NonNull Player.PositionInfo newPosition,
                                             int reason) {
             updateExpectedEndTime(newPosition.positionMs);
+            if (nextEpisodeInfo != null && !nextEpisodeDismissed && !nextEpisodeShown) {
+                scheduleNextEpisodePopup();
+            }
+        }
+
+        @Override
+        public void onTimelineChanged(@NonNull Timeline timeline, int reason) {
             if (nextEpisodeInfo != null && !nextEpisodeDismissed && !nextEpisodeShown) {
                 scheduleNextEpisodePopup();
             }
@@ -3060,6 +3123,8 @@ public class PlayerActivity extends Activity {
                 }
             } else if (state == Player.STATE_ENDED) {
                 releaseAiSubtitleController();
+                cancelNextEpisodePopupMessage();
+                cancelNextEpisodePopupWatchdog();
                 if (nextEpisodeInfo != null) {
                     new StremioConnectorStore(PlayerActivity.this).expectEpisode(
                             nextEpisodeInfo.next, System.currentTimeMillis());
