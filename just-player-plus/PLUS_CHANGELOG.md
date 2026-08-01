@@ -1,5 +1,57 @@
 # JustPlayer Plus changelog
 
+## Step 23 — Reliable next-episode popup fallback
+
+- Kept the precise Media3 position message as the primary next-episode popup trigger.
+- Added a series-only fallback watchdog after the next episode has been resolved, protecting
+  against VOD streams that replace or adjust their timeline after the position message is armed.
+- The watchdog checks every 30 seconds far from the popup, every 5 seconds while approaching it,
+  and once per second only during the final minute before the configured notice window.
+- Pause, dismissal, playback completion, player release and session replacement immediately stop
+  the watchdog; timeline changes re-arm both triggers without allowing a duplicate card.
+- Diagnostics now identify whether the card was triggered by Media3, a direct position check or
+  the watchdog. Movies never start the watchdog.
+- Raised the application version code to 257.
+
+## Step 22 — Stremio-independent startup subtitle handoff
+
+- The Connector now stores its bounded OpenSubtitles listing in a private, validated cache keyed
+  by content ID, release filename and the configured language order.
+- JustPlayer reads that cache before constructing the first media item, so OpenSubtitles remain
+  available even when Stremio launches the external player with `suppliedSubtitles=0`.
+- A cache miss performs one background startup lookup with the same hard 1.5-second deadline;
+  playback initialization waits only for that bounded preflight and then proceeds on every result.
+- Embedded-source preference still affects only automatic track selection. It never hides cached
+  OpenSubtitles tracks from the subtitle list.
+- No subtitle path replaces an active media item, reconnects the video source or discards its
+  buffer. Title enrichment remains late and UI-only.
+- Raised the application version code to 256 and the Connector manifest to 1.7.0.
+
+## Step 21 — Playback-immutable OpenSubtitles preload
+
+- The local Connector performs the public OpenSubtitles listing while Stremio is still resolving
+  its subtitle add-ons and gives up after a hard 1.5-second deadline.
+- Successful results travel through cache-safe loopback URLs that preserve language, label and
+  match metadata; JustPlayer unwraps them into standard Media3 subtitle configurations.
+- Every available subtitle is now part of the first media item. Late lookup and automatic
+  `setMediaItem` rebuilding were removed, so subtitle enrichment cannot reset the duration,
+  discard the video buffer or reconnect the active stream.
+- Timeout, network failure or an empty result returns only the identity marker and never delays
+  playback beyond the fixed deadline.
+- Raised the application version code to 255 and the Connector manifest to 1.6.0.
+
+## Step 20 — Cache-safe Stremio identity handoff
+
+- The local Connector now returns a valid empty metadata subtitle carrying the Cinemeta `tt` ID
+  and release filename in a loopback-only URL.
+- JustPlayer removes the marker before attaching real subtitles and records its identity as a fresh
+  correlation event, so cached Stremio responses remain usable across Torrentio, Comet,
+  MediaFusion and other stream providers.
+- Movie/episode title resolution and OpenSubtitles lookup no longer require Stremio to repeat the
+  Connector request immediately before every external-player launch.
+- Marker parsing accepts only the versioned `127.0.0.1` Connector URL and validated movie/series
+  IDs; foreign, malformed and wrong-port URLs are ignored.
+
 ## Step 19 — On-demand AI subtitle translation
 
 - Added a disabled-by-default, manually triggered AI translation branch for selected external

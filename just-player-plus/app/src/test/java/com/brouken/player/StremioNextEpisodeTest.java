@@ -1,17 +1,47 @@
 package com.brouken.player;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
+import androidx.media3.common.C;
+import androidx.media3.common.MimeTypes;
+
+import org.json.JSONArray;
 import org.json.JSONException;
+import org.json.JSONObject;
 import org.junit.Test;
 
 import java.util.Arrays;
 import java.util.List;
 
 public class StremioNextEpisodeTest {
+
+    @Test
+    public void nextEpisodeWatchdogPollsSparselyUntilPlaybackApproachesPopup() {
+        long durationMs = 60 * 60_000L;
+        long noticeMs = 30_000L;
+
+        assertEquals(NextEpisodePopupWatchdog.FAR_INTERVAL_MS,
+                NextEpisodePopupWatchdog.nextDelayMs(durationMs, 0L, noticeMs));
+        assertEquals(NextEpisodePopupWatchdog.APPROACHING_INTERVAL_MS,
+                NextEpisodePopupWatchdog.nextDelayMs(durationMs,
+                        durationMs - noticeMs - 4 * 60_000L, noticeMs));
+        assertEquals(NextEpisodePopupWatchdog.NEAR_INTERVAL_MS,
+                NextEpisodePopupWatchdog.nextDelayMs(durationMs,
+                        durationMs - noticeMs - 45_000L, noticeMs));
+        assertEquals(0L, NextEpisodePopupWatchdog.nextDelayMs(
+                durationMs, durationMs - noticeMs, noticeMs));
+    }
+
+    @Test
+    public void nextEpisodeWatchdogRetriesWhenDurationIsNotKnownYet() {
+        assertEquals(NextEpisodePopupWatchdog.RETRY_WITHOUT_DURATION_MS,
+                NextEpisodePopupWatchdog.nextDelayMs(C.TIME_UNSET, 0L, 30_000L));
+    }
 
     @Test
     public void episodeIdUsesLastTwoSegments() {
@@ -203,6 +233,196 @@ public class StremioNextEpisodeTest {
     }
 
     @Test
+    public void identitySubtitleCarriesMovieAndFilenameThroughCachedResponse()
+            throws JSONException {
+        StremioSubtitleRequest request = StremioSubtitleRequest.parse(
+                "/subtitles/movie/tt0133093/"
+                        + "filename=The.Matrix.1999.2160p.BluRay.x265-GROUP.mkv.json");
+
+        assertNotNull(request);
+        JSONObject response = new JSONObject(StremioIdentitySubtitle.responseJson(request));
+        JSONObject marker = response.getJSONArray("subtitles").getJSONObject(0);
+        StremioIdentitySubtitle.Identity identity =
+                StremioIdentitySubtitle.parse(marker.getString("url"));
+
+        assertEquals("zxx", marker.getString("lang"));
+        assertNotNull(identity);
+        assertEquals("movie", identity.type);
+        assertEquals("tt0133093", identity.videoId);
+        assertEquals(
+                "The.Matrix.1999.2160p.BluRay.x265-GROUP.mkv",
+                identity.filename);
+    }
+
+    @Test
+    public void identitySubtitleCarriesSeriesAndRejectsForeignUrls() {
+        String marker = StremioIdentitySubtitle.buildUrl(
+                "series", "tt3107288:1:2", null);
+        StremioIdentitySubtitle.Identity identity = StremioIdentitySubtitle.parse(marker);
+
+        assertNotNull(identity);
+        assertEquals("series", identity.type);
+        assertEquals("tt3107288:1:2", identity.videoId);
+        assertNull(identity.filename);
+        assertTrue(StremioIdentitySubtitle.isMarkerPath(
+                "/identity/v1/series/tt3107288%3A1%3A2.vtt"));
+        assertFalse(StremioIdentitySubtitle.isMarkerPath(
+                "/identity/v1/movie/not-an-imdb-id.vtt"));
+        assertNull(StremioIdentitySubtitle.parse(marker.replace(
+                "127.0.0.1:16745", "example.com:16745")));
+        assertNull(StremioIdentitySubtitle.parse(marker.replace(
+                "127.0.0.1:16745", "127.0.0.1:16746")));
+        assertNull(StremioIdentitySubtitle.parse(marker.replace("http://", "https://")));
+    }
+
+    @Test
+    public void preloadedOpenSubtitlesRoundTripWithIdentityMarker() throws Exception {
+        StremioSubtitleRequest request = StremioSubtitleRequest.parse(
+                "/subtitles/movie/tt0133093/filename=The.Matrix.1999.mkv.json");
+        OpenSubtitlesV3Client.Candidate candidate = new OpenSubtitlesV3Client.Candidate(
+                "https://subs5.strem.io/en/download/subencoding-stremio-utf8/src-api/file/42",
+                "42",
+                "ces",
+                "OpenSubtitles v3 · CES · The.Matrix.1999",
+                MimeTypes.APPLICATION_SUBRIP,
+                C.ROLE_FLAG_SUBTITLE,
+                0,
+                OpenSubtitlesV3Client.MatchConfidence.UNKNOWN,
+                0,
+                0);
+
+        JSONObject response = new JSONObject(StremioIdentitySubtitle.responseJson(
+                request, java.util.Collections.singletonList(candidate)));
+        JSONArray subtitles = response.getJSONArray("subtitles");
+        StremioPreloadedSubtitle.Parsed preloaded = StremioPreloadedSubtitle.parse(
+                subtitles.getJSONObject(0).getString("url"));
+        StremioIdentitySubtitle.Identity marker = StremioIdentitySubtitle.parse(
+                subtitles.getJSONObject(1).getString("url"));
+
+        assertEquals(2, subtitles.length());
+        assertNotNull(preloaded);
+        assertEquals(candidate.url, preloaded.sourceUrl);
+        assertEquals("ces", preloaded.language);
+        assertEquals(candidate.label, preloaded.label);
+        assertNotNull(marker);
+        assertEquals("tt0133093", marker.videoId);
+    }
+
+    @Test
+    public void preloadedOpenSubtitlesRejectForeignLoopbackAndSourceHosts() {
+        OpenSubtitlesV3Client.Candidate candidate = new OpenSubtitlesV3Client.Candidate(
+                "https://subs5.strem.io/en/download/file/42",
+                "42",
+                "ces",
+                "OpenSubtitles v3 · CES · 42",
+                MimeTypes.APPLICATION_SUBRIP,
+                C.ROLE_FLAG_SUBTITLE,
+                0,
+                OpenSubtitlesV3Client.MatchConfidence.UNKNOWN,
+                0,
+                0);
+        String url = StremioPreloadedSubtitle.buildUrl(candidate);
+
+        assertNotNull(StremioPreloadedSubtitle.parse(url));
+        assertTrue(StremioPreloadedSubtitle.isPath(
+                "/opensubtitles/v1/ces/42.srt"));
+        assertNull(StremioPreloadedSubtitle.parse(url.replace(
+                "127.0.0.1:16745", "example.com:16745")));
+        assertNull(StremioPreloadedSubtitle.parse(url.replace(
+                "127.0.0.1:16745", "127.0.0.1:16746")));
+        assertNull(StremioPreloadedSubtitle.parse(url.replace(
+                "subs5.strem.io", "example.test")));
+    }
+
+    @Test
+    public void localPreloadCacheSurvivesMissingExternalPlayerSubtitleExtras() {
+        long now = 1_000_000L;
+        StremioSubtitleRequest request = StremioSubtitleRequest.parse(
+                "/subtitles/movie/tt0133093/filename=The.Matrix.1999.mkv.json");
+        OpenSubtitlesV3Client.Candidate candidate = candidate(
+                "42", "ces", "The.Matrix.1999");
+
+        assertNotNull(request);
+        String encoded = StremioSubtitlePreloadCache.update(
+                null,
+                request,
+                new String[]{"cs", "sk"},
+                java.util.Collections.singletonList(candidate),
+                now);
+        StremioSubtitlePreloadCache.Lookup lookup = StremioSubtitlePreloadCache.find(
+                encoded,
+                StremioConnectorStore.Content.movie("tt0133093")
+                        .withMediaFilename("The.Matrix.1999.mkv"),
+                new String[]{"ces", "slk"},
+                now + 500L);
+
+        assertNotNull(lookup);
+        assertEquals("exact_filename", lookup.match);
+        assertEquals(500L, lookup.ageMs);
+        assertEquals(1, lookup.tracks.size());
+        assertEquals(candidate.url, lookup.tracks.get(0).sourceUrl);
+    }
+
+    @Test
+    public void localPreloadCachePrefersExactReleaseOverNewerContentFallback() {
+        long now = 2_000_000L;
+        StremioSubtitleRequest firstRequest = StremioSubtitleRequest.parse(
+                "/subtitles/movie/tt0133093/filename=Release.A.mkv.json");
+        StremioSubtitleRequest secondRequest = StremioSubtitleRequest.parse(
+                "/subtitles/movie/tt0133093/filename=Release.B.mkv.json");
+        assertNotNull(firstRequest);
+        assertNotNull(secondRequest);
+
+        String encoded = StremioSubtitlePreloadCache.update(
+                null,
+                firstRequest,
+                new String[]{"cs"},
+                java.util.Collections.singletonList(candidate("100", "ces", "Release.A")),
+                now);
+        encoded = StremioSubtitlePreloadCache.update(
+                encoded,
+                secondRequest,
+                new String[]{"cs"},
+                java.util.Collections.singletonList(candidate("200", "ces", "Release.B")),
+                now + 1_000L);
+
+        StremioSubtitlePreloadCache.Lookup exact = StremioSubtitlePreloadCache.find(
+                encoded,
+                StremioConnectorStore.Content.movie("tt0133093")
+                        .withMediaFilename("release.a.mkv"),
+                new String[]{"ces"},
+                now + 2_000L);
+
+        assertNotNull(exact);
+        assertEquals("exact_filename", exact.match);
+        assertTrue(exact.tracks.get(0).sourceUrl.endsWith("/100"));
+    }
+
+    @Test
+    public void localPreloadCacheRejectsExpiredOrDifferentLanguageOrder() {
+        long now = 3_000_000L;
+        StremioSubtitleRequest request = StremioSubtitleRequest.parse(
+                "/subtitles/movie/tt0133093/filename=The.Matrix.1999.mkv.json");
+        assertNotNull(request);
+        String encoded = StremioSubtitlePreloadCache.update(
+                null,
+                request,
+                new String[]{"cs", "sk"},
+                java.util.Collections.singletonList(candidate("42", "ces", "The.Matrix")),
+                now);
+        StremioConnectorStore.Content content = StremioConnectorStore.Content.movie(
+                "tt0133093");
+
+        assertNull(StremioSubtitlePreloadCache.find(
+                encoded, content, new String[]{"en"}, now + 1_000L));
+        assertNull(StremioSubtitlePreloadCache.find(
+                encoded,
+                content,
+                new String[]{"cs", "sk"},
+                now + StremioSubtitlePreloadCache.MAX_AGE_MS + 1L));
+    }
+
+    @Test
     public void metadataDerivesNextEpisodeFromCurrentOnly() throws JSONException {
         StremioEpisodeId current = StremioEpisodeId.parse("tt123:1:1");
         String json = "{\"meta\":{\"name\":\"Bluey\","
@@ -261,6 +481,21 @@ public class StremioNextEpisodeTest {
 
     private static StremioConnectorStore.Event event(String id, long timestamp) {
         return new StremioConnectorStore.Event("series", id, timestamp);
+    }
+
+    private static OpenSubtitlesV3Client.Candidate candidate(
+            String id, String language, String release) {
+        return new OpenSubtitlesV3Client.Candidate(
+                "https://subs5.strem.io/en/download/file/" + id,
+                id,
+                language,
+                "OpenSubtitles v3 · " + language.toUpperCase() + " · " + release,
+                MimeTypes.APPLICATION_SUBRIP,
+                C.ROLE_FLAG_SUBTITLE,
+                0,
+                OpenSubtitlesV3Client.MatchConfidence.UNKNOWN,
+                0,
+                0);
     }
 
     private static List<StremioConnectorStore.Event> events(

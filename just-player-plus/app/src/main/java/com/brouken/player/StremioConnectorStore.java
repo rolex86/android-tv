@@ -24,6 +24,7 @@ final class StremioConnectorStore {
     private static final String KEY_CLAIMED_EPISODE = "claimed_episode";
     private static final String KEY_EXPECTED_EPISODE = "expected_episode";
     private static final String KEY_CONTENT_ASSOCIATIONS = "content_associations";
+    private static final String KEY_SUBTITLE_PRELOADS = "subtitle_preloads_v1";
     private static final int MAX_EVENTS = 24;
     private static final int MAX_ASSOCIATIONS = 48;
     private static final long MAX_EVENT_AGE_MS = 15 * 60_000L;
@@ -143,6 +144,59 @@ final class StremioConnectorStore {
     Content refreshContent(Content content, long nowMs) {
         synchronized (LOCK) {
             return refreshContent(readEvents(), content, nowMs);
+        }
+    }
+
+    /**
+     * Finds advisory content identity without consuming next-episode state or claiming the event.
+     * This is used only before the first media item is created.
+     */
+    @Nullable
+    Content findLaunchContent(long nowMs, @Nullable String launchIdentity) {
+        synchronized (LOCK) {
+            Content associated = findAssociation(launchIdentity, nowMs);
+            if (associated != null) {
+                return associated.withCorrelation(
+                        "startup_association", associated.correlationAgeMs);
+            }
+            Event event = findRecentEvent(readEvents(), nowMs);
+            Content content = event == null ? null : Content.fromEvent(event);
+            return content == null ? null : content.withCorrelation(
+                    "startup_recent_request", Math.max(0L, nowMs - event.timestampMs));
+        }
+    }
+
+    void recordPreloadedSubtitles(
+            StremioSubtitleRequest request,
+            String[] preferredLanguages,
+            List<OpenSubtitlesV3Client.Candidate> candidates,
+            long nowMs) {
+        synchronized (LOCK) {
+            String encoded = StremioSubtitlePreloadCache.update(
+                    preferences.getString(KEY_SUBTITLE_PRELOADS, null),
+                    request,
+                    preferredLanguages,
+                    candidates,
+                    nowMs);
+            if ("[]".equals(encoded)) {
+                preferences.edit().remove(KEY_SUBTITLE_PRELOADS).apply();
+            } else {
+                preferences.edit().putString(KEY_SUBTITLE_PRELOADS, encoded).apply();
+            }
+        }
+    }
+
+    @Nullable
+    StremioSubtitlePreloadCache.Lookup findPreloadedSubtitles(
+            Content content,
+            String[] preferredLanguages,
+            long nowMs) {
+        synchronized (LOCK) {
+            return StremioSubtitlePreloadCache.find(
+                    preferences.getString(KEY_SUBTITLE_PRELOADS, null),
+                    content,
+                    preferredLanguages,
+                    nowMs);
         }
     }
 
@@ -339,6 +393,7 @@ final class StremioConnectorStore {
                     .remove(KEY_CLAIMED_EPISODE)
                     .remove(KEY_EXPECTED_EPISODE)
                     .remove(KEY_CONTENT_ASSOCIATIONS)
+                    .remove(KEY_SUBTITLE_PRELOADS)
                     .apply();
         }
     }
@@ -476,7 +531,7 @@ final class StremioConnectorStore {
     }
 
     @Nullable
-    private static String normalizeFilename(@Nullable String value) {
+    static String normalizeFilename(@Nullable String value) {
         if (value == null) {
             return null;
         }

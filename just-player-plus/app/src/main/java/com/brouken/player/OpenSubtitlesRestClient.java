@@ -183,6 +183,7 @@ final class OpenSubtitlesRestClient {
                               OpenSubtitlesCredentialsStore.Credentials credentials,
                               String[] preferredLanguages,
                               List<MediaItem.SubtitleConfiguration> existing,
+                              boolean allowDirectSubtitle,
                               Listener listener) {
         if (released) {
             return;
@@ -201,6 +202,7 @@ final class OpenSubtitlesRestClient {
                 credentials,
                 languageSnapshot,
                 existingSnapshot,
+                allowDirectSubtitle,
                 listener));
     }
 
@@ -212,6 +214,7 @@ final class OpenSubtitlesRestClient {
                             OpenSubtitlesCredentialsStore.Credentials credentials,
                             String[] preferredLanguages,
                             List<MediaItem.SubtitleConfiguration> existing,
+                            boolean allowDirectSubtitle,
                             Listener listener) {
         if (!isCurrent(token) || credentials == null || !credentials.isValid()) {
             return;
@@ -345,7 +348,8 @@ final class OpenSubtitlesRestClient {
                             + " exact=" + verifiedExact + "/" + exactCandidates.size()
                             + " likely=" + verifiedLikely + "/" + likelyCandidates.size());
             MediaItem.SubtitleConfiguration direct = null;
-            if (!exactCandidates.isEmpty()
+            if (allowDirectSubtitle
+                    && !exactCandidates.isEmpty()
                     && !matchedCandidates.contains(exactCandidates.get(0))) {
                 Candidate best = exactCandidates.get(0);
                 if (credentials.hasAccount()) {

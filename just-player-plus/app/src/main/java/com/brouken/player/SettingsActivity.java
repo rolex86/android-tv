@@ -15,6 +15,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.preference.PreferenceManager;
 import android.text.InputType;
 import android.view.View;
 import android.view.ViewGroup;
@@ -172,20 +173,30 @@ public class SettingsActivity extends AppCompatActivity {
                 });
             }
 
-            Preference connector = findPreference(PlusPrefs.KEY_STREMIO_CONNECTOR_ENABLED);
+            SwitchPreferenceCompat connector =
+                    findPreference(PlusPrefs.KEY_STREMIO_CONNECTOR_ENABLED);
             if (connector != null) {
                 connector.setOnPreferenceChangeListener((preference, newValue) -> {
                     boolean enabled = Boolean.TRUE.equals(newValue);
+                    Context context = requireContext().getApplicationContext();
+                    boolean persisted = PreferenceManager.getDefaultSharedPreferences(context)
+                            .edit()
+                            .putBoolean(PlusPrefs.KEY_STREMIO_CONNECTOR_ENABLED, enabled)
+                            .commit();
+                    if (!persisted) {
+                        return false;
+                    }
+                    connector.setChecked(enabled);
                     new Handler(Looper.getMainLooper()).post(() -> {
                         if (enabled) {
                             requestConnectorNotificationPermission();
-                            StremioConnectorService.start(requireContext());
+                            StremioConnectorService.start(context);
                         } else {
-                            StremioConnectorService.stop(requireContext());
-                            new StremioConnectorStore(requireContext()).clear();
+                            StremioConnectorService.stop(context);
+                            new StremioConnectorStore(context).clear();
                         }
                     });
-                    return true;
+                    return false;
                 });
             }
 

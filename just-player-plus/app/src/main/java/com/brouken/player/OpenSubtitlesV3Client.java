@@ -225,7 +225,7 @@ final class OpenSubtitlesV3Client {
         }
     }
 
-    private static HttpUrl genericUrl(String type, String id, @Nullable String filename) {
+    static HttpUrl genericUrl(String type, String id, @Nullable String filename) {
         HttpUrl.Builder builder = baseUrl().newBuilder()
                 .addPathSegment("subtitles")
                 .addPathSegment(type);
