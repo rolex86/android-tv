@@ -50,6 +50,7 @@ class PlusPrefs {
     static final String KEY_EXTERNAL_PLAYER_DIAGNOSTICS = "externalPlayerDiagnostics";
     static final String KEY_STREMIO_CONNECTOR_ENABLED = "stremioConnectorEnabled";
     static final String KEY_NEXT_EPISODE_NOTICE_SECONDS = "nextEpisodeNoticeSeconds";
+    static final String KEY_NEXT_EPISODE_POPUP_SIZE = "nextEpisodePopupSize";
 
     static final String KEY_AI_SUBTITLES_ENABLED = "aiSubtitlesEnabled";
     static final String KEY_AI_SUBTITLE_BACKEND_URL = "aiSubtitleBackendUrl";
@@ -91,6 +92,7 @@ class PlusPrefs {
     boolean externalPlayerDiagnostics;
     boolean stremioConnectorEnabled;
     int nextEpisodeNoticeSeconds;
+    String nextEpisodePopupSize;
 
     boolean aiSubtitlesEnabled;
     String aiSubtitleBackendUrl;
@@ -149,6 +151,9 @@ class PlusPrefs {
                 KEY_STREMIO_CONNECTOR_ENABLED, false);
         nextEpisodeNoticeSeconds = Math.max(5, Math.min(90,
                 parseInt(KEY_NEXT_EPISODE_NOTICE_SECONDS, 30)));
+        nextEpisodePopupSize = NextEpisodePopupSize.fromPreference(preferences.getString(
+                KEY_NEXT_EPISODE_POPUP_SIZE,
+                NextEpisodePopupSize.DEFAULT.preferenceValue)).preferenceValue;
 
         aiSubtitlesEnabled = preferences.getBoolean(KEY_AI_SUBTITLES_ENABLED, false);
         aiSubtitleBackendUrl = preferences.getString(KEY_AI_SUBTITLE_BACKEND_URL, "");

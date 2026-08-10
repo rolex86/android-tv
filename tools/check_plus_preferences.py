@@ -71,6 +71,7 @@ runtime_anchors = {
     "KEY_EXTERNAL_PLAYER_DIAGNOSTICS": "PlusPrefs.KEY_EXTERNAL_PLAYER_DIAGNOSTICS",
     "KEY_STREMIO_CONNECTOR_ENABLED": "mPlusPrefs.stremioConnectorEnabled",
     "KEY_NEXT_EPISODE_NOTICE_SECONDS": "mPlusPrefs.nextEpisodeNoticeSeconds",
+    "KEY_NEXT_EPISODE_POPUP_SIZE": "mPlusPrefs.nextEpisodePopupSize",
     "KEY_AI_SUBTITLES_ENABLED": "mPlusPrefs.aiSubtitlesEnabled",
     "KEY_AI_SUBTITLE_BACKEND_URL": "mPlusPrefs.aiSubtitleBackendUrl",
     "KEY_AI_SUBTITLE_TARGET_LANGUAGE": "mPlusPrefs.aiSubtitleTargetLanguage",
