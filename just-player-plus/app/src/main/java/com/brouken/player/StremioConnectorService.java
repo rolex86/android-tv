@@ -7,8 +7,10 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.IBinder;
+import android.preference.PreferenceManager;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
@@ -34,6 +36,7 @@ import okhttp3.OkHttpClient;
 /** Loopback-only Stremio addon that observes content identity and preloads subtitle listings. */
 public final class StremioConnectorService extends Service {
     static final int PORT = 16745;
+    static final String LEGACY_STREAM_RESPONSE = "{\"streams\":[]}";
     static final String HTTP_MANIFEST_URL =
             "http://127.0.0.1:" + PORT + "/manifest.json";
     static final String STREMIO_ADDONS_URL = "stremio:///addons/series";
@@ -43,7 +46,7 @@ public final class StremioConnectorService extends Service {
     private static final int NOTIFICATION_ID = 16745;
     private static final String MANIFEST = "{"
             + "\"id\":\"com.justplayerplus.connector\","
-            + "\"version\":\"1.7.0\","
+            + "\"version\":\"1.8.0\","
             + "\"name\":\"JustPlayer Plus Connector\","
             + "\"description\":\"Local metadata bridge for JustPlayer Plus\","
             + "\"resources\":["
@@ -63,6 +66,9 @@ public final class StremioConnectorService extends Service {
     private ExternalPlayerDiagnostics diagnostics;
     private OkHttpClient subtitleHttpClient;
     private StremioConnectorOpenSubtitles openSubtitles;
+    @Nullable private StremioStreamAggregator streamAggregator;
+    @Nullable private SharedPreferences aggregationPreferences;
+    @Nullable private SharedPreferences.OnSharedPreferenceChangeListener aggregationListener;
 
     static boolean start(Context context) {
         try {
@@ -85,6 +91,15 @@ public final class StremioConnectorService extends Service {
         diagnostics = new ExternalPlayerDiagnostics(this);
         subtitleHttpClient = StremioConnectorOpenSubtitles.newHttpClient();
         openSubtitles = new StremioConnectorOpenSubtitles(subtitleHttpClient);
+        aggregationPreferences = PreferenceManager.getDefaultSharedPreferences(this);
+        aggregationListener = (preferences, key) -> {
+            if (StremioAggregationPreferences.KEY_ENABLED.equals(key)
+                    && !preferences.getBoolean(
+                    StremioAggregationPreferences.KEY_ENABLED, false)) {
+                releaseStreamAggregator();
+            }
+        };
+        aggregationPreferences.registerOnSharedPreferenceChangeListener(aggregationListener);
         createNotificationChannel();
         startForeground(NOTIFICATION_ID, buildNotification());
         startServer();
@@ -112,6 +127,13 @@ public final class StremioConnectorService extends Service {
     public void onDestroy() {
         stopServer();
         clients.shutdownNow();
+        if (aggregationPreferences != null && aggregationListener != null) {
+            aggregationPreferences.unregisterOnSharedPreferenceChangeListener(
+                    aggregationListener);
+        }
+        aggregationPreferences = null;
+        aggregationListener = null;
+        releaseStreamAggregator();
         openSubtitles = null;
         if (subtitleHttpClient != null) {
             subtitleHttpClient.dispatcher().cancelAll();
@@ -241,11 +263,9 @@ public final class StremioConnectorService extends Service {
             } else if ("/manifest.json".equals(path) || "/".equals(path)) {
                 writeResponse(writer, 200, "application/json", MANIFEST);
             } else if (path.startsWith("/stream/series/") && path.endsWith(".json")) {
-                recordStreamRequest(path, "series");
-                writeResponse(writer, 200, "application/json", "{\"streams\":[]}");
+                handleStreamRequest(writer, path, "series");
             } else if (path.startsWith("/stream/movie/") && path.endsWith(".json")) {
-                recordStreamRequest(path, "movie");
-                writeResponse(writer, 200, "application/json", "{\"streams\":[]}");
+                handleStreamRequest(writer, path, "movie");
             } else if (path.startsWith("/subtitles/") && path.endsWith(".json")) {
                 StremioSubtitleRequest request = recordSubtitleRequest(requestTarget);
                 String body;
@@ -317,12 +337,59 @@ public final class StremioConnectorService extends Service {
         return null;
     }
 
-    private void recordStreamRequest(String path, String type) throws IOException {
+    private void handleStreamRequest(BufferedWriter writer, String path, String type)
+            throws IOException {
+        String id = recordStreamRequest(path, type);
+        boolean aggregationEnabled = StremioAggregationPreferences.isEnabled(this);
+        String response = streamResponse(
+                aggregationEnabled,
+                () -> getStreamAggregator().aggregate(type, id));
+        if (aggregationEnabled && !StremioAggregationPreferences.isEnabled(this)) {
+            // The preference listener cancels in-flight calls; never publish a result that won
+            // the race with the kill switch.
+            response = LEGACY_STREAM_RESPONSE;
+        }
+        writeResponse(writer, 200, "application/json", response);
+    }
+
+    static String streamResponse(boolean aggregationEnabled, StreamResponseProvider provider) {
+        if (!aggregationEnabled) {
+            return LEGACY_STREAM_RESPONSE;
+        }
+        try {
+            String response = provider.load();
+            return response == null ? LEGACY_STREAM_RESPONSE : response;
+        } catch (RuntimeException error) {
+            return LEGACY_STREAM_RESPONSE;
+        }
+    }
+
+    private synchronized StremioStreamAggregator getStreamAggregator() {
+        if (streamAggregator == null) {
+            streamAggregator = new StremioStreamAggregator(this, diagnostics);
+        }
+        return streamAggregator;
+    }
+
+    private synchronized void releaseStreamAggregator() {
+        StremioStreamAggregator aggregator = streamAggregator;
+        streamAggregator = null;
+        if (aggregator != null) {
+            aggregator.shutdown();
+        }
+    }
+
+    private String recordStreamRequest(String path, String type) throws IOException {
         String prefix = "/stream/" + type + "/";
         String encodedId = path.substring(prefix.length(), path.length() - ".json".length());
         String id = URLDecoder.decode(encodedId, StandardCharsets.UTF_8.name());
         store.record(type, id, System.currentTimeMillis());
         diagnostics.recordStremioConnector("stream_request", type + "/" + id);
+        return id;
+    }
+
+    interface StreamResponseProvider {
+        String load();
     }
 
     @Nullable

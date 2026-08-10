@@ -284,6 +284,14 @@
             app:summary="@string/pref_stremio_connector_install_summary"
             app:title="@string/pref_stremio_connector_install" />
 
+        <SwitchPreferenceCompat
+            app:key="stremioAggregationEnabled"
+            app:dependency="stremioConnectorEnabled"
+            app:defaultValue="false"
+            app:summaryOn="@string/pref_stremio_aggregation_on"
+            app:summaryOff="@string/pref_stremio_aggregation_off"
+            app:title="@string/pref_stremio_aggregation" />
+
         <ListPreference
             app:key="nextEpisodeNoticeSeconds"
             app:dependency="stremioConnectorEnabled"
@@ -329,6 +337,180 @@
             app:dependency="externalPlayerDiagnostics"
             app:summary="@string/pref_external_player_diagnostics_view_summary"
             app:title="@string/pref_external_player_diagnostics_view" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        app:key="stremioAggregationCategory"
+        app:title="@string/pref_stremio_aggregation_header">
+
+        <Preference
+            app:key="stremioAggregationSources"
+            app:summary="@string/pref_stremio_sources_empty"
+            app:title="@string/pref_stremio_sources" />
+
+        <ListPreference
+            app:key="stremioAggregationSortMode"
+            app:defaultValue="quality_interleaved"
+            app:entries="@array/plus_stremio_sort_entries"
+            app:entryValues="@array/plus_stremio_sort_values"
+            app:title="@string/pref_stremio_sort"
+            app:useSimpleSummaryProvider="true" />
+
+        <SwitchPreferenceCompat
+            app:key="stremioAggregationPreferCached"
+            app:defaultValue="false"
+            app:summary="@string/pref_stremio_prefer_cached_summary"
+            app:title="@string/pref_stremio_prefer_cached" />
+
+        <ListPreference
+            app:key="stremioAggregationSizeSort"
+            app:defaultValue="none"
+            app:entries="@array/plus_stremio_size_sort_entries"
+            app:entryValues="@array/plus_stremio_size_sort_values"
+            app:title="@string/pref_stremio_size_sort"
+            app:useSimpleSummaryProvider="true" />
+
+        <EditTextPreference
+            app:key="stremioAggregationPreferredLanguages"
+            app:defaultValue=""
+            app:dialogTitle="@string/pref_stremio_preferred_languages"
+            app:summary="@string/pref_stremio_preferred_languages_summary"
+            app:title="@string/pref_stremio_preferred_languages"
+            android:inputType="text" />
+
+        <MultiSelectListPreference
+            app:key="stremioAggregationResolutions"
+            app:defaultValue="@array/plus_stremio_resolution_values"
+            app:entries="@array/plus_stremio_resolution_entries"
+            app:entryValues="@array/plus_stremio_resolution_values"
+            app:title="@string/pref_stremio_resolutions" />
+
+        <MultiSelectListPreference
+            app:key="stremioAggregationStreamTypes"
+            app:defaultValue="@array/plus_stremio_stream_type_values"
+            app:entries="@array/plus_stremio_stream_type_entries"
+            app:entryValues="@array/plus_stremio_stream_type_values"
+            app:title="@string/pref_stremio_stream_types" />
+
+        <MultiSelectListPreference
+            app:key="stremioAggregationBlockedReleases"
+            app:entries="@array/plus_stremio_bad_release_entries"
+            app:entryValues="@array/plus_stremio_bad_release_values"
+            app:summary="@string/pref_stremio_blocked_releases_summary"
+            app:title="@string/pref_stremio_blocked_releases" />
+
+        <MultiSelectListPreference
+            app:key="stremioAggregationCodecs"
+            app:defaultValue="@array/plus_stremio_codec_values"
+            app:entries="@array/plus_stremio_codec_entries"
+            app:entryValues="@array/plus_stremio_codec_values"
+            app:title="@string/pref_stremio_codecs" />
+
+        <MultiSelectListPreference
+            app:key="stremioAggregationHdrFormats"
+            app:defaultValue="@array/plus_stremio_hdr_values"
+            app:entries="@array/plus_stremio_hdr_entries"
+            app:entryValues="@array/plus_stremio_hdr_values"
+            app:title="@string/pref_stremio_hdr" />
+
+        <SwitchPreferenceCompat
+            app:key="stremioAggregationKeepUnknownTech"
+            app:defaultValue="true"
+            app:summary="@string/pref_stremio_keep_unknown_tech_summary"
+            app:title="@string/pref_stremio_keep_unknown_tech" />
+
+        <EditTextPreference
+            app:key="stremioAggregationAllowedLanguages"
+            app:defaultValue=""
+            app:dialogTitle="@string/pref_stremio_allowed_languages"
+            app:summary="@string/pref_stremio_allowed_languages_summary"
+            app:title="@string/pref_stremio_allowed_languages"
+            android:inputType="text" />
+
+        <SwitchPreferenceCompat
+            app:key="stremioAggregationKeepUnknownLanguage"
+            app:defaultValue="true"
+            app:summary="@string/pref_stremio_keep_unknown_language_summary"
+            app:title="@string/pref_stremio_keep_unknown_language" />
+
+        <EditTextPreference
+            app:key="stremioAggregationMinSizeGb"
+            app:defaultValue="0"
+            app:dialogTitle="@string/pref_stremio_min_size"
+            app:title="@string/pref_stremio_min_size"
+            android:inputType="numberDecimal" />
+
+        <EditTextPreference
+            app:key="stremioAggregationMaxSizeGb"
+            app:defaultValue="0"
+            app:dialogTitle="@string/pref_stremio_max_size"
+            app:title="@string/pref_stremio_max_size"
+            android:inputType="numberDecimal" />
+
+        <SwitchPreferenceCompat
+            app:key="stremioAggregationKeepUnknownSize"
+            app:defaultValue="true"
+            app:summary="@string/pref_stremio_keep_unknown_size_summary"
+            app:title="@string/pref_stremio_keep_unknown_size" />
+
+        <EditTextPreference
+            app:key="stremioAggregationBlockedText"
+            app:defaultValue=""
+            app:dialogTitle="@string/pref_stremio_blocked_text"
+            app:summary="@string/pref_stremio_blocked_text_summary"
+            app:title="@string/pref_stremio_blocked_text"
+            android:inputType="textMultiLine" />
+
+        <EditTextPreference
+            app:key="stremioAggregationMaxTotal"
+            app:defaultValue="100"
+            app:dialogTitle="@string/pref_stremio_max_total"
+            app:title="@string/pref_stremio_max_total"
+            android:inputType="number" />
+
+        <EditTextPreference
+            app:key="stremioAggregationMaxPerSource"
+            app:defaultValue="30"
+            app:dialogTitle="@string/pref_stremio_max_source"
+            app:title="@string/pref_stremio_max_source"
+            android:inputType="number" />
+
+        <EditTextPreference
+            app:key="stremioAggregationMaxPerQuality"
+            app:defaultValue="0"
+            app:dialogTitle="@string/pref_stremio_max_quality"
+            app:title="@string/pref_stremio_max_quality"
+            android:inputType="number" />
+
+        <ListPreference
+            app:key="stremioAggregationDeduplication"
+            app:defaultValue="safe"
+            app:entries="@array/plus_stremio_deduplication_entries"
+            app:entryValues="@array/plus_stremio_deduplication_values"
+            app:title="@string/pref_stremio_deduplication"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            app:key="stremioAggregationBingeGroup"
+            app:defaultValue="quality"
+            app:entries="@array/plus_stremio_binge_entries"
+            app:entryValues="@array/plus_stremio_binge_values"
+            app:title="@string/pref_stremio_binge"
+            app:useSimpleSummaryProvider="true" />
+
+        <MultiSelectListPreference
+            app:key="stremioAggregationDisplayFields"
+            app:defaultValue="@array/plus_stremio_display_values"
+            app:entries="@array/plus_stremio_display_entries"
+            app:entryValues="@array/plus_stremio_display_values"
+            app:summary="@string/pref_stremio_display_summary"
+            app:title="@string/pref_stremio_display" />
+
+        <Preference
+            app:key="stremioAggregationReset"
+            app:summary="@string/pref_stremio_reset_summary"
+            app:title="@string/pref_stremio_reset" />
 
     </PreferenceCategory>
 

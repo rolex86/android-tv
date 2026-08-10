@@ -21,6 +21,8 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.EditText;
+import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -32,6 +34,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.preference.EditTextPreference;
 import androidx.preference.ListPreference;
 import androidx.preference.Preference;
+import androidx.preference.PreferenceCategory;
 import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.SwitchPreferenceCompat;
 import androidx.recyclerview.widget.RecyclerView;
@@ -41,6 +44,7 @@ import com.brouken.player.aisubtitles.AiSubtitlePreferences;
 import java.text.Collator;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -48,6 +52,7 @@ import java.util.MissingResourceException;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
+import okhttp3.HttpUrl;
 
 public class SettingsActivity extends AppCompatActivity {
 
@@ -187,6 +192,15 @@ public class SettingsActivity extends AppCompatActivity {
                         return false;
                     }
                     connector.setChecked(enabled);
+                    PreferenceCategory aggregationCategory = findPreference(
+                            StremioAggregationPreferences.KEY_CATEGORY);
+                    SwitchPreferenceCompat aggregationEnabled = findPreference(
+                            StremioAggregationPreferences.KEY_ENABLED);
+                    if (aggregationCategory != null) {
+                        aggregationCategory.setVisible(enabled
+                                && aggregationEnabled != null
+                                && aggregationEnabled.isChecked());
+                    }
                     new Handler(Looper.getMainLooper()).post(() -> {
                         if (enabled) {
                             requestConnectorNotificationPermission();
@@ -199,6 +213,8 @@ public class SettingsActivity extends AppCompatActivity {
                     return false;
                 });
             }
+
+            setupStremioAggregationPreferences(connector);
 
             Preference installConnector = findPreference("stremioConnectorInstall");
             if (installConnector != null) {
@@ -242,6 +258,394 @@ public class SettingsActivity extends AppCompatActivity {
             if (new PlusPrefs(requireContext()).stremioConnectorEnabled) {
                 StremioConnectorService.start(requireContext());
             }
+        }
+
+        private void setupStremioAggregationPreferences(
+                @Nullable SwitchPreferenceCompat connector) {
+            SwitchPreferenceCompat enabled = findPreference(
+                    StremioAggregationPreferences.KEY_ENABLED);
+            PreferenceCategory category = findPreference(
+                    StremioAggregationPreferences.KEY_CATEGORY);
+            Preference sourcesPreference = findPreference(
+                    StremioAggregationPreferences.KEY_SOURCES);
+            Preference resetPreference = findPreference(
+                    StremioAggregationPreferences.KEY_RESET);
+            if (enabled == null || category == null
+                    || sourcesPreference == null || resetPreference == null) {
+                return;
+            }
+
+            StremioStreamSourceStore sourceStore =
+                    new StremioStreamSourceStore(requireContext());
+            Runnable refreshSources = () -> {
+                List<StremioStreamSourceStore.Source> sources = sourceStore.load();
+                int active = 0;
+                for (StremioStreamSourceStore.Source source : sources) {
+                    if (source.enabled) active++;
+                }
+                sourcesPreference.setSummary(sources.isEmpty()
+                        ? getString(R.string.pref_stremio_sources_empty)
+                        : getString(R.string.pref_stremio_sources_count,
+                        sources.size(), active));
+            };
+            Runnable refreshVisibility = () -> category.setVisible(
+                    enabled.isChecked() && (connector == null || connector.isChecked()));
+            enabled.setOnPreferenceChangeListener((preference, newValue) -> {
+                category.setVisible(Boolean.TRUE.equals(newValue)
+                        && (connector == null || connector.isChecked()));
+                return true;
+            });
+            sourcesPreference.setOnPreferenceClickListener(preference -> {
+                showStreamSourcesDialog(sourceStore, refreshSources);
+                return true;
+            });
+            resetPreference.setOnPreferenceClickListener(preference -> {
+                new AlertDialog.Builder(requireContext())
+                        .setMessage(R.string.pref_stremio_reset_confirm)
+                        .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                            StremioAggregationPreferences.reset(requireContext());
+                            Toast.makeText(requireContext(),
+                                    R.string.pref_stremio_reset_done,
+                                    Toast.LENGTH_SHORT).show();
+                            requireActivity().recreate();
+                        })
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .show();
+                return true;
+            });
+
+            setupAggregationEditFields();
+            refreshSources.run();
+            refreshVisibility.run();
+        }
+
+        private void setupAggregationEditFields() {
+            for (String key : new String[]{
+                    StremioAggregationPreferences.KEY_MIN_SIZE_GB,
+                    StremioAggregationPreferences.KEY_MAX_SIZE_GB}) {
+                EditTextPreference preference = findPreference(key);
+                if (preference != null) {
+                    preference.setOnBindEditTextListener(editText -> editText.setInputType(
+                            InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL));
+                }
+            }
+            for (String key : new String[]{
+                    StremioAggregationPreferences.KEY_MAX_TOTAL,
+                    StremioAggregationPreferences.KEY_MAX_PER_SOURCE,
+                    StremioAggregationPreferences.KEY_MAX_PER_QUALITY}) {
+                EditTextPreference preference = findPreference(key);
+                if (preference != null) {
+                    preference.setOnBindEditTextListener(editText -> editText.setInputType(
+                            InputType.TYPE_CLASS_NUMBER));
+                }
+            }
+            EditTextPreference blocked = findPreference(
+                    StremioAggregationPreferences.KEY_BLOCKED_TEXT);
+            if (blocked != null) {
+                blocked.setOnBindEditTextListener(editText -> {
+                    editText.setSingleLine(false);
+                    editText.setMinLines(5);
+                    editText.setInputType(InputType.TYPE_CLASS_TEXT
+                            | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+                });
+            }
+        }
+
+        private void showStreamSourcesDialog(
+                StremioStreamSourceStore store,
+                Runnable refreshSummary) {
+            Context context = requireContext();
+            List<StremioStreamSourceStore.Source> sources = store.load();
+            int padding = Math.round(16f * getResources().getDisplayMetrics().density);
+            LinearLayout content = new LinearLayout(context);
+            content.setOrientation(LinearLayout.VERTICAL);
+            content.setPadding(padding, padding / 2, padding, padding / 2);
+
+            final AlertDialog[] holder = new AlertDialog[1];
+            for (int index = 0; index < sources.size(); index++) {
+                StremioStreamSourceStore.Source source = sources.get(index);
+                LinearLayout sourceBlock = new LinearLayout(context);
+                sourceBlock.setOrientation(LinearLayout.VERTICAL);
+                sourceBlock.setPadding(0, padding / 3, 0, padding / 2);
+
+                CheckBox active = new CheckBox(context);
+                active.setText(source.name.isEmpty()
+                        ? getString(R.string.pref_stremio_sources) + " " + (index + 1)
+                        : source.name);
+                active.setChecked(source.enabled);
+                final int sourceIndex = index;
+                active.setOnCheckedChangeListener((button, checked) -> {
+                    List<StremioStreamSourceStore.Source> updated =
+                            new ArrayList<>(store.load());
+                    if (sourceIndex >= updated.size()) return;
+                    StremioStreamSourceStore.Source current = updated.get(sourceIndex);
+                    updated.set(sourceIndex, current.withValues(
+                            current.manifestUrl, current.name, checked));
+                    if (!store.save(updated)) {
+                        button.setOnCheckedChangeListener(null);
+                        button.setChecked(!checked);
+                        Toast.makeText(context,
+                                R.string.pref_stremio_source_store_failed,
+                                Toast.LENGTH_LONG).show();
+                    }
+                    refreshSummary.run();
+                });
+                sourceBlock.addView(active);
+
+                LinearLayout actions = new LinearLayout(context);
+                actions.setOrientation(LinearLayout.HORIZONTAL);
+                Button up = actionButton(context, R.string.pref_stremio_source_up);
+                Button down = actionButton(context, R.string.pref_stremio_source_down);
+                Button edit = actionButton(context, R.string.pref_stremio_source_edit);
+                up.setEnabled(index > 0);
+                down.setEnabled(index + 1 < sources.size());
+                up.setOnClickListener(view -> moveSource(
+                        store, sourceIndex, -1, holder[0], refreshSummary));
+                down.setOnClickListener(view -> moveSource(
+                        store, sourceIndex, 1, holder[0], refreshSummary));
+                edit.setOnClickListener(view -> {
+                    holder[0].dismiss();
+                    showEditStreamSourceDialog(store, source, refreshSummary);
+                });
+                actions.addView(up);
+                actions.addView(down);
+                actions.addView(edit);
+                sourceBlock.addView(actions);
+                content.addView(sourceBlock);
+            }
+
+            Button add = new Button(context);
+            add.setText(R.string.pref_stremio_source_add);
+            add.setOnClickListener(view -> {
+                holder[0].dismiss();
+                showEditStreamSourceDialog(store, null, refreshSummary);
+            });
+            content.addView(add);
+
+            ScrollView scroll = new ScrollView(context);
+            scroll.addView(content);
+            holder[0] = new AlertDialog.Builder(context)
+                    .setTitle(R.string.pref_stremio_sources_dialog)
+                    .setView(scroll)
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .create();
+            holder[0].show();
+        }
+
+        private Button actionButton(Context context, int text) {
+            Button button = new Button(context);
+            button.setText(text);
+            button.setLayoutParams(new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            return button;
+        }
+
+        private void moveSource(StremioStreamSourceStore store,
+                                int index,
+                                int delta,
+                                AlertDialog dialog,
+                                Runnable refreshSummary) {
+            List<StremioStreamSourceStore.Source> sources = new ArrayList<>(store.load());
+            int target = index + delta;
+            if (index < 0 || index >= sources.size() || target < 0 || target >= sources.size()) {
+                return;
+            }
+            Collections.swap(sources, index, target);
+            if (!store.save(sources)) {
+                Toast.makeText(requireContext(),
+                        R.string.pref_stremio_source_store_failed,
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            refreshSummary.run();
+            dialog.dismiss();
+            showStreamSourcesDialog(store, refreshSummary);
+        }
+
+        private void showEditStreamSourceDialog(
+                StremioStreamSourceStore store,
+                @Nullable StremioStreamSourceStore.Source existing,
+                Runnable refreshSummary) {
+            Context context = requireContext();
+            int padding = Math.round(20f * getResources().getDisplayMetrics().density);
+            LinearLayout content = new LinearLayout(context);
+            content.setOrientation(LinearLayout.VERTICAL);
+            content.setPadding(padding, padding / 2, padding, 0);
+
+            EditText name = new EditText(context);
+            name.setHint(R.string.pref_stremio_source_name);
+            name.setSingleLine(true);
+            EditText manifestUrl = new EditText(context);
+            manifestUrl.setHint(R.string.pref_stremio_source_url);
+            manifestUrl.setSingleLine(true);
+            manifestUrl.setInputType(InputType.TYPE_CLASS_TEXT
+                    | InputType.TYPE_TEXT_VARIATION_URI);
+            CheckBox active = new CheckBox(context);
+            active.setText(R.string.pref_stremio_source_enabled);
+            active.setChecked(existing == null || existing.enabled);
+            if (existing != null) {
+                name.setText(existing.name);
+                manifestUrl.setText(existing.manifestUrl);
+            }
+            content.addView(name);
+            content.addView(manifestUrl);
+            content.addView(active);
+
+            Button delete = new Button(context);
+            delete.setText(R.string.pref_stremio_source_delete);
+            delete.setVisibility(existing == null ? View.GONE : View.VISIBLE);
+            content.addView(delete);
+
+            AlertDialog dialog = new AlertDialog.Builder(context)
+                    .setTitle(existing == null
+                            ? R.string.pref_stremio_source_add
+                            : R.string.pref_stremio_source_edit)
+                    .setView(content)
+                    .setPositiveButton(R.string.pref_stremio_source_save, null)
+                    .setNeutralButton(R.string.pref_stremio_source_test, null)
+                    .setNegativeButton(android.R.string.cancel, (ignored, which) ->
+                            showStreamSourcesDialog(store, refreshSummary))
+                    .create();
+            dialog.setOnShowListener(ignored -> {
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+                    String url = manifestUrl.getText().toString().trim();
+                    HttpUrl parsed = StremioAddonClient.parseManifestUrl(url);
+                    if (parsed == null) {
+                        Toast.makeText(context,
+                                R.string.pref_stremio_source_invalid,
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    String enteredName = name.getText().toString().trim();
+                    if (!enteredName.isEmpty()) {
+                        persistStreamSource(store, existing, url, enteredName,
+                                active.isChecked(), dialog, refreshSummary);
+                        return;
+                    }
+                    inspectStreamSource(url, result -> {
+                        if (!result.success) {
+                            Toast.makeText(context,
+                                    getString(R.string.pref_stremio_source_test_failed,
+                                            result.state),
+                                    Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        String detectedName = result.name.isEmpty()
+                                ? parsed.host() : result.name;
+                        name.setText(detectedName);
+                        persistStreamSource(store, existing, url, detectedName,
+                                active.isChecked(), dialog, refreshSummary);
+                    });
+                });
+                dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(view -> {
+                    String url = manifestUrl.getText().toString().trim();
+                    if (StremioAddonClient.parseManifestUrl(url) == null) {
+                        Toast.makeText(context,
+                                R.string.pref_stremio_source_invalid,
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    inspectStreamSource(url, result -> {
+                        if (result.success) {
+                            if (name.getText().toString().trim().isEmpty()
+                                    && !result.name.isEmpty()) {
+                                name.setText(result.name);
+                            }
+                            Toast.makeText(context,
+                                    getString(R.string.pref_stremio_source_test_ok,
+                                            result.name.isEmpty() ? "OK" : result.name),
+                                    Toast.LENGTH_LONG).show();
+                        } else {
+                            Toast.makeText(context,
+                                    getString(R.string.pref_stremio_source_test_failed,
+                                            result.state),
+                                    Toast.LENGTH_LONG).show();
+                        }
+                    });
+                });
+                delete.setOnClickListener(view -> {
+                    if (existing == null) return;
+                    List<StremioStreamSourceStore.Source> sources =
+                            new ArrayList<>(store.load());
+                    for (int index = sources.size() - 1; index >= 0; index--) {
+                        if (sources.get(index).id.equals(existing.id)) {
+                            sources.remove(index);
+                        }
+                    }
+                    if (!store.save(sources)) {
+                        Toast.makeText(context,
+                                R.string.pref_stremio_source_store_failed,
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    refreshSummary.run();
+                    Toast.makeText(context,
+                            R.string.pref_stremio_source_removed,
+                            Toast.LENGTH_SHORT).show();
+                    dialog.dismiss();
+                    showStreamSourcesDialog(store, refreshSummary);
+                });
+            });
+            dialog.show();
+        }
+
+        private void persistStreamSource(
+                StremioStreamSourceStore store,
+                @Nullable StremioStreamSourceStore.Source existing,
+                String manifestUrl,
+                String name,
+                boolean enabled,
+                AlertDialog dialog,
+                Runnable refreshSummary) {
+            List<StremioStreamSourceStore.Source> sources = new ArrayList<>(store.load());
+            if (existing == null) {
+                StremioStreamSourceStore.Source created =
+                        StremioStreamSourceStore.Source.create(manifestUrl, name)
+                                .withValues(manifestUrl, name, enabled);
+                sources.add(created);
+            } else {
+                for (int index = 0; index < sources.size(); index++) {
+                    if (sources.get(index).id.equals(existing.id)) {
+                        sources.set(index, existing.withValues(manifestUrl, name, enabled));
+                        break;
+                    }
+                }
+            }
+            if (!store.save(sources)) {
+                Toast.makeText(requireContext(),
+                        R.string.pref_stremio_source_store_failed,
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            refreshSummary.run();
+            Toast.makeText(requireContext(),
+                    R.string.pref_stremio_source_saved,
+                    Toast.LENGTH_SHORT).show();
+            dialog.dismiss();
+            showStreamSourcesDialog(store, refreshSummary);
+        }
+
+        private void inspectStreamSource(
+                String manifestUrl,
+                ManifestResultListener listener) {
+            Toast.makeText(requireContext(),
+                    R.string.pref_stremio_source_test_running,
+                    Toast.LENGTH_SHORT).show();
+            new Thread(() -> {
+                OkHttpClient client = StremioAddonClient.newHttpClient();
+                StremioAddonClient.ManifestResult result =
+                        new StremioAddonClient(client).inspectManifest(manifestUrl);
+                client.dispatcher().cancelAll();
+                client.connectionPool().evictAll();
+                if (!isAdded()) return;
+                requireActivity().runOnUiThread(() -> {
+                    if (isAdded()) listener.onResult(result);
+                });
+            }, "stremio-source-test").start();
+        }
+
+        private interface ManifestResultListener {
+            void onResult(StremioAddonClient.ManifestResult result);
         }
 
         private void requestConnectorNotificationPermission() {

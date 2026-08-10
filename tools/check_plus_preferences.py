@@ -19,6 +19,8 @@ TEST_PATH = (
 OFFSET_TEST_PATH = TEST_PATH.with_name("OffsetSubtitleParserFactoryTest.java")
 END_TIME_TEST_PATH = TEST_PATH.with_name("PlaybackEndTimeTest.java")
 STREMIO_TEST_PATH = TEST_PATH.with_name("StremioNextEpisodeTest.java")
+STREMIO_STREAM_TEST_PATH = TEST_PATH.with_name("StremioStreamPipelineTest.java")
+STREMIO_AGGREGATION_PREFS_PATH = APP / "java" / "com" / "brouken" / "player" / "StremioAggregationPreferences.java"
 AI_TEST_PATH = (
     ROOT / "just-player-plus" / "app" / "src" / "test" / "java"
     / "com" / "brouken" / "player" / "aisubtitles" / "AiSubtitlePolicyTest.java"
@@ -317,6 +319,70 @@ if preferences_xml.count('app:key="aiSubtitleApiToken"') != 1:
     errors.append("AI subtitle access token must occur exactly once in root_preferences.xml")
 if "AiSubtitlePreferences.KEY_API_TOKEN" not in external_java:
     errors.append("AI subtitle access token has no runtime hook")
+
+aggregation_keys = (
+    "stremioAggregationEnabled",
+    "stremioAggregationSources",
+    "stremioAggregationSortMode",
+    "stremioAggregationPreferCached",
+    "stremioAggregationSizeSort",
+    "stremioAggregationPreferredLanguages",
+    "stremioAggregationResolutions",
+    "stremioAggregationStreamTypes",
+    "stremioAggregationBlockedReleases",
+    "stremioAggregationCodecs",
+    "stremioAggregationHdrFormats",
+    "stremioAggregationKeepUnknownTech",
+    "stremioAggregationAllowedLanguages",
+    "stremioAggregationKeepUnknownLanguage",
+    "stremioAggregationMinSizeGb",
+    "stremioAggregationMaxSizeGb",
+    "stremioAggregationKeepUnknownSize",
+    "stremioAggregationBlockedText",
+    "stremioAggregationMaxTotal",
+    "stremioAggregationMaxPerSource",
+    "stremioAggregationMaxPerQuality",
+    "stremioAggregationDeduplication",
+    "stremioAggregationBingeGroup",
+    "stremioAggregationDisplayFields",
+    "stremioAggregationReset",
+)
+if not STREMIO_AGGREGATION_PREFS_PATH.exists():
+    errors.append("Stremio aggregation preferences are missing")
+else:
+    aggregation_preferences = STREMIO_AGGREGATION_PREFS_PATH.read_text(encoding="utf-8")
+    for aggregation_key in aggregation_keys:
+        if aggregation_key not in aggregation_preferences:
+            errors.append(f"Aggregation preference has no runtime definition: {aggregation_key}")
+        if preferences_xml.count(f'app:key="{aggregation_key}"') != 1:
+            errors.append(
+                f"Aggregation preference must occur once in XML: {aggregation_key}"
+            )
+
+for aggregation_hook in (
+    "StremioAggregationPreferences.isEnabled(this)",
+    "streamResponse(\n                aggregationEnabled",
+    "new StremioStreamSourceStore(requireContext())",
+    "StremioAddonClient.parseManifestUrl(url)",
+    "aggregator.shutdown()",
+):
+    if aggregation_hook not in external_java:
+        errors.append(f"Missing Stremio aggregation runtime hook: {aggregation_hook}")
+
+if not STREMIO_STREAM_TEST_PATH.exists():
+    errors.append("Stremio stream aggregation regression tests are missing")
+else:
+    stream_tests = STREMIO_STREAM_TEST_PATH.read_text(encoding="utf-8")
+    for test_name in (
+        "disabledGateReturnsExactVersion258ResponseWithoutInvokingAggregator",
+        "qualityOrderingInterleavesSourcesAndKeepsOriginalPlaybackFields",
+        "safeDeduplicationUsesExactPlaybackIdentityAndHigherSourcePriority",
+        "filtersReleaseLanguageSizeTypeAndUserTextConservatively",
+        "bingeModesAreStableAndNonePreservesOriginalHint",
+        "streamEndpointDerivationPreservesConfiguredPathAndQuery",
+    ):
+        if test_name not in stream_tests:
+            errors.append(f"Missing Stremio stream regression test: {test_name}")
 
 # These binaries contain the protected Media3 renderer/audio path and extension decoders.
 # An intentional upstream refresh must review the playback regression matrix and update hashes.
