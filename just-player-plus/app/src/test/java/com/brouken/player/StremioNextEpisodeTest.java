@@ -124,6 +124,21 @@ public class StremioNextEpisodeTest {
     }
 
     @Test
+    public void expectedNextNeverOverridesANewerStreamRequest() {
+        StremioConnectorStore.ExpectedEpisode expected =
+                new StremioConnectorStore.ExpectedEpisode(
+                        StremioEpisodeId.parse("tt1:2:4"), 10_000L);
+
+        assertTrue(StremioConnectorStore.shouldUseExpectedEpisode(
+                event("tt1:2:3", 9_999L), expected));
+        assertTrue(StremioConnectorStore.shouldUseExpectedEpisode(null, expected));
+        assertFalse(StremioConnectorStore.shouldUseExpectedEpisode(
+                event("tt1:2:3", 10_001L), expected));
+        assertFalse(StremioConnectorStore.shouldUseExpectedEpisode(
+                event("tt1:2:3", 10_000L), expected));
+    }
+
+    @Test
     public void freshMovieRequestSupersedesStaleSeriesRequest() {
         long now = 1_000_000L;
 

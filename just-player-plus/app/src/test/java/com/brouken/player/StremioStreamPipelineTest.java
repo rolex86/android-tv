@@ -143,6 +143,34 @@ public class StremioStreamPipelineTest {
     }
 
     @Test
+    public void diagnosticsCountEveryPipelineStageAndFilterReason() throws Exception {
+        StremioStreamSourceStore.Source source = source(
+                "11111111-1111-1111-1111-111111111111", "Source");
+        JSONObject keep = direct(
+                "https://video.test/keep", "Show.1080p.CZ.HEVC.mkv", 8_000_000_000L);
+        JSONObject duplicate = new JSONObject(keep.toString());
+        JSONObject wrongLanguage = direct(
+                "https://video.test/en", "Show.1080p.EN.HEVC.mkv", 8_000_000_000L);
+        JSONObject invalid = new JSONObject().put("name", "Show.1080p.CZ");
+
+        StremioStreamPipeline.Result result = StremioStreamPipeline.processDetailed(
+                Collections.singletonList(sourceStreams(
+                        source, 0, keep, duplicate, wrongLanguage, invalid)),
+                new StremioAggregationPreferences.Builder()
+                        .setAllowedLanguages(set("cz"))
+                        .build());
+
+        assertEquals("loaded", result.state);
+        assertEquals(4, result.stats.raw);
+        assertEquals(1, result.stats.accepted);
+        assertEquals(1, result.stats.returned);
+        assertEquals(1, result.stats.duplicate);
+        assertEquals(1, result.stats.invalid);
+        assertEquals(Integer.valueOf(1), result.stats.rejected.get("language"));
+        assertTrue(result.stats.summary().contains("filter_language=1"));
+    }
+
+    @Test
     public void bingeModesAreStableAndNonePreservesOriginalHint() throws Exception {
         StremioStreamSourceStore.Source source = source(
                 "11111111-1111-1111-1111-111111111111", "Source");

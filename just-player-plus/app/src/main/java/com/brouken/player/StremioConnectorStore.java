@@ -84,9 +84,9 @@ final class StremioConnectorStore {
         synchronized (LOCK) {
             List<Event> events = readEvents();
             Event event = findRecentEvent(events, nowMs);
-            StremioEpisodeId expected = claimExpectedEpisode(nowMs);
-            if (expected != null && (event == null || !expected.raw.equals(event.id))) {
-                Content content = Content.series(expected)
+            ExpectedEpisode expected = claimExpectedEpisode(nowMs);
+            if (shouldUseExpectedEpisode(event, expected)) {
+                Content content = Content.series(expected.episode)
                         .withCorrelation("expected_next", 0L);
                 rememberAssociation(launchIdentity, content, nowMs);
                 return content;
@@ -336,7 +336,7 @@ final class StremioConnectorStore {
     }
 
     @Nullable
-    private StremioEpisodeId claimExpectedEpisode(long nowMs) {
+    private ExpectedEpisode claimExpectedEpisode(long nowMs) {
         String encoded = preferences.getString(KEY_EXPECTED_EPISODE, null);
         preferences.edit().remove(KEY_EXPECTED_EPISODE).apply();
         if (encoded == null) {
@@ -351,10 +351,19 @@ final class StremioConnectorStore {
             if (timestamp > nowMs + 10_000L || nowMs - timestamp > MAX_EXPECTED_AGE_MS) {
                 return null;
             }
-            return StremioEpisodeId.parse(encoded.substring(0, separator));
+            StremioEpisodeId episode = StremioEpisodeId.parse(
+                    encoded.substring(0, separator));
+            return episode == null ? null : new ExpectedEpisode(episode, timestamp);
         } catch (NumberFormatException ignored) {
             return null;
         }
+    }
+
+    static boolean shouldUseExpectedEpisode(
+            @Nullable Event event,
+            @Nullable ExpectedEpisode expected) {
+        return expected != null
+                && (event == null || event.timestampMs < expected.timestampMs);
     }
 
     @Nullable
@@ -461,6 +470,16 @@ final class StremioConnectorStore {
             this.type = type;
             this.id = id;
             this.mediaFilename = normalizeFilename(mediaFilename);
+            this.timestampMs = timestampMs;
+        }
+    }
+
+    static final class ExpectedEpisode {
+        final StremioEpisodeId episode;
+        final long timestampMs;
+
+        ExpectedEpisode(StremioEpisodeId episode, long timestampMs) {
+            this.episode = episode;
             this.timestampMs = timestampMs;
         }
     }

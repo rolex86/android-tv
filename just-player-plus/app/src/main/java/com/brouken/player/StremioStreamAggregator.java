@@ -67,6 +67,12 @@ final class StremioStreamAggregator {
             }
         }
         if (sources.isEmpty()) {
+            diagnostics.recordStremioConnector(
+                    "aggregation_complete",
+                    "configuredSources=" + allSources.size()
+                            + " enabledSources=0 loadedSources=0"
+                            + " raw=0 accepted=0 returned=0"
+                            + " reason=no_enabled_sources durationMs=0");
             return StremioConnectorService.LEGACY_STREAM_RESPONSE;
         }
 
@@ -74,7 +80,11 @@ final class StremioStreamAggregator {
         long now = System.currentTimeMillis();
         CacheEntry cached = cache.get(cacheKey);
         if (cached != null && now - cached.createdAtMs <= CACHE_AGE_MS) {
-            return cached.response;
+            diagnostics.recordStremioConnector(
+                    "aggregation_cache_hit",
+                    cached.result.stats.summary()
+                            + " ageMs=" + Math.max(0L, now - cached.createdAtMs));
+            return cached.result.response;
         }
 
         CompletionService<StremioAddonClient.StreamResult> completion =
@@ -122,7 +132,10 @@ final class StremioStreamAggregator {
             }
         } catch (Exception error) {
             diagnostics.recordStremioConnector(
-                    "aggregation_partial", "completed=" + loaded.size());
+                    "aggregation_partial",
+                    "loadedSources=" + loaded.size()
+                            + " remainingSources=" + remaining
+                            + " error=" + error.getClass().getSimpleName());
         } finally {
             for (int index = 0; index < futures.size(); index++) {
                 Future<StremioAddonClient.StreamResult> future = futures.get(index);
@@ -136,18 +149,26 @@ final class StremioStreamAggregator {
             }
         }
 
-        String response = StremioStreamPipeline.process(loaded, settings);
+        StremioStreamPipeline.Result result =
+                StremioStreamPipeline.processDetailed(loaded, settings);
+        diagnostics.recordStremioConnector(
+                "loaded".equals(result.state)
+                        ? "aggregation_pipeline" : "aggregation_pipeline_failed",
+                "state=" + result.state + ' ' + result.stats.summary());
         if (!loaded.isEmpty() || remaining == 0) {
             if (cache.size() >= MAX_CACHE_ENTRIES) {
                 cache.clear();
             }
-            cache.put(cacheKey, new CacheEntry(response, now));
+            cache.put(cacheKey, new CacheEntry(result, now));
         }
         diagnostics.recordStremioConnector(
                 "aggregation_complete",
-                "sources=" + loaded.size() + " durationMs="
+                "configuredSources=" + allSources.size()
+                        + " enabledSources=" + sources.size()
+                        + " loadedSources=" + loaded.size() + ' '
+                        + result.stats.summary() + " durationMs="
                         + Math.max(0L, System.currentTimeMillis() - now));
-        return response;
+        return result.response;
     }
 
     void shutdown() {
@@ -188,11 +209,11 @@ final class StremioStreamAggregator {
     }
 
     private static final class CacheEntry {
-        final String response;
+        final StremioStreamPipeline.Result result;
         final long createdAtMs;
 
-        CacheEntry(String response, long createdAtMs) {
-            this.response = response;
+        CacheEntry(StremioStreamPipeline.Result result, long createdAtMs) {
+            this.result = result;
             this.createdAtMs = createdAtMs;
         }
     }

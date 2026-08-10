@@ -340,19 +340,53 @@ public final class StremioConnectorService extends Service {
     private void handleStreamRequest(BufferedWriter writer, String path, String type)
             throws IOException {
         String id = recordStreamRequest(path, type);
+        long startedAt = System.currentTimeMillis();
         boolean aggregationEnabled = StremioAggregationPreferences.isEnabled(this);
         String response = streamResponse(
                 aggregationEnabled,
-                () -> getStreamAggregator().aggregate(type, id));
+                () -> getStreamAggregator().aggregate(type, id),
+                error -> diagnostics.recordStremioConnector(
+                        "aggregation_failed",
+                        type + "/" + id + " error="
+                                + error.getClass().getSimpleName()));
         if (aggregationEnabled && !StremioAggregationPreferences.isEnabled(this)) {
             // The preference listener cancels in-flight calls; never publish a result that won
             // the race with the kill switch.
             response = LEGACY_STREAM_RESPONSE;
+            diagnostics.recordStremioConnector(
+                    "aggregation_kill_switch", type + "/" + id);
         }
-        writeResponse(writer, 200, "application/json", response);
+        int streamCount = streamCount(response);
+        int responseBytes = response.getBytes(StandardCharsets.UTF_8).length;
+        diagnostics.recordStremioConnector(
+                "aggregation_response_ready",
+                type + "/" + id + " streams=" + streamCount
+                        + " bytes=" + responseBytes);
+        try {
+            writeResponse(writer, 200, "application/json", response);
+        } catch (IOException error) {
+            diagnostics.recordStremioConnector(
+                    "aggregation_response_failed",
+                    type + "/" + id + " streams=" + streamCount
+                            + " bytes=" + responseBytes
+                            + " error=" + error.getClass().getSimpleName());
+            throw error;
+        }
+        diagnostics.recordStremioConnector(
+                "aggregation_response_written",
+                type + "/" + id + " streams=" + streamCount
+                        + " bytes=" + responseBytes
+                        + " durationMs="
+                        + Math.max(0L, System.currentTimeMillis() - startedAt));
     }
 
     static String streamResponse(boolean aggregationEnabled, StreamResponseProvider provider) {
+        return streamResponse(aggregationEnabled, provider, null);
+    }
+
+    static String streamResponse(boolean aggregationEnabled,
+                                 StreamResponseProvider provider,
+                                 @Nullable StreamResponseErrorHandler errorHandler) {
         if (!aggregationEnabled) {
             return LEGACY_STREAM_RESPONSE;
         }
@@ -360,7 +394,20 @@ public final class StremioConnectorService extends Service {
             String response = provider.load();
             return response == null ? LEGACY_STREAM_RESPONSE : response;
         } catch (RuntimeException error) {
+            if (errorHandler != null) {
+                errorHandler.onError(error);
+            }
             return LEGACY_STREAM_RESPONSE;
+        }
+    }
+
+    static int streamCount(String response) {
+        try {
+            org.json.JSONArray streams = new org.json.JSONObject(response)
+                    .optJSONArray("streams");
+            return streams == null ? -1 : streams.length();
+        } catch (org.json.JSONException | RuntimeException error) {
+            return -1;
         }
     }
 
@@ -390,6 +437,10 @@ public final class StremioConnectorService extends Service {
 
     interface StreamResponseProvider {
         String load();
+    }
+
+    interface StreamResponseErrorHandler {
+        void onError(RuntimeException error);
     }
 
     @Nullable

@@ -74,65 +74,147 @@ final class StremioStreamPipeline {
         }
     }
 
+    static final class Result {
+        @NonNull final String response;
+        @NonNull final Stats stats;
+        @NonNull final String state;
+
+        Result(String response, Stats stats, String state) {
+            this.response = response;
+            this.stats = stats;
+            this.state = state;
+        }
+    }
+
+    static final class Stats {
+        int raw;
+        int accepted;
+        int returned;
+        int oversized;
+        int invalid;
+        int duplicate;
+        int sourceLimit;
+        int candidateLimit;
+        int qualityLimit;
+        int resultLimit;
+        final Map<String, Integer> rejected = new LinkedHashMap<>();
+
+        void reject(String reason) {
+            Integer count = rejected.get(reason);
+            rejected.put(reason, count == null ? 1 : count + 1);
+        }
+
+        String summary() {
+            StringBuilder value = new StringBuilder()
+                    .append("raw=").append(raw)
+                    .append(" accepted=").append(accepted)
+                    .append(" returned=").append(returned)
+                    .append(" invalid=").append(invalid)
+                    .append(" oversized=").append(oversized)
+                    .append(" duplicate=").append(duplicate)
+                    .append(" sourceLimit=").append(sourceLimit)
+                    .append(" candidateLimit=").append(candidateLimit)
+                    .append(" qualityLimit=").append(qualityLimit)
+                    .append(" resultLimit=").append(resultLimit);
+            for (Map.Entry<String, Integer> entry : rejected.entrySet()) {
+                value.append(" filter_").append(entry.getKey())
+                        .append('=').append(entry.getValue());
+            }
+            return value.toString();
+        }
+    }
+
     private StremioStreamPipeline() {
     }
 
     static String process(List<SourceStreams> sourceResults,
                           StremioAggregationPreferences.Snapshot settings) {
+        return processDetailed(sourceResults, settings).response;
+    }
+
+    static Result processDetailed(List<SourceStreams> sourceResults,
+                                  StremioAggregationPreferences.Snapshot settings) {
+        Stats stats = new Stats();
+        for (SourceStreams sourceResult : sourceResults) {
+            stats.raw += sourceResult.streams.size();
+        }
         try {
-            List<Candidate> candidates = filterAndDeduplicate(sourceResults, settings);
+            List<Candidate> candidates = filterAndDeduplicate(
+                    sourceResults, settings, stats);
+            stats.accepted = candidates.size();
             List<Candidate> ordered = order(candidates, settings);
             JSONArray streams = new JSONArray();
             Map<String, Integer> qualityCounts = new HashMap<>();
-            for (Candidate candidate : ordered) {
+            for (int index = 0; index < ordered.size(); index++) {
+                Candidate candidate = ordered.get(index);
                 if (streams.length() >= ABSOLUTE_MAX_RESULTS) {
+                    stats.resultLimit += ordered.size() - index;
                     break;
                 }
                 if (settings.maxTotal > 0 && streams.length() >= settings.maxTotal) {
+                    stats.resultLimit += ordered.size() - index;
                     break;
                 }
                 int qualityCount = qualityCounts.containsKey(candidate.resolution)
                         ? qualityCounts.get(candidate.resolution) : 0;
                 if (settings.maxPerQuality > 0 && qualityCount >= settings.maxPerQuality) {
+                    stats.qualityLimit++;
                     continue;
                 }
                 qualityCounts.put(candidate.resolution, qualityCount + 1);
                 streams.put(format(candidate, settings));
             }
-            return new JSONObject().put("streams", streams).toString();
+            stats.returned = streams.length();
+            return new Result(
+                    new JSONObject().put("streams", streams).toString(), stats, "loaded");
         } catch (JSONException | RuntimeException error) {
-            return StremioConnectorService.LEGACY_STREAM_RESPONSE;
+            return new Result(
+                    StremioConnectorService.LEGACY_STREAM_RESPONSE,
+                    stats,
+                    "failed_" + error.getClass().getSimpleName());
         }
     }
 
     private static List<Candidate> filterAndDeduplicate(
             List<SourceStreams> sourceResults,
-            StremioAggregationPreferences.Snapshot settings) throws JSONException {
+            StremioAggregationPreferences.Snapshot settings,
+            Stats stats) throws JSONException {
         List<SourceStreams> sortedSources = new ArrayList<>(sourceResults);
         Collections.sort(sortedSources, (first, second) ->
                 Integer.compare(first.priority, second.priority));
         List<Candidate> accepted = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         Map<String, Integer> sourceCounts = new HashMap<>();
+        int processed = 0;
         candidateLoop:
         for (SourceStreams sourceResult : sortedSources) {
             for (int index = 0; index < sourceResult.streams.size(); index++) {
                 if (accepted.size() >= ABSOLUTE_MAX_CANDIDATES) {
+                    stats.candidateLimit = Math.max(0, stats.raw - processed);
                     break candidateLoop;
                 }
+                processed++;
                 JSONObject stream = sourceResult.streams.get(index);
                 String encoded = stream.toString();
                 if (encoded.length() > MAX_STREAM_OBJECT_CHARS) {
+                    stats.oversized++;
                     continue;
                 }
                 Candidate candidate = Candidate.parse(
                         new JSONObject(encoded), sourceResult, index);
-                if (candidate == null || !passes(candidate, settings)) {
+                if (candidate == null) {
+                    stats.invalid++;
+                    continue;
+                }
+                String rejection = rejectionReason(candidate, settings);
+                if (rejection != null) {
+                    stats.reject(rejection);
                     continue;
                 }
                 int sourceCount = sourceCounts.containsKey(candidate.source.id)
                         ? sourceCounts.get(candidate.source.id) : 0;
                 if (settings.maxPerSource > 0 && sourceCount >= settings.maxPerSource) {
+                    stats.sourceLimit++;
                     continue;
                 }
                 if (!"off".equals(settings.deduplication)) {
@@ -146,6 +228,7 @@ final class StremioStreamPipeline {
                         }
                     }
                     if (duplicate) {
+                        stats.duplicate++;
                         continue;
                     }
                     seen.addAll(keys);
@@ -157,60 +240,64 @@ final class StremioStreamPipeline {
         return accepted;
     }
 
-    private static boolean passes(Candidate value,
-                                  StremioAggregationPreferences.Snapshot settings) {
-        if (!settings.resolutions.contains(value.resolution)
-                || !settings.streamTypes.contains(value.streamType)) {
-            return false;
+    @Nullable
+    private static String rejectionReason(
+            Candidate value,
+            StremioAggregationPreferences.Snapshot settings) {
+        if (!settings.resolutions.contains(value.resolution)) {
+            return "resolution";
+        }
+        if (!settings.streamTypes.contains(value.streamType)) {
+            return "streamType";
         }
         for (String blocked : settings.blockedReleases) {
             if (value.releaseTypes.contains(blocked)) {
-                return false;
+                return "release";
             }
         }
         if (value.codec.isEmpty()) {
             if (!settings.keepUnknownTech) {
-                return false;
+                return "codecUnknown";
             }
         } else if (!settings.codecs.contains(value.codec)) {
-            return false;
+            return "codec";
         }
         if (value.hdr.isEmpty()) {
             if (!settings.keepUnknownTech) {
-                return false;
+                return "hdrUnknown";
             }
         } else if (!settings.hdrFormats.contains(value.hdr)) {
-            return false;
+            return "hdr";
         }
         if (!settings.allowedLanguages.isEmpty()) {
             if (value.languages.isEmpty()) {
                 if (!settings.keepUnknownLanguage) {
-                    return false;
+                    return "languageUnknown";
                 }
             } else if (Collections.disjoint(value.languages, settings.allowedLanguages)) {
-                return false;
+                return "language";
             }
         }
         if (value.sizeBytes <= 0L) {
             if (!settings.keepUnknownSize
                     && (settings.minSizeGb > 0d || settings.maxSizeGb > 0d)) {
-                return false;
+                return "sizeUnknown";
             }
         } else {
             double sizeGb = value.sizeBytes / 1_000_000_000d;
             if (settings.minSizeGb > 0d && sizeGb < settings.minSizeGb) {
-                return false;
+                return "sizeMin";
             }
             if (settings.maxSizeGb > 0d && sizeGb > settings.maxSizeGb) {
-                return false;
+                return "sizeMax";
             }
         }
         for (String blocked : settings.blockedText) {
             if (value.searchText.contains(blocked)) {
-                return false;
+                return "text";
             }
         }
-        return true;
+        return null;
     }
 
     private static List<Candidate> order(List<Candidate> values,

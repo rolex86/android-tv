@@ -10,6 +10,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class StremioConnectorServiceTest {
 
@@ -36,5 +37,23 @@ public class StremioConnectorServiceTest {
         } finally {
             executor.shutdownNow();
         }
+    }
+
+    @Test
+    public void streamResponseReportsRuntimeFailureAndCountsReturnedStreams() {
+        AtomicReference<String> error = new AtomicReference<>();
+
+        String response = StremioConnectorService.streamResponse(
+                true,
+                () -> { throw new IllegalStateException("test"); },
+                failure -> error.set(failure.getClass().getSimpleName()));
+
+        assertEquals("{\"streams\":[]}", response);
+        assertEquals("IllegalStateException", error.get());
+        assertEquals(0, StremioConnectorService.streamCount(response));
+        assertEquals(2, StremioConnectorService.streamCount(
+                "{\"streams\":[{},{}]}"));
+        assertEquals(-1, StremioConnectorService.streamCount("{\"other\":[]}"));
+        assertEquals(-1, StremioConnectorService.streamCount("not-json"));
     }
 }
