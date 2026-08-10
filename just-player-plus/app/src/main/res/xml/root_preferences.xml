@@ -294,6 +294,15 @@
             app:useSimpleSummaryProvider="true" />
 
         <ListPreference
+            app:key="nextEpisodePopupSize"
+            app:dependency="stremioConnectorEnabled"
+            app:defaultValue="medium"
+            app:entries="@array/plus_next_episode_popup_size_entries"
+            app:entryValues="@array/plus_next_episode_popup_size_values"
+            app:title="@string/pref_next_episode_popup_size"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
             app:key="backButtonBehavior"
             app:defaultValue="controls_then_exit"
             app:entries="@array/plus_back_button_entries"

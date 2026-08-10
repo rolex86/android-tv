@@ -325,11 +325,18 @@ public class PlayerActivity extends Activity {
     private final SharedPreferences.OnSharedPreferenceChangeListener plusPreferenceListener =
             (preferences, key) -> {
                 if (!PlusPrefs.KEY_STREMIO_CONNECTOR_ENABLED.equals(key)
-                        && !PlusPrefs.KEY_OPENSUBTITLES_EXACT_MATCH.equals(key)) {
+                        && !PlusPrefs.KEY_OPENSUBTITLES_EXACT_MATCH.equals(key)
+                        && !PlusPrefs.KEY_NEXT_EPISODE_POPUP_SIZE.equals(key)) {
                     return;
                 }
                 runOnUiThread(() -> {
                     mPlusPrefs.reload();
+                    if (PlusPrefs.KEY_NEXT_EPISODE_POPUP_SIZE.equals(key)) {
+                        if (nextEpisodeOverlay != null) {
+                            nextEpisodeOverlay.applySize(mPlusPrefs.nextEpisodePopupSize);
+                        }
+                        return;
+                    }
                     if (PlusPrefs.KEY_OPENSUBTITLES_EXACT_MATCH.equals(key)) {
                         if (!mPlusPrefs.openSubtitlesExactMatch
                                 && openSubtitlesRestClient != null) {
@@ -914,7 +921,10 @@ public class PlayerActivity extends Activity {
                 .build();
         nextEpisodeMetadataResolver = new NextEpisodeMetadataResolver(nextEpisodeHttpClient);
         nextEpisodeOverlay = new NextEpisodeOverlay(
-                coordinatorLayout, nextEpisodeHttpClient, new NextEpisodeOverlay.Listener() {
+                coordinatorLayout,
+                nextEpisodeHttpClient,
+                mPlusPrefs.nextEpisodePopupSize,
+                new NextEpisodeOverlay.Listener() {
             @Override
             public void onPlayNow() {
                 playNextEpisodeNow();

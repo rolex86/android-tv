@@ -21,6 +21,40 @@ import java.util.List;
 public class StremioNextEpisodeTest {
 
     @Test
+    public void nextEpisodePopupUsesMediumAsDefault() {
+        assertEquals(NextEpisodePopupSize.MEDIUM, NextEpisodePopupSize.DEFAULT);
+        assertEquals(NextEpisodePopupSize.MEDIUM,
+                NextEpisodePopupSize.fromPreference(null));
+        assertEquals(NextEpisodePopupSize.MEDIUM,
+                NextEpisodePopupSize.fromPreference("unknown"));
+    }
+
+    @Test
+    public void nextEpisodePopupProfilesCoverTheWholeCard() {
+        assertEquals(NextEpisodePopupSize.SMALL,
+                NextEpisodePopupSize.fromPreference("small"));
+        assertEquals(NextEpisodePopupSize.MEDIUM,
+                NextEpisodePopupSize.fromPreference("medium"));
+        assertEquals(NextEpisodePopupSize.LARGE,
+                NextEpisodePopupSize.fromPreference("large"));
+
+        assertTrue(NextEpisodePopupSize.SMALL.cardWidthDp
+                < NextEpisodePopupSize.MEDIUM.cardWidthDp);
+        assertTrue(NextEpisodePopupSize.MEDIUM.cardWidthDp
+                < NextEpisodePopupSize.LARGE.cardWidthDp);
+        assertTrue(NextEpisodePopupSize.SMALL.cardHeightDp
+                < NextEpisodePopupSize.MEDIUM.cardHeightDp);
+        assertTrue(NextEpisodePopupSize.MEDIUM.cardHeightDp
+                < NextEpisodePopupSize.LARGE.cardHeightDp);
+        assertTrue(NextEpisodePopupSize.SMALL.buttonHeightDp
+                < NextEpisodePopupSize.MEDIUM.buttonHeightDp);
+        assertTrue(NextEpisodePopupSize.MEDIUM.buttonHeightDp
+                < NextEpisodePopupSize.LARGE.buttonHeightDp);
+        assertEquals(460, NextEpisodePopupSize.LARGE.cardWidthDp);
+        assertEquals(190, NextEpisodePopupSize.LARGE.cardHeightDp);
+    }
+
+    @Test
     public void nextEpisodeWatchdogPollsSparselyUntilPlaybackApproachesPopup() {
         long durationMs = 60 * 60_000L;
         long noticeMs = 30_000L;

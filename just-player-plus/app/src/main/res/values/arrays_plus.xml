@@ -22,6 +22,17 @@
         <item>90</item>
     </string-array>
 
+    <string-array name="plus_next_episode_popup_size_entries">
+        <item>Small</item>
+        <item>Medium</item>
+        <item>Large</item>
+    </string-array>
+    <string-array name="plus_next_episode_popup_size_values" translatable="false">
+        <item>small</item>
+        <item>medium</item>
+        <item>large</item>
+    </string-array>
+
     <string-array name="plus_network_buffer_entries">
         <item>Default — current Media3 behavior</item>
         <item>Larger — up to 90 s / 256 MiB</item>

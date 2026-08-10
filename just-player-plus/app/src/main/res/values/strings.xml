@@ -30,6 +30,7 @@
     <string name="pref_stremio_connector_start_failed">The local connector could not be started.</string>
     <string name="pref_stremio_connector_copy_failed">The addon URL could not be copied.</string>
     <string name="pref_next_episode_notice">Show next episode before the end</string>
+    <string name="pref_next_episode_popup_size">Next episode popup size</string>
     <string name="pref_network_buffer">Network buffer</string>
     <string name="pref_show_end_time">Expected end time</string>
     <string name="pref_show_end_time_on">Show the projected end time in playback controls</string>

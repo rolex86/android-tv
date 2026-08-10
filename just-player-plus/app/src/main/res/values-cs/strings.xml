@@ -11,6 +11,7 @@
     <string name="pref_stremio_connector_start_failed">Místní propojení se nepodařilo spustit.</string>
     <string name="pref_stremio_connector_copy_failed">Adresu doplňku se nepodařilo zkopírovat.</string>
     <string name="pref_next_episode_notice">Zobrazit další epizodu před koncem</string>
+    <string name="pref_next_episode_popup_size">Velikost okna další epizody</string>
     <string name="pref_network_buffer">Síťový buffer</string>
     <string name="pref_show_end_time">Očekávaný čas konce</string>
     <string name="pref_show_end_time_on">Zobrazovat odhad konce v ovládání přehrávače</string>
