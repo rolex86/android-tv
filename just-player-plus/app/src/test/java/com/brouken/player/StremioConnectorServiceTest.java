@@ -77,4 +77,30 @@ public class StremioConnectorServiceTest {
         assertFalse(StremioStreamAggregator.shouldCancelReplacedPrefetch(
                 "episode-36", "episode-37", 1));
     }
+
+    @Test
+    public void protectedPrefetchSurvivesOnlyWithinItsBoundedLifetime() {
+        long now = 10_000_000L;
+
+        assertTrue(StremioProtectedPrefetchCache.isFresh(
+                now - StremioProtectedPrefetchCache.MAX_AGE_MS, now));
+        assertFalse(StremioProtectedPrefetchCache.isFresh(
+                now - StremioProtectedPrefetchCache.MAX_AGE_MS - 1L, now));
+        assertFalse(StremioProtectedPrefetchCache.isFresh(now + 1L, now));
+    }
+
+    @Test
+    public void protectedPrefetchRejectsMalformedOrMismatchedResponses() {
+        long now = 10_000_000L;
+
+        assertTrue(StremioProtectedPrefetchCache.isStructurallyValid(
+                new StremioProtectedPrefetchCache.Entry(
+                        "episode-38", "{\"streams\":[{}]}", 1, now)));
+        assertFalse(StremioProtectedPrefetchCache.isStructurallyValid(
+                new StremioProtectedPrefetchCache.Entry(
+                        "episode-38", "{\"streams\":[{}]}", 2, now)));
+        assertFalse(StremioProtectedPrefetchCache.isStructurallyValid(
+                new StremioProtectedPrefetchCache.Entry(
+                        "episode-38", "not-json", 1, now)));
+    }
 }

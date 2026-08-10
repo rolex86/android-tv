@@ -22,9 +22,9 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.net.SocketException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
@@ -50,7 +50,7 @@ public final class StremioConnectorService extends Service {
     private static final int NOTIFICATION_ID = 16745;
     private static final String MANIFEST = "{"
             + "\"id\":\"com.justplayerplus.connector\","
-            + "\"version\":\"1.9.0\","
+            + "\"version\":\"1.10.0\","
             + "\"name\":\"JustPlayer Plus Connector\","
             + "\"description\":\"Local metadata bridge for JustPlayer Plus\","
             + "\"resources\":["
@@ -64,6 +64,7 @@ public final class StremioConnectorService extends Service {
 
     private final ExecutorService clients = Executors.newFixedThreadPool(4);
     private volatile boolean running;
+    private volatile boolean destroyed;
     private ServerSocket serverSocket;
     private Thread acceptThread;
     private StremioConnectorStore store;
@@ -86,6 +87,7 @@ public final class StremioConnectorService extends Service {
 
     static void stop(Context context) {
         context.stopService(new Intent(context, StremioConnectorService.class));
+        new StremioProtectedPrefetchCache(context).clear();
     }
 
     static boolean prefetchNextEpisode(Context context, StremioEpisodeId episode) {
@@ -113,6 +115,7 @@ public final class StremioConnectorService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        destroyed = false;
         store = new StremioConnectorStore(this);
         diagnostics = new ExternalPlayerDiagnostics(this);
         subtitleHttpClient = StremioConnectorOpenSubtitles.newHttpClient();
@@ -123,22 +126,32 @@ public final class StremioConnectorService extends Service {
                     && !preferences.getBoolean(
                     StremioAggregationPreferences.KEY_ENABLED, false)) {
                 releaseStreamAggregator();
+                new StremioProtectedPrefetchCache(this).clear();
             }
         };
         aggregationPreferences.registerOnSharedPreferenceChangeListener(aggregationListener);
         createNotificationChannel();
         startForeground(NOTIFICATION_ID, buildNotification());
-        startServer();
+        diagnostics.recordStremioConnector(
+                "service_created", "version=" + BuildConfig.VERSION_NAME);
+        startServer("service_create");
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        diagnostics.recordStremioConnector(
+                "service_start_command",
+                "startId=" + startId
+                        + " flags=" + flags
+                        + " action=" + (intent == null || intent.getAction() == null
+                        ? "none" : intent.getAction())
+                        + " serverRunning=" + running);
         if (!new PlusPrefs(this).stremioConnectorEnabled) {
             stopSelf();
             return START_NOT_STICKY;
         }
         if (!running) {
-            startServer();
+            startServer("start_command");
         }
         if (intent != null && ACTION_PREFETCH_STREAMS.equals(intent.getAction())) {
             String type = intent.getStringExtra(EXTRA_PREFETCH_TYPE);
@@ -163,6 +176,11 @@ public final class StremioConnectorService extends Service {
 
     @Override
     public void onDestroy() {
+        destroyed = true;
+        if (diagnostics != null) {
+            diagnostics.recordStremioConnector(
+                    "service_destroyed", "serverRunning=" + running);
+        }
         stopServer();
         clients.shutdownNow();
         if (aggregationPreferences != null && aggregationListener != null) {
@@ -193,21 +211,29 @@ public final class StremioConnectorService extends Service {
         }
     }
 
-    private synchronized void startServer() {
-        if (running) {
+    private synchronized void startServer(String reason) {
+        if (running || destroyed) {
             return;
         }
+        ServerSocket candidate = null;
         try {
-            serverSocket = new ServerSocket(PORT, 16, InetAddress.getByName("127.0.0.1"));
-            serverSocket.setReuseAddress(true);
+            candidate = new ServerSocket();
+            candidate.setReuseAddress(true);
+            candidate.bind(new InetSocketAddress(
+                    InetAddress.getByName("127.0.0.1"), PORT), 16);
+            serverSocket = candidate;
             running = true;
             acceptThread = new Thread(this::acceptLoop, "stremio-connector-accept");
             acceptThread.start();
-            diagnostics.recordStremioConnector("listening", HTTP_MANIFEST_URL);
+            diagnostics.recordStremioConnector(
+                    "listening", HTTP_MANIFEST_URL + " reason=" + reason);
         } catch (IOException error) {
+            closeQuietly(candidate);
+            serverSocket = null;
             running = false;
             diagnostics.recordStremioConnector(
-                    "listen_failed", error.getClass().getSimpleName());
+                    "listen_failed",
+                    "reason=" + reason + " error=" + error.getClass().getSimpleName());
             stopSelf();
         }
     }
@@ -221,14 +247,9 @@ public final class StremioConnectorService extends Service {
             Socket socket;
             try {
                 socket = listener.accept();
-            } catch (SocketException error) {
-                if (running) {
-                    stopSelf();
-                }
+            } catch (IOException error) {
+                recoverServerAfterAcceptFailure(listener, error);
                 return;
-            } catch (IOException ignored) {
-                // A malformed/aborted local request must not terminate the connector.
-                continue;
             }
             if (!running) {
                 closeQuietly(socket);
@@ -239,6 +260,24 @@ public final class StremioConnectorService extends Service {
                 return;
             }
         }
+    }
+
+    private void recoverServerAfterAcceptFailure(ServerSocket failedListener, IOException error) {
+        synchronized (this) {
+            if (!running || destroyed || serverSocket != failedListener) {
+                return;
+            }
+            diagnostics.recordStremioConnector(
+                    "server_accept_failed", error.getClass().getSimpleName());
+            running = false;
+            serverSocket = null;
+            acceptThread = null;
+            closeQuietly(failedListener);
+        }
+        // Keep the service and its in-memory aggregator alive. If rebinding still fails,
+        // startServer records the failure and lets Android recreate this START_STICKY service;
+        // the completed protected prefetch remains available from its private disk cache.
+        startServer("accept_recovery");
     }
 
     static boolean dispatchClient(ExecutorService executor, Runnable task) {

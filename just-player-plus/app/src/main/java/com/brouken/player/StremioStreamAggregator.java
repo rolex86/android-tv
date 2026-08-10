@@ -35,6 +35,7 @@ final class StremioStreamAggregator {
 
     private final android.content.Context context;
     private final StremioStreamSourceStore sourceStore;
+    private final StremioProtectedPrefetchCache protectedPrefetchCache;
     private final ExternalPlayerDiagnostics diagnostics;
     private final OkHttpClient httpClient;
     private final StremioAddonClient addonClient;
@@ -51,6 +52,7 @@ final class StremioStreamAggregator {
                             ExternalPlayerDiagnostics diagnostics) {
         this.context = context.getApplicationContext();
         sourceStore = new StremioStreamSourceStore(this.context);
+        protectedPrefetchCache = new StremioProtectedPrefetchCache(this.context);
         this.diagnostics = diagnostics;
         httpClient = StremioAddonClient.newHttpClient();
         addonClient = new StremioAddonClient(httpClient);
@@ -72,6 +74,11 @@ final class StremioStreamAggregator {
             recordCacheHit(cached, "foreground");
             return cached.result.pipeline.response;
         }
+        StremioProtectedPrefetchCache.Entry persisted = findPersistedCacheHit(
+                request, System.currentTimeMillis(), "foreground");
+        if (persisted != null) {
+            return persisted.response;
+        }
 
         AggregationTask task;
         boolean joined;
@@ -80,6 +87,11 @@ final class StremioStreamAggregator {
             if (cached != null) {
                 recordCacheHit(cached, "foreground");
                 return cached.result.pipeline.response;
+            }
+            persisted = findPersistedCacheHit(
+                    request, System.currentTimeMillis(), "foreground_recheck");
+            if (persisted != null) {
+                return persisted.response;
             }
             task = inFlight.get(request.cacheKey);
             joined = task != null;
@@ -129,17 +141,29 @@ final class StremioStreamAggregator {
         AggregationTask task;
         String state;
         synchronized (flightLock) {
-            boolean sameTarget = request.cacheKey.equals(protectedPrefetchKey);
+            StremioProtectedPrefetchCache.Entry persisted =
+                    protectedPrefetchCache.find(
+                            request.cacheKey, System.currentTimeMillis());
+            boolean sameTarget = request.cacheKey.equals(protectedPrefetchKey)
+                    || persisted != null;
+            if (persisted != null) {
+                protectedPrefetchKey = request.cacheKey;
+            }
             CacheEntry cached = findCached(
                     request.cacheKey, System.currentTimeMillis(), sameTarget);
             if (sameTarget && cached != null) {
                 recordCacheHit(cached, "prefetch");
                 return;
             }
+            if (sameTarget && persisted != null) {
+                recordPersistedCacheHit(persisted, "prefetch");
+                return;
+            }
 
             if (!sameTarget) {
                 AggregationTask previous = activePrefetchTask;
                 protectedPrefetchKey = request.cacheKey;
+                protectedPrefetchCache.retainOnly(request.cacheKey);
                 activePrefetchTask = null;
                 if (previous != null && shouldCancelReplacedPrefetch(
                         previous.request.cacheKey,
@@ -162,6 +186,13 @@ final class StremioStreamAggregator {
                     request.cacheKey, System.currentTimeMillis(), true);
             if (cachedAfterReplacement != null) {
                 recordCacheHit(cachedAfterReplacement, "prefetch");
+                return;
+            }
+            StremioProtectedPrefetchCache.Entry persistedAfterReplacement =
+                    protectedPrefetchCache.find(
+                            request.cacheKey, System.currentTimeMillis());
+            if (persistedAfterReplacement != null) {
+                recordPersistedCacheHit(persistedAfterReplacement, "prefetch");
                 return;
             }
 
@@ -217,6 +248,7 @@ final class StremioStreamAggregator {
         if (activePrefetchTask == task) {
             activePrefetchTask = null;
         }
+        task.prefetchOwner = false;
         task.cancellation.cancel();
         task.future.cancel(true);
         diagnostics.recordStremioConnector(
@@ -226,8 +258,33 @@ final class StremioStreamAggregator {
 
     private AggregationResult executeAndCache(AggregationTask task) {
         AggregationResult result = runAggregation(task.request, task.cancellation);
+        long completedAtMs = System.currentTimeMillis();
         if (!task.cancellation.isCancelled() && result.cacheable) {
-            putCache(task.request.cacheKey, result);
+            putCache(task.request.cacheKey, result, completedAtMs);
+            int streamCount = StremioConnectorService.streamCount(
+                    result.pipeline.response);
+            boolean persistAttempted = false;
+            boolean persistSucceeded = false;
+            synchronized (flightLock) {
+                if (!task.cancellation.isCancelled()
+                        && task.prefetchOwner
+                        && task.request.cacheKey.equals(protectedPrefetchKey)) {
+                    persistAttempted = true;
+                    persistSucceeded = protectedPrefetchCache.replace(
+                            task.request.cacheKey,
+                            result.pipeline.response,
+                            streamCount,
+                            completedAtMs);
+                }
+            }
+            if (persistAttempted) {
+                diagnostics.recordStremioConnector(
+                        persistSucceeded
+                                ? "aggregation_prefetch_persisted"
+                                : "aggregation_prefetch_persist_failed",
+                        task.request.type + "/" + task.request.id
+                                + " streams=" + streamCount);
+            }
         }
         if (!task.cancellation.isCancelled() && task.prefetchOwner) {
             diagnostics.recordStremioConnector(
@@ -380,7 +437,33 @@ final class StremioStreamAggregator {
                         + " mode=" + mode);
     }
 
-    private void putCache(String key, AggregationResult result) {
+    @Nullable
+    private StremioProtectedPrefetchCache.Entry findPersistedCacheHit(
+            RequestSnapshot request,
+            long nowMs,
+            String mode) {
+        StremioProtectedPrefetchCache.Entry persisted =
+                protectedPrefetchCache.find(request.cacheKey, nowMs);
+        if (persisted == null) {
+            return null;
+        }
+        protectedPrefetchKey = request.cacheKey;
+        recordPersistedCacheHit(persisted, mode);
+        return persisted;
+    }
+
+    private void recordPersistedCacheHit(
+            StremioProtectedPrefetchCache.Entry cached,
+            String mode) {
+        diagnostics.recordStremioConnector(
+                "aggregation_persistent_cache_hit",
+                "streams=" + cached.streamCount
+                        + " ageMs=" + Math.max(
+                        0L, System.currentTimeMillis() - cached.createdAtMs)
+                        + " mode=" + mode);
+    }
+
+    private void putCache(String key, AggregationResult result, long createdAtMs) {
         if (cache.size() >= MAX_CACHE_ENTRIES) {
             String oldestKey = null;
             long oldestTimestamp = Long.MAX_VALUE;
@@ -398,7 +481,7 @@ final class StremioStreamAggregator {
                 cache.remove(oldestKey);
             }
         }
-        cache.put(key, new CacheEntry(result, System.currentTimeMillis()));
+        cache.put(key, new CacheEntry(result, createdAtMs));
     }
 
     private void recordNoSources(RequestSnapshot request, String reason) {

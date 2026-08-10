@@ -2005,19 +2005,21 @@ public class PlayerActivity extends Activity {
         // Crossing the configured watched threshold must never turn an explicit Back action
         // into automatic continuation in the calling app. Only a natural player end (or the
         // explicit "play now" path, which seeks to it) may report playback completion.
-        String resultEndBy = playbackFinished && !userInitiatedExit
-                ? "playback_completion" : "user";
+        String resultEndBy = ExternalPlaybackResultPolicy.endBy(
+                playbackFinished, userInitiatedExit);
         if (apiAccess || apiAccessPartial || intentReturnResult) {
             externalDiagnostics.recordResult(resultPosition, resultDuration, resultEndBy);
         }
         if (intentReturnResult) {
             Intent intent = new Intent("com.mxtech.intent.result.VIEW");
             intent.putExtra(API_END_BY, resultEndBy);
-            if (resultDuration != C.TIME_UNSET) {
-                intent.putExtra(API_DURATION, externalResultValue(resultDuration));
-            }
-            if (resultPosition != C.TIME_UNSET) {
-                intent.putExtra(API_POSITION, externalResultValue(resultPosition));
+            if (ExternalPlaybackResultPolicy.shouldIncludeProgress(resultEndBy)) {
+                if (resultDuration != C.TIME_UNSET) {
+                    intent.putExtra(API_DURATION, externalResultValue(resultDuration));
+                }
+                if (resultPosition != C.TIME_UNSET) {
+                    intent.putExtra(API_POSITION, externalResultValue(resultPosition));
+                }
             }
             setResult(Activity.RESULT_OK, intent);
         }
