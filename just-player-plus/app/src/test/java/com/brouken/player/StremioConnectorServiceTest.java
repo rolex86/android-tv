@@ -1,7 +1,7 @@
 package com.brouken.player;
 
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
@@ -55,5 +55,26 @@ public class StremioConnectorServiceTest {
                 "{\"streams\":[{},{}]}"));
         assertEquals(-1, StremioConnectorService.streamCount("{\"other\":[]}"));
         assertEquals(-1, StremioConnectorService.streamCount("not-json"));
+    }
+
+    @Test
+    public void prefetchAcceptsOnlyValidatedSeriesEpisodes() {
+        assertTrue(StremioConnectorService.isValidPrefetchRequest(
+                "series", "tt7678620:3:36"));
+        assertFalse(StremioConnectorService.isValidPrefetchRequest(
+                "movie", "tt7678620"));
+        assertFalse(StremioConnectorService.isValidPrefetchRequest(
+                "series", "tt7678620"));
+        assertFalse(StremioConnectorService.isValidPrefetchRequest(null, null));
+    }
+
+    @Test
+    public void replacementCancelsOnlyAnUnobservedOlderPrefetch() {
+        assertTrue(StremioStreamAggregator.shouldCancelReplacedPrefetch(
+                "episode-36", "episode-37", 0));
+        assertFalse(StremioStreamAggregator.shouldCancelReplacedPrefetch(
+                "episode-36", "episode-36", 0));
+        assertFalse(StremioStreamAggregator.shouldCancelReplacedPrefetch(
+                "episode-36", "episode-37", 1));
     }
 }

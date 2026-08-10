@@ -266,6 +266,9 @@ public class PlayerActivity extends Activity {
     private AlertDialog exitDialog;
     private PlayerMessage nextEpisodePopupMessage;
     private int nextEpisodePopupScheduleGeneration;
+    private PlayerMessage nextEpisodePrefetchMessage;
+    private int nextEpisodePrefetchScheduleGeneration;
+    private boolean nextEpisodePrefetchRequested;
     private long nextEpisodeNoticeMs = TimeUnit.SECONDS.toMillis(30L);
     private final Runnable nextEpisodePopupWatchdog = this::runNextEpisodePopupWatchdog;
     private static final long AI_SUBTITLE_ATTACH_TIMEOUT_MS = 30_000L;
@@ -1620,6 +1623,8 @@ public class PlayerActivity extends Activity {
         openSubtitlesExactStartScheduled = false;
         cancelNextEpisodePopupMessage();
         cancelNextEpisodePopupWatchdog();
+        cancelNextEpisodePrefetchMessage();
+        nextEpisodePrefetchRequested = false;
         nextEpisodeInfo = null;
         nextEpisodeDismissed = false;
         nextEpisodeShown = false;
@@ -1638,6 +1643,81 @@ public class PlayerActivity extends Activity {
             nextEpisodePopupMessage.cancel();
             nextEpisodePopupMessage = null;
         }
+    }
+
+    private void cancelNextEpisodePrefetchMessage() {
+        nextEpisodePrefetchScheduleGeneration++;
+        if (nextEpisodePrefetchMessage != null) {
+            nextEpisodePrefetchMessage.cancel();
+            nextEpisodePrefetchMessage = null;
+        }
+    }
+
+    private void scheduleNextEpisodePrefetch() {
+        if (nextEpisodePrefetchRequested) {
+            cancelNextEpisodePrefetchMessage();
+            return;
+        }
+        cancelNextEpisodePrefetchMessage();
+        if (!StremioAggregationPreferences.isEnabled(this)
+                || playerView == null || player == null || nextEpisodeInfo == null
+                || isFinishing() || player.isCurrentMediaItemLive()) {
+            return;
+        }
+        long duration = player.getDuration();
+        long position = player.getCurrentPosition();
+        long triggerPosition = NextEpisodeStreamPrefetchPolicy.triggerPositionMs(duration);
+        if (triggerPosition < 0L || position < 0L) {
+            return;
+        }
+        if (NextEpisodeStreamPrefetchPolicy.shouldStart(duration, position)) {
+            requestNextEpisodePrefetch(nextEpisodeSession, "position_check");
+            return;
+        }
+
+        final int session = nextEpisodeSession;
+        final int scheduleGeneration = nextEpisodePrefetchScheduleGeneration;
+        try {
+            nextEpisodePrefetchMessage = player.createMessage((messageType, payload) -> {
+                if (playerView != null) {
+                    playerView.post(() -> {
+                        if (session == nextEpisodeSession
+                                && scheduleGeneration
+                                == nextEpisodePrefetchScheduleGeneration) {
+                            nextEpisodePrefetchMessage = null;
+                            requestNextEpisodePrefetch(session, "player_message");
+                        }
+                    });
+                }
+            }).setPosition(triggerPosition).setDeleteAfterDelivery(true).send();
+        } catch (IllegalStateException ignored) {
+            // STATE_READY or a later timeline update will arm the prefetch message.
+        }
+    }
+
+    private void requestNextEpisodePrefetch(int session, String trigger) {
+        if (session != nextEpisodeSession || nextEpisodePrefetchRequested
+                || nextEpisodeInfo == null || isFinishing()
+                || !StremioAggregationPreferences.isEnabled(this)) {
+            return;
+        }
+        cancelNextEpisodePrefetchMessage();
+        if (!StremioConnectorService.prefetchNextEpisode(this, nextEpisodeInfo.next)) {
+            externalDiagnostics.recordStremioConnector(
+                    "aggregation_prefetch_dispatch_failed",
+                    "series/" + nextEpisodeInfo.next.raw);
+            return;
+        }
+        nextEpisodePrefetchRequested = true;
+        long duration = player == null ? C.TIME_UNSET : player.getDuration();
+        long position = player == null ? C.TIME_UNSET : player.getCurrentPosition();
+        externalDiagnostics.recordStremioConnector(
+                "aggregation_prefetch_dispatched",
+                "current=" + nextEpisodeInfo.current.raw
+                        + " next=" + nextEpisodeInfo.next.raw
+                        + " trigger=" + trigger
+                        + " remainingMs=" + (duration == C.TIME_UNSET || position == C.TIME_UNSET
+                        ? -1L : Math.max(0L, duration - position)));
     }
 
     private void cancelNextEpisodePopupWatchdog() {
@@ -1698,6 +1778,7 @@ public class PlayerActivity extends Activity {
                 || player.isCurrentMediaItemLive() || nextEpisodeOverlay == null) {
             return;
         }
+        scheduleNextEpisodePrefetch();
         long duration = player.getDuration();
         long position = player.getCurrentPosition();
         mPlusPrefs.reload();
@@ -2796,6 +2877,7 @@ public class PlayerActivity extends Activity {
         abandonAiSubtitleAttach();
         cancelNextEpisodePopupMessage();
         cancelNextEpisodePopupWatchdog();
+        cancelNextEpisodePrefetchMessage();
         trackMemoryArmed = false;
         trackSelectionChangePending = false;
         if (save) {

@@ -1,23 +1,27 @@
 package com.brouken.player;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletionService;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
@@ -26,7 +30,7 @@ import okhttp3.OkHttpClient;
 /** Runs all enabled upstream sources concurrently and never proxies the video itself. */
 final class StremioStreamAggregator {
     private static final long TOTAL_DEADLINE_MS = 9_000L;
-    private static final long CACHE_AGE_MS = 30_000L;
+    private static final long REGULAR_CACHE_AGE_MS = 30_000L;
     private static final int MAX_CACHE_ENTRIES = 32;
 
     private final android.content.Context context;
@@ -34,8 +38,14 @@ final class StremioStreamAggregator {
     private final ExternalPlayerDiagnostics diagnostics;
     private final OkHttpClient httpClient;
     private final StremioAddonClient addonClient;
+    private final ExecutorService aggregationExecutor;
     private final ExecutorService sourceExecutor;
     private final ConcurrentHashMap<String, CacheEntry> cache = new ConcurrentHashMap<>();
+    private final Object flightLock = new Object();
+    private final Map<String, AggregationTask> inFlight = new HashMap<>();
+
+    @Nullable private AggregationTask activePrefetchTask;
+    @Nullable private volatile String protectedPrefetchKey;
 
     StremioStreamAggregator(android.content.Context context,
                             ExternalPlayerDiagnostics diagnostics) {
@@ -44,59 +54,217 @@ final class StremioStreamAggregator {
         this.diagnostics = diagnostics;
         httpClient = StremioAddonClient.newHttpClient();
         addonClient = new StremioAddonClient(httpClient);
-        sourceExecutor = Executors.newCachedThreadPool(new ThreadFactory() {
-            private int index;
-
-            @Override
-            public synchronized Thread newThread(@NonNull Runnable task) {
-                Thread thread = new Thread(task, "stremio-source-" + (++index));
-                thread.setDaemon(true);
-                return thread;
-            }
-        });
+        aggregationExecutor = Executors.newCachedThreadPool(
+                namedThreadFactory("stremio-aggregation-"));
+        sourceExecutor = Executors.newCachedThreadPool(
+                namedThreadFactory("stremio-source-"));
     }
 
     String aggregate(String type, String id) {
-        StremioAggregationPreferences.Snapshot settings =
-                StremioAggregationPreferences.read(context);
-        List<StremioStreamSourceStore.Source> allSources = sourceStore.load();
-        List<StremioStreamSourceStore.Source> sources = new ArrayList<>();
-        for (StremioStreamSourceStore.Source source : allSources) {
-            if (source.enabled) {
-                sources.add(source);
-            }
-        }
-        if (sources.isEmpty()) {
-            diagnostics.recordStremioConnector(
-                    "aggregation_complete",
-                    "configuredSources=" + allSources.size()
-                            + " enabledSources=0 loadedSources=0"
-                            + " raw=0 accepted=0 returned=0"
-                            + " reason=no_enabled_sources durationMs=0");
+        RequestSnapshot request = snapshot(type, id);
+        if (request.sources.isEmpty()) {
+            recordNoSources(request, "no_enabled_sources");
             return StremioConnectorService.LEGACY_STREAM_RESPONSE;
         }
 
-        String cacheKey = cacheKey(type, id, settings, sources);
-        long now = System.currentTimeMillis();
-        CacheEntry cached = cache.get(cacheKey);
-        if (cached != null && now - cached.createdAtMs <= CACHE_AGE_MS) {
-            diagnostics.recordStremioConnector(
-                    "aggregation_cache_hit",
-                    cached.result.stats.summary()
-                            + " ageMs=" + Math.max(0L, now - cached.createdAtMs));
-            return cached.result.response;
+        CacheEntry cached = findCached(request.cacheKey, System.currentTimeMillis(), true);
+        if (cached != null) {
+            recordCacheHit(cached, "foreground");
+            return cached.result.pipeline.response;
         }
 
+        AggregationTask task;
+        boolean joined;
+        synchronized (flightLock) {
+            cached = findCached(request.cacheKey, System.currentTimeMillis(), true);
+            if (cached != null) {
+                recordCacheHit(cached, "foreground");
+                return cached.result.pipeline.response;
+            }
+            task = inFlight.get(request.cacheKey);
+            joined = task != null;
+            if (task == null) {
+                task = startTaskLocked(request);
+            }
+            task.foregroundWaiters++;
+        }
+        if (joined) {
+            diagnostics.recordStremioConnector(
+                    "aggregation_joined",
+                    type + "/" + id + " mode=foreground");
+        }
+
+        try {
+            return task.future.get().pipeline.response;
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            diagnostics.recordStremioConnector(
+                    "aggregation_wait_cancelled", type + "/" + id + " reason=interrupted");
+            return StremioConnectorService.LEGACY_STREAM_RESPONSE;
+        } catch (CancellationException error) {
+            diagnostics.recordStremioConnector(
+                    "aggregation_wait_cancelled", type + "/" + id + " reason=cancelled");
+            return StremioConnectorService.LEGACY_STREAM_RESPONSE;
+        } catch (ExecutionException error) {
+            Throwable cause = error.getCause();
+            throw new IllegalStateException(cause == null ? error : cause);
+        } finally {
+            synchronized (flightLock) {
+                task.foregroundWaiters = Math.max(0, task.foregroundWaiters - 1);
+            }
+        }
+    }
+
+    /**
+     * Warms one next-episode target. A new target replaces obsolete background work instead of
+     * appending to a queue. Foreground HTTP waiters are never cancelled.
+     */
+    void prefetch(String type, String id) {
+        RequestSnapshot request = snapshot(type, id);
+        if (request.sources.isEmpty()) {
+            recordNoSources(request, "prefetch_no_enabled_sources");
+            return;
+        }
+
+        AggregationTask task;
+        String state;
+        synchronized (flightLock) {
+            boolean sameTarget = request.cacheKey.equals(protectedPrefetchKey);
+            CacheEntry cached = findCached(
+                    request.cacheKey, System.currentTimeMillis(), sameTarget);
+            if (sameTarget && cached != null) {
+                recordCacheHit(cached, "prefetch");
+                return;
+            }
+
+            if (!sameTarget) {
+                AggregationTask previous = activePrefetchTask;
+                protectedPrefetchKey = request.cacheKey;
+                activePrefetchTask = null;
+                if (previous != null && shouldCancelReplacedPrefetch(
+                        previous.request.cacheKey,
+                        request.cacheKey,
+                        previous.foregroundWaiters)) {
+                    previous.prefetchOwner = false;
+                    cancelTaskLocked(previous, "replaced");
+                } else if (previous != null
+                        && !previous.request.cacheKey.equals(request.cacheKey)) {
+                    previous.prefetchOwner = false;
+                    diagnostics.recordStremioConnector(
+                            "aggregation_prefetch_detached",
+                            previous.request.type + "/" + previous.request.id
+                                    + " reason=replaced foregroundWaiters="
+                                    + previous.foregroundWaiters);
+                }
+            }
+
+            CacheEntry cachedAfterReplacement = findCached(
+                    request.cacheKey, System.currentTimeMillis(), true);
+            if (cachedAfterReplacement != null) {
+                recordCacheHit(cachedAfterReplacement, "prefetch");
+                return;
+            }
+
+            task = inFlight.get(request.cacheKey);
+            if (task == null) {
+                task = startTaskLocked(request);
+                state = "started";
+            } else {
+                state = "joined";
+            }
+            task.prefetchOwner = true;
+            activePrefetchTask = task;
+        }
+        diagnostics.recordStremioConnector(
+                "aggregation_prefetch_" + state,
+                type + "/" + id + " enabledSources=" + request.sources.size());
+    }
+
+    void shutdown() {
+        synchronized (flightLock) {
+            for (AggregationTask task : new ArrayList<>(inFlight.values())) {
+                cancelTaskLocked(task, "shutdown");
+            }
+            inFlight.clear();
+            activePrefetchTask = null;
+            protectedPrefetchKey = null;
+        }
+        cache.clear();
+        aggregationExecutor.shutdownNow();
+        sourceExecutor.shutdownNow();
+        httpClient.dispatcher().cancelAll();
+        httpClient.connectionPool().evictAll();
+    }
+
+    private AggregationTask startTaskLocked(RequestSnapshot request) {
+        AggregationTask task = new AggregationTask(request);
+        inFlight.put(request.cacheKey, task);
+        try {
+            aggregationExecutor.execute(task.future);
+        } catch (RejectedExecutionException error) {
+            if (inFlight.get(request.cacheKey) == task) {
+                inFlight.remove(request.cacheKey);
+            }
+            throw error;
+        }
+        return task;
+    }
+
+    private void cancelTaskLocked(AggregationTask task, String reason) {
+        if (inFlight.get(task.request.cacheKey) == task) {
+            inFlight.remove(task.request.cacheKey);
+        }
+        if (activePrefetchTask == task) {
+            activePrefetchTask = null;
+        }
+        task.cancellation.cancel();
+        task.future.cancel(true);
+        diagnostics.recordStremioConnector(
+                "aggregation_prefetch_cancelled",
+                task.request.type + "/" + task.request.id + " reason=" + reason);
+    }
+
+    private AggregationResult executeAndCache(AggregationTask task) {
+        AggregationResult result = runAggregation(task.request, task.cancellation);
+        if (!task.cancellation.isCancelled() && result.cacheable) {
+            putCache(task.request.cacheKey, result);
+        }
+        if (!task.cancellation.isCancelled() && task.prefetchOwner) {
+            diagnostics.recordStremioConnector(
+                    "aggregation_prefetch_complete",
+                    task.request.type + "/" + task.request.id + ' '
+                            + result.pipeline.stats.summary()
+                            + " durationMs=" + result.durationMs);
+        }
+        return result;
+    }
+
+    private void onTaskFinished(AggregationTask task) {
+        synchronized (flightLock) {
+            if (inFlight.get(task.request.cacheKey) == task) {
+                inFlight.remove(task.request.cacheKey);
+            }
+            if (activePrefetchTask == task) {
+                activePrefetchTask = null;
+            }
+        }
+    }
+
+    private AggregationResult runAggregation(
+            RequestSnapshot request,
+            StremioRequestCancellation cancellation) {
+        long startedAt = System.currentTimeMillis();
         CompletionService<StremioAddonClient.StreamResult> completion =
                 new ExecutorCompletionService<>(sourceExecutor);
         List<Future<StremioAddonClient.StreamResult>> futures = new ArrayList<>();
         Map<String, Integer> priorities = new HashMap<>();
-        for (int index = 0; index < sources.size(); index++) {
-            StremioStreamSourceStore.Source source = sources.get(index);
+        for (int index = 0; index < request.sources.size(); index++) {
+            StremioStreamSourceStore.Source source = request.sources.get(index);
             priorities.put(source.id, index);
-            Callable<StremioAddonClient.StreamResult> task =
-                    () -> addonClient.loadStreams(source, type, id);
-            futures.add(completion.submit(task));
+            Callable<StremioAddonClient.StreamResult> sourceTask =
+                    () -> addonClient.loadStreams(
+                            source, request.type, request.id, cancellation);
+            futures.add(completion.submit(sourceTask));
         }
 
         long deadlineNanos = System.nanoTime()
@@ -104,7 +272,7 @@ final class StremioStreamAggregator {
         List<StremioStreamPipeline.SourceStreams> loaded = new ArrayList<>();
         int remaining = futures.size();
         try {
-            while (remaining > 0) {
+            while (remaining > 0 && !cancellation.isCancelled()) {
                 long waitNanos = deadlineNanos - System.nanoTime();
                 if (waitNanos <= 0L) {
                     break;
@@ -130,6 +298,13 @@ final class StremioStreamAggregator {
                             result.source, result.streams, priority));
                 }
             }
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            diagnostics.recordStremioConnector(
+                    "aggregation_partial",
+                    "loadedSources=" + loaded.size()
+                            + " remainingSources=" + remaining
+                            + " error=InterruptedException");
         } catch (Exception error) {
             diagnostics.recordStremioConnector(
                     "aggregation_partial",
@@ -143,39 +318,109 @@ final class StremioStreamAggregator {
                     future.cancel(true);
                     diagnostics.recordStremioConnector(
                             "aggregation_source_deadline",
-                            "sourceId=" + shortId(sources.get(index).id)
+                            "sourceId=" + shortId(request.sources.get(index).id)
                                     + " count=0 durationMs=" + TOTAL_DEADLINE_MS);
                 }
             }
+            cancellation.cancelCalls();
         }
 
-        StremioStreamPipeline.Result result =
-                StremioStreamPipeline.processDetailed(loaded, settings);
+        StremioStreamPipeline.Result pipeline =
+                StremioStreamPipeline.processDetailed(loaded, request.settings);
         diagnostics.recordStremioConnector(
-                "loaded".equals(result.state)
+                "loaded".equals(pipeline.state)
                         ? "aggregation_pipeline" : "aggregation_pipeline_failed",
-                "state=" + result.state + ' ' + result.stats.summary());
-        if (!loaded.isEmpty() || remaining == 0) {
-            if (cache.size() >= MAX_CACHE_ENTRIES) {
-                cache.clear();
-            }
-            cache.put(cacheKey, new CacheEntry(result, now));
-        }
+                "state=" + pipeline.state + ' ' + pipeline.stats.summary());
+        long durationMs = Math.max(0L, System.currentTimeMillis() - startedAt);
         diagnostics.recordStremioConnector(
                 "aggregation_complete",
-                "configuredSources=" + allSources.size()
-                        + " enabledSources=" + sources.size()
+                "configuredSources=" + request.allSources.size()
+                        + " enabledSources=" + request.sources.size()
                         + " loadedSources=" + loaded.size() + ' '
-                        + result.stats.summary() + " durationMs="
-                        + Math.max(0L, System.currentTimeMillis() - now));
-        return result.response;
+                        + pipeline.stats.summary() + " durationMs=" + durationMs);
+        return new AggregationResult(
+                pipeline, !loaded.isEmpty() || remaining == 0, durationMs);
     }
 
-    void shutdown() {
-        cache.clear();
-        sourceExecutor.shutdownNow();
-        httpClient.dispatcher().cancelAll();
-        httpClient.connectionPool().evictAll();
+    private RequestSnapshot snapshot(String type, String id) {
+        StremioAggregationPreferences.Snapshot settings =
+                StremioAggregationPreferences.read(context);
+        List<StremioStreamSourceStore.Source> allSources = sourceStore.load();
+        List<StremioStreamSourceStore.Source> sources = new ArrayList<>();
+        for (StremioStreamSourceStore.Source source : allSources) {
+            if (source.enabled) {
+                sources.add(source);
+            }
+        }
+        return new RequestSnapshot(
+                type, id, settings, allSources, sources,
+                cacheKey(type, id, settings, sources));
+    }
+
+    @Nullable
+    private CacheEntry findCached(String key, long nowMs, boolean allowProtected) {
+        CacheEntry cached = cache.get(key);
+        if (cached == null) {
+            return null;
+        }
+        boolean protectedEntry = allowProtected && key.equals(protectedPrefetchKey);
+        if (protectedEntry || nowMs - cached.createdAtMs <= REGULAR_CACHE_AGE_MS) {
+            return cached;
+        }
+        cache.remove(key, cached);
+        return null;
+    }
+
+    private void recordCacheHit(CacheEntry cached, String mode) {
+        diagnostics.recordStremioConnector(
+                "aggregation_cache_hit",
+                cached.result.pipeline.stats.summary()
+                        + " ageMs=" + Math.max(
+                        0L, System.currentTimeMillis() - cached.createdAtMs)
+                        + " mode=" + mode);
+    }
+
+    private void putCache(String key, AggregationResult result) {
+        if (cache.size() >= MAX_CACHE_ENTRIES) {
+            String oldestKey = null;
+            long oldestTimestamp = Long.MAX_VALUE;
+            String protectedKey = protectedPrefetchKey;
+            for (Map.Entry<String, CacheEntry> entry : cache.entrySet()) {
+                if (entry.getKey().equals(protectedKey)) {
+                    continue;
+                }
+                if (entry.getValue().createdAtMs < oldestTimestamp) {
+                    oldestTimestamp = entry.getValue().createdAtMs;
+                    oldestKey = entry.getKey();
+                }
+            }
+            if (oldestKey != null) {
+                cache.remove(oldestKey);
+            }
+        }
+        cache.put(key, new CacheEntry(result, System.currentTimeMillis()));
+    }
+
+    private void recordNoSources(RequestSnapshot request, String reason) {
+        diagnostics.recordStremioConnector(
+                "aggregation_complete",
+                "configuredSources=" + request.allSources.size()
+                        + " enabledSources=0 loadedSources=0"
+                        + " raw=0 accepted=0 returned=0"
+                        + " reason=" + reason + " durationMs=0");
+    }
+
+    private static ThreadFactory namedThreadFactory(String prefix) {
+        return new ThreadFactory() {
+            private int index;
+
+            @Override
+            public synchronized Thread newThread(@NonNull Runnable task) {
+                Thread thread = new Thread(task, prefix + (++index));
+                thread.setDaemon(true);
+                return thread;
+            }
+        };
     }
 
     private static String cacheKey(
@@ -208,11 +453,87 @@ final class StremioStreamAggregator {
         return id.substring(0, Math.min(8, id.length()));
     }
 
+    static boolean shouldCancelReplacedPrefetch(
+            @Nullable String currentKey,
+            @Nullable String replacementKey,
+            int foregroundWaiters) {
+        return currentKey != null
+                && replacementKey != null
+                && !currentKey.equals(replacementKey)
+                && foregroundWaiters <= 0;
+    }
+
+    private final class AggregationTask {
+        final RequestSnapshot request;
+        final StremioRequestCancellation cancellation = new StremioRequestCancellation();
+        final FutureTask<AggregationResult> future;
+        int foregroundWaiters;
+        volatile boolean prefetchOwner;
+
+        AggregationTask(RequestSnapshot request) {
+            this.request = request;
+            future = new FutureTask<>(() -> {
+                try {
+                    return executeAndCache(this);
+                } catch (RuntimeException error) {
+                    if (prefetchOwner) {
+                        diagnostics.recordStremioConnector(
+                                "aggregation_prefetch_failed",
+                                request.type + "/" + request.id
+                                        + " error=" + error.getClass().getSimpleName());
+                    }
+                    throw error;
+                } finally {
+                    onTaskFinished(this);
+                }
+            });
+        }
+    }
+
+    private static final class RequestSnapshot {
+        final String type;
+        final String id;
+        final StremioAggregationPreferences.Snapshot settings;
+        final List<StremioStreamSourceStore.Source> allSources;
+        final List<StremioStreamSourceStore.Source> sources;
+        final String cacheKey;
+
+        RequestSnapshot(
+                String type,
+                String id,
+                StremioAggregationPreferences.Snapshot settings,
+                List<StremioStreamSourceStore.Source> allSources,
+                List<StremioStreamSourceStore.Source> sources,
+                String cacheKey) {
+            this.type = type;
+            this.id = id;
+            this.settings = settings;
+            this.allSources = allSources;
+            this.sources = sources;
+            this.cacheKey = cacheKey;
+        }
+    }
+
+    private static final class AggregationResult {
+        final StremioStreamPipeline.Result pipeline;
+        final boolean cacheable;
+        final long durationMs;
+
+        AggregationResult(
+                StremioStreamPipeline.Result pipeline,
+                boolean cacheable,
+                long durationMs) {
+            this.pipeline = pipeline;
+            this.cacheable = cacheable;
+            this.durationMs = durationMs;
+        }
+    }
+
     private static final class CacheEntry {
-        final StremioStreamPipeline.Result result;
+        final AggregationResult result;
         final long createdAtMs;
 
-        CacheEntry(StremioStreamPipeline.Result result, long createdAtMs) {
+        CacheEntry(AggregationResult result, long createdAtMs) {
             this.result = result;
             this.createdAtMs = createdAtMs;
         }

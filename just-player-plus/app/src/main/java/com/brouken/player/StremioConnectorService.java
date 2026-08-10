@@ -33,7 +33,7 @@ import java.util.concurrent.RejectedExecutionException;
 
 import okhttp3.OkHttpClient;
 
-/** Loopback-only Stremio addon that observes content identity and preloads subtitle listings. */
+/** Loopback-only Stremio addon that observes identity and preloads subtitles and stream lists. */
 public final class StremioConnectorService extends Service {
     static final int PORT = 16745;
     static final String LEGACY_STREAM_RESPONSE = "{\"streams\":[]}";
@@ -42,11 +42,15 @@ public final class StremioConnectorService extends Service {
     static final String STREMIO_ADDONS_URL = "stremio:///addons/series";
 
     private static final int MAX_REQUEST_LINE_LENGTH = 4_096;
+    private static final String ACTION_PREFETCH_STREAMS =
+            BuildConfig.APPLICATION_ID + ".action.PREFETCH_STREMIO_STREAMS";
+    private static final String EXTRA_PREFETCH_TYPE = "prefetch_type";
+    private static final String EXTRA_PREFETCH_ID = "prefetch_id";
     private static final String CHANNEL_ID = "stremio_connector";
     private static final int NOTIFICATION_ID = 16745;
     private static final String MANIFEST = "{"
             + "\"id\":\"com.justplayerplus.connector\","
-            + "\"version\":\"1.8.0\","
+            + "\"version\":\"1.9.0\","
             + "\"name\":\"JustPlayer Plus Connector\","
             + "\"description\":\"Local metadata bridge for JustPlayer Plus\","
             + "\"resources\":["
@@ -84,6 +88,28 @@ public final class StremioConnectorService extends Service {
         context.stopService(new Intent(context, StremioConnectorService.class));
     }
 
+    static boolean prefetchNextEpisode(Context context, StremioEpisodeId episode) {
+        if (episode == null
+                || !new PlusPrefs(context).stremioConnectorEnabled
+                || !StremioAggregationPreferences.isEnabled(context)) {
+            return false;
+        }
+        Intent intent = new Intent(context, StremioConnectorService.class)
+                .setAction(ACTION_PREFETCH_STREAMS)
+                .putExtra(EXTRA_PREFETCH_TYPE, "series")
+                .putExtra(EXTRA_PREFETCH_ID, episode.raw);
+        try {
+            ContextCompat.startForegroundService(context, intent);
+            return true;
+        } catch (RuntimeException error) {
+            return false;
+        }
+    }
+
+    static boolean isValidPrefetchRequest(@Nullable String type, @Nullable String id) {
+        return "series".equals(type) && StremioEpisodeId.parse(id) != null;
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -113,6 +139,18 @@ public final class StremioConnectorService extends Service {
         }
         if (!running) {
             startServer();
+        }
+        if (intent != null && ACTION_PREFETCH_STREAMS.equals(intent.getAction())) {
+            String type = intent.getStringExtra(EXTRA_PREFETCH_TYPE);
+            String id = intent.getStringExtra(EXTRA_PREFETCH_ID);
+            if (StremioAggregationPreferences.isEnabled(this)
+                    && isValidPrefetchRequest(type, id)) {
+                getStreamAggregator().prefetch(type, id);
+            } else {
+                diagnostics.recordStremioConnector(
+                        "aggregation_prefetch_skipped",
+                        "reason=disabled_or_invalid_request");
+            }
         }
         return START_STICKY;
     }

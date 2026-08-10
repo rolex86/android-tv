@@ -78,6 +78,27 @@ public class StremioNextEpisodeTest {
     }
 
     @Test
+    public void nextEpisodeStreamPrefetchStartsThreeMinutesBeforeTheEnd() {
+        long durationMs = 30 * 60_000L;
+
+        assertEquals(durationMs - NextEpisodeStreamPrefetchPolicy.LEAD_MS,
+                NextEpisodeStreamPrefetchPolicy.triggerPositionMs(durationMs));
+        assertFalse(NextEpisodeStreamPrefetchPolicy.shouldStart(
+                durationMs, durationMs - NextEpisodeStreamPrefetchPolicy.LEAD_MS - 1L));
+        assertTrue(NextEpisodeStreamPrefetchPolicy.shouldStart(
+                durationMs, durationMs - NextEpisodeStreamPrefetchPolicy.LEAD_MS));
+    }
+
+    @Test
+    public void shortEpisodePrefetchesAsSoonAsItsMetadataIsReady() {
+        long durationMs = 2 * 60_000L;
+
+        assertEquals(0L, NextEpisodeStreamPrefetchPolicy.triggerPositionMs(durationMs));
+        assertTrue(NextEpisodeStreamPrefetchPolicy.shouldStart(durationMs, 0L));
+        assertEquals(-1L, NextEpisodeStreamPrefetchPolicy.triggerPositionMs(C.TIME_UNSET));
+    }
+
+    @Test
     public void episodeIdUsesLastTwoSegments() {
         StremioEpisodeId id = StremioEpisodeId.parse("custom:meta:2:7");
 

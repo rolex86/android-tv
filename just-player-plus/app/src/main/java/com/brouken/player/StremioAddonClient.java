@@ -81,6 +81,13 @@ final class StremioAddonClient {
     StreamResult loadStreams(StremioStreamSourceStore.Source source,
                              String type,
                              String id) {
+        return loadStreams(source, type, id, null);
+    }
+
+    StreamResult loadStreams(StremioStreamSourceStore.Source source,
+                             String type,
+                             String id,
+                             @Nullable StremioRequestCancellation cancellation) {
         long startedAt = System.currentTimeMillis();
         HttpUrl streamUrl = buildStreamUrl(source.manifestUrl, type, id);
         if (streamUrl == null) {
@@ -90,6 +97,10 @@ final class StremioAddonClient {
         Request request = request(streamUrl);
         Call call = httpClient.newCall(request);
         call.timeout().timeout(SOURCE_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        if (cancellation != null && !cancellation.register(call)) {
+            return new StreamResult(source, Collections.emptyList(),
+                    "cancelled", elapsed(startedAt));
+        }
         try (Response response = call.execute()) {
             if (!response.isSuccessful()) {
                 return new StreamResult(source, Collections.emptyList(),
@@ -118,13 +129,23 @@ final class StremioAddonClient {
             return new StreamResult(source, parsed, "loaded", elapsed(startedAt));
         } catch (InterruptedIOException error) {
             return new StreamResult(source, Collections.emptyList(),
-                    "timeout", elapsed(startedAt));
+                    call.isCanceled()
+                            || (cancellation != null && cancellation.isCancelled())
+                            ? "cancelled" : "timeout",
+                    elapsed(startedAt));
         } catch (BoundedResponseBody.ResponseTooLargeException error) {
             return new StreamResult(source, Collections.emptyList(),
                     "response_too_large", elapsed(startedAt));
         } catch (IOException | JSONException | RuntimeException error) {
             return new StreamResult(source, Collections.emptyList(),
-                    "invalid_response", elapsed(startedAt));
+                    call.isCanceled()
+                            || (cancellation != null && cancellation.isCancelled())
+                            ? "cancelled" : "invalid_response",
+                    elapsed(startedAt));
+        } finally {
+            if (cancellation != null) {
+                cancellation.unregister(call);
+            }
         }
     }
 
