@@ -171,7 +171,7 @@ public class StremioStreamPipelineTest {
                 "tt123:2:4");
 
         assertNotNull(url);
-        assertEquals("/user-token/stream/series/tt123%3A2%3A4.json", url.encodedPath());
+        assertEquals("/user-token/stream/series/tt123:2:4.json", url.encodedPath());
         assertEquals("profile=one", url.encodedQuery());
         assertTrue(StremioAddonClient.parseManifestUrl(
                 "http://local.test/config/manifest.json") != null);
