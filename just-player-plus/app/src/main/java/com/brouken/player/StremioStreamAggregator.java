@@ -29,7 +29,7 @@ import okhttp3.OkHttpClient;
 
 /** Runs all enabled upstream sources concurrently and never proxies the video itself. */
 final class StremioStreamAggregator {
-    private static final String CACHE_SCHEMA = "upstream-relevance-v3";
+    private static final String CACHE_SCHEMA = "next-episode-resilience-v4";
     private static final long TOTAL_DEADLINE_MS = 9_000L;
     private static final long REGULAR_CACHE_AGE_MS = 30_000L;
     private static final int MAX_CACHE_ENTRIES = 32;
@@ -260,8 +260,9 @@ final class StremioStreamAggregator {
     private AggregationResult executeAndCache(AggregationTask task) {
         AggregationResult result = runAggregation(task.request, task.cancellation);
         long completedAtMs = System.currentTimeMillis();
+        CacheEntry cachedEntry = null;
         if (!task.cancellation.isCancelled() && result.cacheable) {
-            putCache(task.request.cacheKey, result, completedAtMs);
+            cachedEntry = putCache(task.request.cacheKey, result, completedAtMs);
             int streamCount = StremioConnectorService.streamCount(
                     result.pipeline.response);
             boolean persistAttempted = false;
@@ -269,13 +270,17 @@ final class StremioStreamAggregator {
             synchronized (flightLock) {
                 if (!task.cancellation.isCancelled()
                         && task.prefetchOwner
-                        && task.request.cacheKey.equals(protectedPrefetchKey)) {
+                        && task.request.cacheKey.equals(protectedPrefetchKey)
+                        && result.protectable) {
                     persistAttempted = true;
                     persistSucceeded = protectedPrefetchCache.replace(
                             task.request.cacheKey,
                             result.pipeline.response,
                             streamCount,
                             completedAtMs);
+                    if (persistSucceeded && cachedEntry != null) {
+                        cachedEntry.protectedPrefetch = true;
+                    }
                 }
             }
             if (persistAttempted) {
@@ -329,6 +334,7 @@ final class StremioStreamAggregator {
                 + TimeUnit.MILLISECONDS.toNanos(TOTAL_DEADLINE_MS);
         List<StremioStreamPipeline.SourceStreams> loaded = new ArrayList<>();
         int remaining = futures.size();
+        int failedSources = 0;
         try {
             while (remaining > 0 && !cancellation.isCancelled()) {
                 long waitNanos = deadlineNanos - System.nanoTime();
@@ -354,6 +360,8 @@ final class StremioStreamAggregator {
                 if ("loaded".equals(result.state)) {
                     loaded.add(new StremioStreamPipeline.SourceStreams(
                             result.source, result.streams, priority));
+                } else if (!isCompleteSourceState(result.state)) {
+                    failedSources++;
                 }
             }
         } catch (InterruptedException error) {
@@ -390,14 +398,30 @@ final class StremioStreamAggregator {
                         ? "aggregation_pipeline" : "aggregation_pipeline_failed",
                 "state=" + pipeline.state + ' ' + pipeline.stats.summary());
         long durationMs = Math.max(0L, System.currentTimeMillis() - startedAt);
+        boolean complete = remaining == 0
+                && failedSources == 0
+                && !cancellation.isCancelled();
+        boolean cacheable = "loaded".equals(pipeline.state)
+                && (!loaded.isEmpty() || remaining == 0);
+        boolean protectable = cacheable && complete && pipeline.stats.returned > 0;
         diagnostics.recordStremioConnector(
                 "aggregation_complete",
                 "configuredSources=" + request.allSources.size()
                         + " enabledSources=" + request.sources.size()
                         + " loadedSources=" + loaded.size() + ' '
+                        + "failedSources=" + failedSources
+                        + " complete=" + complete
+                        + " protectable=" + protectable + ' '
                         + pipeline.stats.summary() + " durationMs=" + durationMs);
         return new AggregationResult(
-                pipeline, !loaded.isEmpty() || remaining == 0, durationMs);
+                pipeline, cacheable, protectable, durationMs);
+    }
+
+    static boolean isCompleteSourceState(String state) {
+        return "loaded".equals(state)
+                || "unsupported_type".equals(state)
+                || "unsupported_id".equals(state)
+                || "missing_stream_resource".equals(state);
     }
 
     private RequestSnapshot snapshot(String type, String id) {
@@ -421,7 +445,9 @@ final class StremioStreamAggregator {
         if (cached == null) {
             return null;
         }
-        boolean protectedEntry = allowProtected && key.equals(protectedPrefetchKey);
+        boolean protectedEntry = allowProtected
+                && cached.protectedPrefetch
+                && key.equals(protectedPrefetchKey);
         if (protectedEntry || nowMs - cached.createdAtMs <= REGULAR_CACHE_AGE_MS) {
             return cached;
         }
@@ -464,7 +490,7 @@ final class StremioStreamAggregator {
                         + " mode=" + mode);
     }
 
-    private void putCache(String key, AggregationResult result, long createdAtMs) {
+    private CacheEntry putCache(String key, AggregationResult result, long createdAtMs) {
         if (cache.size() >= MAX_CACHE_ENTRIES) {
             String oldestKey = null;
             long oldestTimestamp = Long.MAX_VALUE;
@@ -482,7 +508,9 @@ final class StremioStreamAggregator {
                 cache.remove(oldestKey);
             }
         }
-        cache.put(key, new CacheEntry(result, createdAtMs));
+        CacheEntry entry = new CacheEntry(result, createdAtMs);
+        cache.put(key, entry);
+        return entry;
     }
 
     private void recordNoSources(RequestSnapshot request, String reason) {
@@ -602,14 +630,17 @@ final class StremioStreamAggregator {
     private static final class AggregationResult {
         final StremioStreamPipeline.Result pipeline;
         final boolean cacheable;
+        final boolean protectable;
         final long durationMs;
 
         AggregationResult(
                 StremioStreamPipeline.Result pipeline,
                 boolean cacheable,
+                boolean protectable,
                 long durationMs) {
             this.pipeline = pipeline;
             this.cacheable = cacheable;
+            this.protectable = protectable;
             this.durationMs = durationMs;
         }
     }
@@ -617,6 +648,7 @@ final class StremioStreamAggregator {
     private static final class CacheEntry {
         final AggregationResult result;
         final long createdAtMs;
+        volatile boolean protectedPrefetch;
 
         CacheEntry(AggregationResult result, long createdAtMs) {
             this.result = result;

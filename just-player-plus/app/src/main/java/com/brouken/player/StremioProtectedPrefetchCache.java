@@ -91,7 +91,7 @@ final class StremioProtectedPrefetchCache {
                 && entry.cacheKey != null
                 && !entry.cacheKey.isEmpty()
                 && entry.response != null
-                && entry.streamCount >= 0
+                && entry.streamCount > 0
                 && StremioConnectorService.streamCount(entry.response) == entry.streamCount;
     }
 

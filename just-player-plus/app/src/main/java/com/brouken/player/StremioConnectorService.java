@@ -50,7 +50,7 @@ public final class StremioConnectorService extends Service {
     private static final int NOTIFICATION_ID = 16745;
     private static final String MANIFEST = "{"
             + "\"id\":\"com.justplayerplus.connector\","
-            + "\"version\":\"1.11.0\","
+            + "\"version\":\"1.12.0\","
             + "\"name\":\"JustPlayer Plus Connector\","
             + "\"description\":\"Local metadata bridge for JustPlayer Plus\","
             + "\"resources\":["
@@ -434,6 +434,12 @@ public final class StremioConnectorService extends Service {
                     "aggregation_kill_switch", type + "/" + id);
         }
         int streamCount = streamCount(response);
+        if (aggregationEnabled
+                && StremioAggregationPreferences.isEnabled(this)
+                && streamCount >= 0) {
+            store.recordStreamFallbacks(
+                    type, id, response, System.currentTimeMillis());
+        }
         int responseBytes = response.getBytes(StandardCharsets.UTF_8).length;
         diagnostics.recordStremioConnector(
                 "aggregation_response_ready",

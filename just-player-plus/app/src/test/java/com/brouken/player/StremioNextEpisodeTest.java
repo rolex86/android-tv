@@ -16,6 +16,8 @@ import org.json.JSONObject;
 import org.junit.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 
 public class StremioNextEpisodeTest {
@@ -182,6 +184,43 @@ public class StremioNextEpisodeTest {
                 event("tt1:2:3", 10_001L), expected));
         assertFalse(StremioConnectorStore.shouldUseExpectedEpisode(
                 event("tt1:2:3", 10_000L), expected));
+    }
+
+    @Test
+    public void directFallbackQueuePreservesFinalConnectorOrderAcrossSources() {
+        List<StremioConnectorStore.StreamFallback> fallbacks =
+                StremioConnectorStore.parseDirectFallbacks("{\"streams\":["
+                        + "{\"url\":\"https://one.example/bluey\","
+                        + "\"name\":\"1080p • Source A\"},"
+                        + "{\"infoHash\":\"abcdef\",\"name\":\"Torrent\"},"
+                        + "{\"url\":\"https://two.example/bluey\","
+                        + "\"name\":\"720p • Source B\"},"
+                        + "{\"url\":\"https://one.example/bluey\"},"
+                        + "{\"externalUrl\":\"https://page.example/bluey\"}]}");
+
+        assertEquals(2, fallbacks.size());
+        assertEquals("https://one.example/bluey", fallbacks.get(0).url);
+        assertEquals("https://two.example/bluey", fallbacks.get(1).url);
+        assertTrue(fallbacks.get(0).label.contains("Source A"));
+    }
+
+    @Test
+    public void fallbackRequiresTheExactCurrentEpisodeStreamAndSkipsAttempts() {
+        List<StremioConnectorStore.StreamFallback> fallbacks = Arrays.asList(
+                new StremioConnectorStore.StreamFallback("https://one/episode", "A"),
+                new StremioConnectorStore.StreamFallback("https://two/episode", "B"),
+                new StremioConnectorStore.StreamFallback("https://three/episode", "C"));
+        HashSet<String> attempted = new HashSet<>(
+                Collections.singletonList("https://two/episode"));
+
+        StremioConnectorStore.StreamFallback selected =
+                StremioConnectorStore.nextFallback(
+                        fallbacks, "https://one/episode", attempted);
+
+        assertNotNull(selected);
+        assertEquals("https://three/episode", selected.url);
+        assertNull(StremioConnectorStore.nextFallback(
+                fallbacks, "https://other-series/episode", attempted));
     }
 
     @Test

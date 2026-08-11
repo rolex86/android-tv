@@ -102,5 +102,20 @@ public class StremioConnectorServiceTest {
         assertFalse(StremioProtectedPrefetchCache.isStructurallyValid(
                 new StremioProtectedPrefetchCache.Entry(
                         "episode-38", "not-json", 1, now)));
+        assertFalse(StremioProtectedPrefetchCache.isStructurallyValid(
+                new StremioProtectedPrefetchCache.Entry(
+                        "episode-38", "{\"streams\":[]}", 0, now)));
+    }
+
+    @Test
+    public void protectedPrefetchRequiresEveryEnabledSourceToCompleteCleanly() {
+        assertTrue(StremioStreamAggregator.isCompleteSourceState("loaded"));
+        assertTrue(StremioStreamAggregator.isCompleteSourceState("unsupported_type"));
+        assertTrue(StremioStreamAggregator.isCompleteSourceState("unsupported_id"));
+        assertTrue(StremioStreamAggregator.isCompleteSourceState(
+                "missing_stream_resource"));
+        assertFalse(StremioStreamAggregator.isCompleteSourceState("timeout"));
+        assertFalse(StremioStreamAggregator.isCompleteSourceState("manifest_timeout"));
+        assertFalse(StremioStreamAggregator.isCompleteSourceState("http_503"));
     }
 }

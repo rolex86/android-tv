@@ -155,7 +155,7 @@ runtime_regression_anchors = (
     "updateExpectedEndTime(newPosition.positionMs)",
     "onPlaybackParametersChanged",
     "getTimeFormat(this)",
-    "now, getStremioLaunchIdentity())",
+    "getStremioMediaIdentity(), getStremioLaunchIdentity())",
     "metadata_resolution_started",
     "setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS)",
     "if (mPlusPrefs.aiSubtitlesEnabled)",
@@ -203,6 +203,7 @@ else:
         "dubbedLabelsIncludeSynchronizedVariants",
         "subtitleMediaDefaultKeepsItsConfiguredPosition",
         "audioAndSubtitleMemoryProvenanceAreIndependent",
+        "rememberedSeriesTrackSurvivesMissingLanguageMetadataOnAnotherSource",
     ):
         if test_name not in tests:
             errors.append(f"Missing smart-selection regression test: {test_name}")
@@ -240,6 +241,8 @@ else:
     for test_name in (
         "freshMovieRequestSupersedesStaleSeriesRequest",
         "launchIdentityIsStableAndDoesNotStoreTheRawTitle",
+        "directFallbackQueuePreservesFinalConnectorOrderAcrossSources",
+        "fallbackRequiresTheExactCurrentEpisodeStreamAndSkipsAttempts",
         "rememberedContentRejectsMalformedTypesAndIds",
         "movieMetadataUsesCinemetaName",
         "subtitleRequestRecoversEpisodeIdentityAndFilename",

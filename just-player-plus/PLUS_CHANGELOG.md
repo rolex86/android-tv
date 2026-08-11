@@ -1,5 +1,21 @@
 # JustPlayer Plus changelog
 
+## Step 24 — Resilient next-episode stream handoff
+
+- Protected next-episode prefetch now requires a complete, non-empty response from every
+  compatible enabled source; partial and empty results remain short-lived and are retried.
+- The Connector remembers the final ordered direct-URL stream queue for each exact episode ID.
+- A series source error can continue with the next filtered stream, including another source,
+  without confusing episodes or depending on Stremio retrying the same cached stream.
+- Direct fallback retains the stable Stremio series identity, playback position, supplied
+  subtitles and remembered manual audio/subtitle choices.
+- Exact launch-marker and stream-URL associations take precedence over unrelated newer Connector
+  requests while the legacy expected-episode hint remains bounded and user navigation-safe.
+- Remembered known-language tracks can map to an untagged equivalent on another release; an
+  untagged remembered track maps to a tagged track only when their semantic labels agree.
+- Invalidated pre-version-266 aggregation and protected-prefetch cache entries, raised the
+  Connector manifest to `1.12.0`, and raised the application version code to 266.
+
 ## Step 23 — Reliable next-episode popup fallback
 
 - Kept the precise Media3 position message as the primary next-episode popup trigger.

@@ -13,7 +13,12 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 /** Small bounded journal used to correlate Stremio's latest content request with player launch. */
 final class StremioConnectorStore {
@@ -25,12 +30,16 @@ final class StremioConnectorStore {
     private static final String KEY_EXPECTED_EPISODE = "expected_episode";
     private static final String KEY_CONTENT_ASSOCIATIONS = "content_associations";
     private static final String KEY_SUBTITLE_PRELOADS = "subtitle_preloads_v1";
+    private static final String KEY_STREAM_FALLBACKS = "stream_fallbacks_v1";
     private static final int MAX_EVENTS = 24;
     private static final int MAX_ASSOCIATIONS = 48;
+    private static final int MAX_FALLBACK_QUEUES = 8;
+    private static final int MAX_STREAM_FALLBACKS = 50;
     private static final long MAX_EVENT_AGE_MS = 15 * 60_000L;
     private static final long MAX_FILENAME_REFRESH_AGE_MS = 5_000L;
     private static final long MAX_EXPECTED_AGE_MS = 30_000L;
     private static final long MAX_ASSOCIATION_AGE_MS = 24L * 60L * 60_000L;
+    private static final long MAX_STREAM_FALLBACK_AGE_MS = 2L * 60L * 60_000L;
     private static final long DEDUPLICATE_WINDOW_MS = 2_000L;
 
     private final SharedPreferences preferences;
@@ -81,10 +90,29 @@ final class StremioConnectorStore {
      */
     @Nullable
     Content claimRecentContent(long nowMs, @Nullable String launchIdentity) {
+        return claimRecentContent(nowMs, launchIdentity, null);
+    }
+
+    @Nullable
+    Content claimRecentContent(
+            long nowMs,
+            @Nullable String launchIdentity,
+            @Nullable String alternateLaunchIdentity) {
         synchronized (LOCK) {
             List<Event> events = readEvents();
             Event event = findRecentEvent(events, nowMs);
             ExpectedEpisode expected = claimExpectedEpisode(nowMs);
+            Content associated = findAssociation(launchIdentity, nowMs);
+            if (associated == null) {
+                associated = findAssociation(alternateLaunchIdentity, nowMs);
+            }
+            if (associated != null) {
+                associated = associated.withCorrelation(
+                        "launch_association", associated.correlationAgeMs);
+                rememberAssociation(launchIdentity, associated, nowMs);
+                rememberAssociation(alternateLaunchIdentity, associated, nowMs);
+                return associated;
+            }
             if (shouldUseExpectedEpisode(event, expected)) {
                 Content content = Content.series(expected.episode)
                         .withCorrelation("expected_next", 0L);
@@ -148,13 +176,227 @@ final class StremioConnectorStore {
     }
 
     /**
+     * Remembers the final ordered direct-URL streams returned by the Connector for exact content.
+     * Torrent and external-page entries remain Stremio-owned and are never treated as playable
+     * JustPlayer fallbacks.
+     */
+    void recordStreamFallbacks(String type, String id, String response, long nowMs) {
+        Content content = Content.fromValues(type, id);
+        if (content == null) {
+            return;
+        }
+        List<StreamFallback> fallbacks = parseDirectFallbacks(response);
+        synchronized (LOCK) {
+            JSONArray previous = readStreamFallbackQueues();
+            JSONArray updated = new JSONArray();
+            if (!fallbacks.isEmpty()) {
+                JSONObject current = new JSONObject();
+                JSONArray streams = new JSONArray();
+                try {
+                    current.put("type", type);
+                    current.put("id", id);
+                    current.put("timestamp", nowMs);
+                    for (StreamFallback fallback : fallbacks) {
+                        JSONObject stream = new JSONObject();
+                        stream.put("url", fallback.url);
+                        if (fallback.label != null) {
+                            stream.put("label", fallback.label);
+                        }
+                        streams.put(stream);
+                    }
+                    current.put("streams", streams);
+                    updated.put(current);
+                } catch (JSONException ignored) {
+                    return;
+                }
+            }
+
+            for (int index = 0;
+                 index < previous.length() && updated.length() < MAX_FALLBACK_QUEUES;
+                 index++) {
+                JSONObject item = previous.optJSONObject(index);
+                if (item == null
+                        || (type.equals(item.optString("type", ""))
+                        && id.equals(item.optString("id", "")))) {
+                    continue;
+                }
+                long timestamp = item.optLong("timestamp", 0L);
+                if (isFreshStreamFallback(timestamp, nowMs)) {
+                    updated.put(item);
+                }
+            }
+            if (updated.length() == 0) {
+                preferences.edit().remove(KEY_STREAM_FALLBACKS).apply();
+            } else {
+                preferences.edit().putString(
+                        KEY_STREAM_FALLBACKS, updated.toString()).apply();
+            }
+
+            if (!fallbacks.isEmpty()) {
+                List<String> identities = new ArrayList<>();
+                for (StreamFallback fallback : fallbacks) {
+                    identities.add(fallback.url);
+                }
+                rememberAssociations(identities, content, nowMs);
+            }
+        }
+    }
+
+    @Nullable
+    StreamFallback findNextStreamFallback(
+            Content content,
+            @Nullable String currentUrl,
+            Set<String> attemptedUrls,
+            long nowMs) {
+        if (content == null || !content.isSeries() || currentUrl == null) {
+            return null;
+        }
+        synchronized (LOCK) {
+            JSONArray queues = readStreamFallbackQueues();
+            for (int index = 0; index < queues.length(); index++) {
+                JSONObject item = queues.optJSONObject(index);
+                if (item == null
+                        || !content.type.equals(item.optString("type", ""))
+                        || !content.id.equals(item.optString("id", ""))
+                        || !isFreshStreamFallback(
+                        item.optLong("timestamp", 0L), nowMs)) {
+                    continue;
+                }
+                List<StreamFallback> candidates = parseStoredFallbacks(
+                        item.optJSONArray("streams"));
+                return nextFallback(candidates, currentUrl, attemptedUrls);
+            }
+            return null;
+        }
+    }
+
+    static List<StreamFallback> parseDirectFallbacks(@Nullable String response) {
+        if (response == null) {
+            return Collections.emptyList();
+        }
+        try {
+            JSONArray streams = new JSONObject(response).optJSONArray("streams");
+            if (streams == null) {
+                return Collections.emptyList();
+            }
+            List<StreamFallback> result = new ArrayList<>();
+            Set<String> urls = new LinkedHashSet<>();
+            for (int index = 0;
+                 index < streams.length() && result.size() < MAX_STREAM_FALLBACKS;
+                 index++) {
+                JSONObject stream = streams.optJSONObject(index);
+                if (stream == null) {
+                    continue;
+                }
+                String url = stream.optString("url", "").trim();
+                if (!isDirectPlaybackUrl(url) || !urls.add(url)) {
+                    continue;
+                }
+                String name = normalizeFilename(stream.optString("name", null));
+                String title = normalizeFilename(stream.optString("title", null));
+                String label = name == null ? title
+                        : title == null ? name : name + " | " + title;
+                result.add(new StreamFallback(url, label));
+            }
+            return result;
+        } catch (JSONException | RuntimeException ignored) {
+            return Collections.emptyList();
+        }
+    }
+
+    @Nullable
+    static StreamFallback nextFallback(
+            List<StreamFallback> candidates,
+            String currentUrl,
+            Set<String> attemptedUrls) {
+        boolean currentBelongsToQueue = false;
+        for (StreamFallback candidate : candidates) {
+            if (candidate.url.equals(currentUrl)) {
+                currentBelongsToQueue = true;
+                break;
+            }
+        }
+        if (!currentBelongsToQueue) {
+            return null;
+        }
+        Set<String> attempted = attemptedUrls == null
+                ? Collections.emptySet() : attemptedUrls;
+        for (StreamFallback candidate : candidates) {
+            if (!candidate.url.equals(currentUrl) && !attempted.contains(candidate.url)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private static List<StreamFallback> parseStoredFallbacks(@Nullable JSONArray streams) {
+        if (streams == null) {
+            return Collections.emptyList();
+        }
+        List<StreamFallback> result = new ArrayList<>();
+        Set<String> urls = new HashSet<>();
+        for (int index = 0;
+             index < streams.length() && result.size() < MAX_STREAM_FALLBACKS;
+             index++) {
+            JSONObject stream = streams.optJSONObject(index);
+            if (stream == null) {
+                continue;
+            }
+            String url = stream.optString("url", "").trim();
+            if (!isDirectPlaybackUrl(url) || !urls.add(url)) {
+                continue;
+            }
+            result.add(new StreamFallback(
+                    url, normalizeFilename(stream.optString("label", null))));
+        }
+        return result;
+    }
+
+    private JSONArray readStreamFallbackQueues() {
+        String encoded = preferences.getString(KEY_STREAM_FALLBACKS, null);
+        if (encoded == null) {
+            return new JSONArray();
+        }
+        try {
+            return new JSONArray(encoded);
+        } catch (JSONException ignored) {
+            preferences.edit().remove(KEY_STREAM_FALLBACKS).apply();
+            return new JSONArray();
+        }
+    }
+
+    private static boolean isFreshStreamFallback(long timestampMs, long nowMs) {
+        return timestampMs > 0L
+                && timestampMs <= nowMs + 10_000L
+                && nowMs - timestampMs <= MAX_STREAM_FALLBACK_AGE_MS;
+    }
+
+    private static boolean isDirectPlaybackUrl(String value) {
+        String normalized = value.toLowerCase(Locale.ROOT);
+        return normalized.startsWith("http://")
+                || normalized.startsWith("https://")
+                || normalized.startsWith("rtsp://");
+    }
+
+    /**
      * Finds advisory content identity without consuming next-episode state or claiming the event.
      * This is used only before the first media item is created.
      */
     @Nullable
     Content findLaunchContent(long nowMs, @Nullable String launchIdentity) {
+        return findLaunchContent(nowMs, launchIdentity, null);
+    }
+
+    @Nullable
+    Content findLaunchContent(
+            long nowMs,
+            @Nullable String launchIdentity,
+            @Nullable String alternateLaunchIdentity) {
         synchronized (LOCK) {
             Content associated = findAssociation(launchIdentity, nowMs);
+            if (associated == null) {
+                associated = findAssociation(alternateLaunchIdentity, nowMs);
+            }
             if (associated != null) {
                 return associated.withCorrelation(
                         "startup_association", associated.correlationAgeMs);
@@ -221,28 +463,48 @@ final class StremioConnectorStore {
     private void rememberAssociation(@Nullable String launchIdentity,
                                      Content content,
                                      long nowMs) {
-        String identity = hashIdentity(launchIdentity);
-        if (identity == null) {
+        rememberAssociations(
+                Collections.singletonList(launchIdentity), content, nowMs);
+    }
+
+    private void rememberAssociations(
+            List<String> launchIdentities,
+            Content content,
+            long nowMs) {
+        LinkedHashSet<String> identities = new LinkedHashSet<>();
+        for (String launchIdentity : launchIdentities) {
+            String identity = hashIdentity(launchIdentity);
+            if (identity != null) {
+                identities.add(identity);
+            }
+        }
+        if (identities.isEmpty()) {
             return;
         }
         JSONArray previous = readAssociations();
         JSONArray updated = new JSONArray();
         try {
-            JSONObject current = new JSONObject();
-            current.put("identity", identity);
-            current.put("type", content.type);
-            current.put("id", content.id);
-            current.put("timestamp", nowMs);
-            if (content.mediaFilename != null) {
-                current.put("filename", content.mediaFilename);
+            for (String identity : identities) {
+                if (updated.length() >= MAX_ASSOCIATIONS) {
+                    break;
+                }
+                JSONObject current = new JSONObject();
+                current.put("identity", identity);
+                current.put("type", content.type);
+                current.put("id", content.id);
+                current.put("timestamp", nowMs);
+                if (content.mediaFilename != null) {
+                    current.put("filename", content.mediaFilename);
+                }
+                updated.put(current);
             }
-            updated.put(current);
 
             for (int index = 0;
                  index < previous.length() && updated.length() < MAX_ASSOCIATIONS;
                  index++) {
                 JSONObject item = previous.optJSONObject(index);
-                if (item == null || identity.equals(item.optString("identity", ""))) {
+                if (item == null
+                        || identities.contains(item.optString("identity", ""))) {
                     continue;
                 }
                 long timestamp = item.optLong("timestamp", 0L);
@@ -403,6 +665,7 @@ final class StremioConnectorStore {
                     .remove(KEY_EXPECTED_EPISODE)
                     .remove(KEY_CONTENT_ASSOCIATIONS)
                     .remove(KEY_SUBTITLE_PRELOADS)
+                    .remove(KEY_STREAM_FALLBACKS)
                     .apply();
         }
     }
@@ -481,6 +744,16 @@ final class StremioConnectorStore {
         ExpectedEpisode(StremioEpisodeId episode, long timestampMs) {
             this.episode = episode;
             this.timestampMs = timestampMs;
+        }
+    }
+
+    static final class StreamFallback {
+        final String url;
+        @Nullable final String label;
+
+        StreamFallback(String url, @Nullable String label) {
+            this.url = url;
+            this.label = label;
         }
     }
 
