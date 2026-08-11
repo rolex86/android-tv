@@ -163,7 +163,9 @@ public class PlayerActivity extends Activity {
     private boolean startupLaunchDiagnosticsDeferred;
     private int nextEpisodeSession;
     private boolean nextEpisodeDismissed;
+    private boolean nextEpisodeContinuationDeclined;
     private boolean nextEpisodeShown;
+    private boolean nextEpisodeLaunchStarted;
     private boolean trackMemoryArmed;
     private String trackMemoryAudioSignature;
     private String trackMemorySubtitleSignature;
@@ -1627,7 +1629,9 @@ public class PlayerActivity extends Activity {
         nextEpisodePrefetchRequested = false;
         nextEpisodeInfo = null;
         nextEpisodeDismissed = false;
+        nextEpisodeContinuationDeclined = false;
         nextEpisodeShown = false;
+        nextEpisodeLaunchStarted = false;
         stremioTitleTrackIdentity = null;
         stremioSeriesTrackIdentity = null;
         stableTrackMemoryApplied = false;
@@ -1856,6 +1860,7 @@ public class PlayerActivity extends Activity {
 
     private void dismissNextEpisode() {
         nextEpisodeDismissed = true;
+        nextEpisodeContinuationDeclined = true;
         cancelNextEpisodePopupMessage();
         cancelNextEpisodePopupWatchdog();
         if (nextEpisodeInfo != null) {
@@ -1883,6 +1888,9 @@ public class PlayerActivity extends Activity {
                 nextEpisodeInfo.seriesTitle != null,
                 nextEpisodeInfo.artworkUrl != null,
                 "play_now");
+        if (launchNextEpisodeInStremio("play_now")) {
+            return;
+        }
         long duration = player != null ? player.getDuration() : C.TIME_UNSET;
         if (player == null || duration == C.TIME_UNSET || duration <= 0L) {
             dismissNextEpisode();
@@ -1896,6 +1904,60 @@ public class PlayerActivity extends Activity {
         }
         player.seekTo(Math.max(0L, duration - 750L));
         player.play();
+    }
+
+    private boolean launchNextEpisodeInStremio(String trigger) {
+        if (nextEpisodeLaunchStarted || nextEpisodeInfo == null || !intentReturnResult) {
+            return false;
+        }
+        String deepLink = StremioNextEpisodeDeepLink.build(nextEpisodeInfo.next);
+        if (deepLink == null) {
+            return false;
+        }
+
+        boolean previouslyDismissed = nextEpisodeDismissed;
+        boolean resumeOnFailure = player != null && player.isPlaying();
+        nextEpisodeLaunchStarted = true;
+        nextEpisodeDismissed = true;
+        cancelNextEpisodePopupMessage();
+        cancelNextEpisodePopupWatchdog();
+        if (nextEpisodeOverlay != null) {
+            nextEpisodeOverlay.hide(false);
+        }
+        if (resumeOnFailure) {
+            player.pause();
+        }
+
+        new StremioConnectorStore(this).expectEpisode(
+                nextEpisodeInfo.next, System.currentTimeMillis());
+        externalDiagnostics.recordStremioConnector(
+                "next_episode_deep_link_attempt",
+                "trigger=" + trigger + " target=" + nextEpisodeInfo.next.raw);
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(deepLink))
+                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            startActivity(intent);
+            externalDiagnostics.recordStremioConnector(
+                    "next_episode_deep_link_launched",
+                    "trigger=" + trigger + " target=" + nextEpisodeInfo.next.raw);
+            restorePlayStateAllowed = false;
+            // Do not deliver the old episode's activity result after explicitly opening the next
+            // one. That callback is exactly what makes affected Stremio builds replay the old ID.
+            super.finish();
+            return true;
+        } catch (RuntimeException error) {
+            nextEpisodeLaunchStarted = false;
+            nextEpisodeDismissed = previouslyDismissed;
+            externalDiagnostics.recordStremioConnector(
+                    "next_episode_deep_link_failed",
+                    "trigger=" + trigger
+                            + " target=" + nextEpisodeInfo.next.raw
+                            + " error=" + error.getClass().getSimpleName());
+            if (resumeOnFailure && player != null) {
+                player.play();
+            }
+            return false;
+        }
     }
 
     private void snapshotPlaybackResult() {
@@ -2002,11 +2064,11 @@ public class PlayerActivity extends Activity {
     @Override
     public void finish() {
         snapshotPlaybackResult();
-        // Crossing the configured watched threshold must never turn an explicit Back action
-        // into automatic continuation in the calling app. Only a natural player end (or the
-        // explicit "play now" path, which seeks to it) may report playback completion.
+        // Crossing the configured watched threshold must never turn an explicit Back action or
+        // an explicit next-episode dismissal into automatic continuation in the calling app.
+        // Successful next-episode deep links bypass this result path altogether.
         String resultEndBy = ExternalPlaybackResultPolicy.endBy(
-                playbackFinished, userInitiatedExit);
+                playbackFinished, userInitiatedExit || nextEpisodeContinuationDeclined);
         if (apiAccess || apiAccessPartial || intentReturnResult) {
             externalDiagnostics.recordResult(resultPosition, resultDuration, resultEndBy);
         }
@@ -3219,9 +3281,25 @@ public class PlayerActivity extends Activity {
                 releaseAiSubtitleController();
                 cancelNextEpisodePopupMessage();
                 cancelNextEpisodePopupWatchdog();
-                if (nextEpisodeInfo != null) {
+                if (StremioNextEpisodeDeepLink.shouldLaunchAtNaturalEnd(
+                        nextEpisodeInfo != null,
+                        intentReturnResult,
+                        nextEpisodeContinuationDeclined)) {
+                    externalDiagnostics.recordNextEpisode(
+                            nextEpisodeInfo.current.raw,
+                            nextEpisodeInfo.next.raw,
+                            nextEpisodeInfo.seriesTitle != null,
+                            nextEpisodeInfo.artworkUrl != null,
+                            "natural_end");
+                    if (launchNextEpisodeInStremio("natural_end")) {
+                        return;
+                    }
+                }
+                if (nextEpisodeInfo != null && !nextEpisodeContinuationDeclined) {
                     new StremioConnectorStore(PlayerActivity.this).expectEpisode(
                             nextEpisodeInfo.next, System.currentTimeMillis());
+                } else if (nextEpisodeContinuationDeclined) {
+                    new StremioConnectorStore(PlayerActivity.this).clearExpectedEpisode();
                 }
                 if (nextEpisodeOverlay != null) {
                     nextEpisodeOverlay.hide(false);
