@@ -129,17 +129,29 @@ final class NextEpisodeTrackContract {
             @Nullable String requiredLanguage,
             @Nullable String requiredLabel,
             Format candidate) {
+        return matchesIdentity(
+                requiredLanguage,
+                requiredLabel,
+                candidate.language,
+                candidate.label);
+    }
+
+    static boolean matchesIdentity(
+            @Nullable String requiredLanguage,
+            @Nullable String requiredLabel,
+            @Nullable String candidateLanguage,
+            @Nullable String candidateLabel) {
         String required = normalizeLanguage(requiredLanguage);
-        String actual = normalizeLanguage(candidate.language);
+        String actual = normalizeLanguage(candidateLanguage);
         if (!required.isEmpty()) {
             if (!actual.isEmpty()) {
                 return required.equals(actual);
             }
-            return labelIdentifiesLanguage(candidate.label, required);
+            return labelIdentifiesLanguage(candidateLabel, required);
         }
         String requiredSemanticLabel = normalizeLabel(requiredLabel);
         return !requiredSemanticLabel.isEmpty()
-                && requiredSemanticLabel.equals(normalizeLabel(candidate.label));
+                && requiredSemanticLabel.equals(normalizeLabel(candidateLabel));
     }
 
     private static boolean labelIdentifiesLanguage(

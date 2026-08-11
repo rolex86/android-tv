@@ -8,7 +8,6 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import androidx.media3.common.C;
-import androidx.media3.common.Format;
 import androidx.media3.common.MimeTypes;
 
 import org.json.JSONArray;
@@ -251,27 +250,14 @@ public class StremioNextEpisodeTest {
 
     @Test
     public void strictTrackContractRejectsEnglishAndAcceptsExplicitCzechLabel() {
-        Format english = new Format.Builder()
-                .setLanguage("eng")
-                .setLabel("English")
-                .build();
-        Format czechMetadata = new Format.Builder()
-                .setLanguage("cs")
-                .setLabel("Čeština")
-                .build();
-        Format czechLabel = new Format.Builder()
-                .setLanguage("und")
-                .setLabel("Czech dubbing")
-                .build();
-        Format unknown = new Format.Builder()
-                .setLanguage("und")
-                .setLabel("Audio 1")
-                .build();
-
-        assertFalse(NextEpisodeTrackContract.matchesIdentity("ces", "Čeština", english));
-        assertTrue(NextEpisodeTrackContract.matchesIdentity("ces", "Čeština", czechMetadata));
-        assertTrue(NextEpisodeTrackContract.matchesIdentity("ces", "Čeština", czechLabel));
-        assertFalse(NextEpisodeTrackContract.matchesIdentity("ces", "Čeština", unknown));
+        assertFalse(NextEpisodeTrackContract.matchesIdentity(
+                "ces", "Čeština", "eng", "English"));
+        assertTrue(NextEpisodeTrackContract.matchesIdentity(
+                "ces", "Čeština", "cs", "Čeština"));
+        assertTrue(NextEpisodeTrackContract.matchesIdentity(
+                "ces", "Čeština", "und", "Czech dubbing"));
+        assertFalse(NextEpisodeTrackContract.matchesIdentity(
+                "ces", "Čeština", "und", "Audio 1"));
     }
 
     @Test
