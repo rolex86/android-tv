@@ -15,9 +15,11 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /** Small bounded journal used to correlate Stremio's latest content request with player launch. */
@@ -202,6 +204,16 @@ final class StremioConnectorStore {
                         if (fallback.label != null) {
                             stream.put("label", fallback.label);
                         }
+                        putIfPresent(stream, "sourceId", fallback.sourceId);
+                        putIfPresent(stream, "sourceName", fallback.sourceName);
+                        putIfPresent(stream, "quality", fallback.quality);
+                        putIfPresent(stream, "filename", fallback.filename);
+                        if (!fallback.languages.isEmpty()) {
+                            stream.put("languages", new JSONArray(fallback.languages));
+                        }
+                        if (!fallback.requestHeaders.isEmpty()) {
+                            stream.put("requestHeaders", new JSONObject(fallback.requestHeaders));
+                        }
                         streams.put(stream);
                     }
                     current.put("streams", streams);
@@ -270,6 +282,39 @@ final class StremioConnectorStore {
         }
     }
 
+    List<StreamFallback> findStreamCandidates(Content content, long nowMs) {
+        if (content == null || !content.isSeries()) {
+            return Collections.emptyList();
+        }
+        synchronized (LOCK) {
+            JSONArray queues = readStreamFallbackQueues();
+            for (int index = 0; index < queues.length(); index++) {
+                JSONObject item = queues.optJSONObject(index);
+                if (item == null
+                        || !content.type.equals(item.optString("type", ""))
+                        || !content.id.equals(item.optString("id", ""))
+                        || !isFreshStreamFallback(item.optLong("timestamp", 0L), nowMs)) {
+                    continue;
+                }
+                return parseStoredFallbacks(item.optJSONArray("streams"));
+            }
+            return Collections.emptyList();
+        }
+    }
+
+    @Nullable
+    StreamFallback findStreamCandidate(Content content, String url, long nowMs) {
+        if (url == null) {
+            return null;
+        }
+        for (StreamFallback candidate : findStreamCandidates(content, nowMs)) {
+            if (candidate.url.equals(url)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
     static List<StreamFallback> parseDirectFallbacks(@Nullable String response) {
         if (response == null) {
             return Collections.emptyList();
@@ -296,7 +341,16 @@ final class StremioConnectorStore {
                 String title = normalizeFilename(stream.optString("title", null));
                 String label = name == null ? title
                         : title == null ? name : name + " | " + title;
-                result.add(new StreamFallback(url, label));
+                JSONObject hints = stream.optJSONObject("behaviorHints");
+                result.add(new StreamFallback(
+                        url,
+                        label,
+                        hints == null ? null : hints.optString("jppSourceId", null),
+                        hints == null ? null : hints.optString("jppSourceName", null),
+                        hints == null ? null : hints.optString("jppResolution", null),
+                        hints == null ? null : hints.optString("jppFilename", null),
+                        parseStrings(hints == null ? null : hints.optJSONArray("jppLanguages")),
+                        parseRequestHeaders(hints)));
             }
             return result;
         } catch (JSONException | RuntimeException ignored) {
@@ -347,7 +401,61 @@ final class StremioConnectorStore {
                 continue;
             }
             result.add(new StreamFallback(
-                    url, normalizeFilename(stream.optString("label", null))));
+                    url,
+                    normalizeFilename(stream.optString("label", null)),
+                    stream.optString("sourceId", null),
+                    stream.optString("sourceName", null),
+                    stream.optString("quality", null),
+                    stream.optString("filename", null),
+                    parseStrings(stream.optJSONArray("languages")),
+                    parseStringMap(stream.optJSONObject("requestHeaders"))));
+        }
+        return result;
+    }
+
+    private static void putIfPresent(JSONObject target, String key, @Nullable String value)
+            throws JSONException {
+        if (value != null && !value.isEmpty()) {
+            target.put(key, value);
+        }
+    }
+
+    private static List<String> parseStrings(@Nullable JSONArray values) {
+        if (values == null) {
+            return Collections.emptyList();
+        }
+        LinkedHashSet<String> result = new LinkedHashSet<>();
+        for (int index = 0; index < values.length() && result.size() < 16; index++) {
+            String value = values.optString(index, "").trim();
+            if (!value.isEmpty() && value.length() <= 32) {
+                result.add(value.toLowerCase(Locale.ROOT));
+            }
+        }
+        return new ArrayList<>(result);
+    }
+
+    private static Map<String, String> parseRequestHeaders(@Nullable JSONObject hints) {
+        JSONObject proxyHeaders = hints == null ? null : hints.optJSONObject("proxyHeaders");
+        return parseStringMap(proxyHeaders == null
+                ? null : proxyHeaders.optJSONObject("request"));
+    }
+
+    private static Map<String, String> parseStringMap(@Nullable JSONObject values) {
+        if (values == null) {
+            return Collections.emptyMap();
+        }
+        LinkedHashMap<String, String> result = new LinkedHashMap<>();
+        JSONArray names = values.names();
+        if (names == null) {
+            return result;
+        }
+        for (int index = 0; index < names.length() && result.size() < 8; index++) {
+            String name = names.optString(index, "").trim();
+            String value = values.optString(name, "").trim();
+            if (!name.isEmpty() && name.length() <= 128
+                    && !value.isEmpty() && value.length() <= 1_024) {
+                result.put(name, value);
+            }
         }
         return result;
     }
@@ -372,6 +480,9 @@ final class StremioConnectorStore {
     }
 
     private static boolean isDirectPlaybackUrl(String value) {
+        if (value == null || value.isEmpty() || value.length() > 8_192) {
+            return false;
+        }
         String normalized = value.toLowerCase(Locale.ROOT);
         return normalized.startsWith("http://")
                 || normalized.startsWith("https://")
@@ -750,10 +861,35 @@ final class StremioConnectorStore {
     static final class StreamFallback {
         final String url;
         @Nullable final String label;
+        @Nullable final String sourceId;
+        @Nullable final String sourceName;
+        @Nullable final String quality;
+        @Nullable final String filename;
+        final List<String> languages;
+        final Map<String, String> requestHeaders;
 
         StreamFallback(String url, @Nullable String label) {
+            this(url, label, null, null, null, null,
+                    Collections.emptyList(), Collections.emptyMap());
+        }
+
+        StreamFallback(String url,
+                       @Nullable String label,
+                       @Nullable String sourceId,
+                       @Nullable String sourceName,
+                       @Nullable String quality,
+                       @Nullable String filename,
+                       List<String> languages,
+                       Map<String, String> requestHeaders) {
             this.url = url;
-            this.label = label;
+            this.label = normalizeFilename(label);
+            this.sourceId = normalizeFilename(sourceId);
+            this.sourceName = normalizeFilename(sourceName);
+            this.quality = normalizeFilename(quality);
+            this.filename = normalizeFilename(filename);
+            this.languages = Collections.unmodifiableList(new ArrayList<>(languages));
+            this.requestHeaders = Collections.unmodifiableMap(
+                    new LinkedHashMap<>(requestHeaders));
         }
     }
 

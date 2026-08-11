@@ -247,4 +247,9 @@
     <string name="ai_subtitle_failed">Překlad se nepodařilo dokončit.</string>
     <string name="ai_subtitle_attach_failed">Překlad je hotový, ale titulkovou stopu se nepodařilo aktivovat. Přehrávání bylo obnoveno.</string>
     <string name="ai_subtitle_too_large">Soubor s titulky je větší než 2 MB.</string>
+    <string name="next_episode_failed_title">Další epizoda se nespustila</string>
+    <string name="next_episode_failed_message">Pro %1$s nebyl nalezen přehratelný stream odpovídající současnému zvuku a titulkům. Jiný jazyk se nespustil.</string>
+    <string name="next_episode_retry">Zkusit znovu</string>
+    <string name="next_episode_open_stremio">Otevřít streamy ve Stremiu</string>
+    <string name="stream_fallback_failed">Přehrávání se zastavilo, protože žádný náhradní stream neodpovídal současnému zvuku a titulkům.</string>
 </resources>

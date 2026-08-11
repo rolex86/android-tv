@@ -73,6 +73,12 @@ public class StremioStreamPipelineTest {
         assertTrue(streams.getJSONObject(0).getString("title").contains("HEVC"));
         assertEquals("jpp:v1:q:2160p", streams.getJSONObject(0)
                 .getJSONObject("behaviorHints").getString("bingeGroup"));
+        assertEquals("11111111-1111-1111-1111-111111111111", streams.getJSONObject(0)
+                .getJSONObject("behaviorHints").getString("jppSourceId"));
+        assertEquals("2160p", streams.getJSONObject(0)
+                .getJSONObject("behaviorHints").getString("jppResolution"));
+        assertEquals("Movie.2160p.CZ.HEVC.DV.DDP5.1.mkv", streams.getJSONObject(0)
+                .getJSONObject("behaviorHints").getString("jppFilename"));
     }
 
     @Test

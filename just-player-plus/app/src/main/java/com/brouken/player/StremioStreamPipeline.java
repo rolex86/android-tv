@@ -548,6 +548,21 @@ final class StremioStreamPipeline {
             }
             behaviorHints.put("bingeGroup", group);
         }
+        // Preserve the ranking facts that produced this final Connector order. Stremio ignores
+        // unknown behavior hints, while JustPlayer Plus can use them to prefer a comparable
+        // release before it probes the real Media3 tracks of the next episode.
+        JSONObject behaviorHints = value.stream.optJSONObject("behaviorHints");
+        if (behaviorHints == null) {
+            behaviorHints = new JSONObject();
+            value.stream.put("behaviorHints", behaviorHints);
+        }
+        behaviorHints.put("jppSourceId", value.source.id);
+        behaviorHints.put("jppSourceName", sourceName);
+        behaviorHints.put("jppResolution", value.resolution);
+        behaviorHints.put("jppLanguages", new JSONArray(value.languages));
+        if (!value.filename.isEmpty()) {
+            behaviorHints.put("jppFilename", value.filename);
+        }
         return value.stream;
     }
 

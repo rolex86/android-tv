@@ -50,7 +50,7 @@ public final class StremioConnectorService extends Service {
     private static final int NOTIFICATION_ID = 16745;
     private static final String MANIFEST = "{"
             + "\"id\":\"com.justplayerplus.connector\","
-            + "\"version\":\"1.13.0\","
+            + "\"version\":\"1.14.0\","
             + "\"name\":\"JustPlayer Plus Connector\","
             + "\"description\":\"Local metadata bridge for JustPlayer Plus\","
             + "\"resources\":["
@@ -158,7 +158,14 @@ public final class StremioConnectorService extends Service {
             String id = intent.getStringExtra(EXTRA_PREFETCH_ID);
             if (StremioAggregationPreferences.isEnabled(this)
                     && isValidPrefetchRequest(type, id)) {
-                getStreamAggregator().prefetch(type, id);
+                StremioStreamAggregator aggregator = getStreamAggregator();
+                aggregator.prefetch(type, id);
+                if (!dispatchClient(clients, () -> completePlaybackPlanPrefetch(
+                        aggregator, type, id))) {
+                    diagnostics.recordStremioConnector(
+                            "aggregation_prefetch_plan_dispatch_failed",
+                            type + "/" + id);
+                }
             } else {
                 diagnostics.recordStremioConnector(
                         "aggregation_prefetch_skipped",
@@ -166,6 +173,36 @@ public final class StremioConnectorService extends Service {
             }
         }
         return START_STICKY;
+    }
+
+    private void completePlaybackPlanPrefetch(
+            StremioStreamAggregator aggregator, String type, String id) {
+        if (destroyed || !StremioAggregationPreferences.isEnabled(this)) {
+            return;
+        }
+        String response;
+        try {
+            // aggregate() joins the in-flight prefetch and returns its protected final ordering;
+            // it does not start a second upstream request for the same snapshot.
+            response = aggregator.aggregate(type, id);
+        } catch (RuntimeException error) {
+            diagnostics.recordStremioConnector(
+                    "aggregation_prefetch_plan_failed",
+                    type + "/" + id + " error=" + error.getClass().getSimpleName());
+            return;
+        }
+        int streamCount = streamCount(response);
+        if (streamCount <= 0 || destroyed
+                || !StremioAggregationPreferences.isEnabled(this)) {
+            diagnostics.recordStremioConnector(
+                    "aggregation_prefetch_plan_empty",
+                    type + "/" + id + " streams=" + streamCount);
+            return;
+        }
+        store.recordStreamFallbacks(type, id, response, System.currentTimeMillis());
+        diagnostics.recordStremioConnector(
+                "aggregation_prefetch_plan_ready",
+                type + "/" + id + " streams=" + streamCount);
     }
 
     @Nullable

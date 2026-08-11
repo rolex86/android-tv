@@ -1,5 +1,23 @@
 # JustPlayer Plus changelog
 
+## Step 27 — Shield-safe in-player episode continuation
+
+- JustPlayer Plus now keeps the external-player activity alive and resolves the exact next series
+  episode through the local Connector instead of returning early to Stremio.
+- Protected prefetch persists the complete ordered direct-stream plan before the end of the current
+  episode, while actual media probing remains sequential and starts only after the transition so a
+  second decoder or concurrent video load cannot burden Shield-class devices.
+- Every candidate is verified against Media3's real audio and subtitle tracks. The remembered
+  per-series selection is a hard contract; an unknown or conflicting language is skipped instead
+  of being played optimistically.
+- Candidate failover is now paused and muted with fixed per-candidate and overall timeouts, zero
+  probe retries and an explicit safe-failure dialog when no compatible release exists.
+- Manual Play and natural completion use the same continuation path. Direct-stream recovery for
+  the current episode follows the same strict track validation before resuming at its old position.
+- Added a bounded, episode-deduplicated local watched journal as the stable handoff point for a
+  future user-authorized Trakt synchronization module.
+- Raised the application version code to 269 and the Connector manifest to `1.14.0`.
+
 ## Step 26 — Return next-episode control to Stremio
 
 - Removed the custom `stremio:///detail/...?...autoPlay=true` launch that opened an episode detail

@@ -89,6 +89,9 @@ import androidx.media3.exoplayer.PlayerMessage;
 import androidx.media3.exoplayer.RenderersFactory;
 import androidx.media3.exoplayer.SeekParameters;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
+import androidx.media3.exoplayer.source.MediaSource;
+import androidx.media3.exoplayer.source.MergingMediaSource;
+import androidx.media3.exoplayer.source.SingleSampleMediaSource;
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector;
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy;
 import androidx.media3.extractor.DefaultExtractorsFactory;
@@ -262,6 +265,7 @@ public class PlayerActivity extends Activity {
     private boolean userChangedTracksSinceMediaStart;
     List<MediaItem.SubtitleConfiguration> apiSubs = new ArrayList<>();
     boolean intentReturnResult;
+    private boolean internalNextEpisodePlayback;
     boolean playbackFinished;
     private boolean userInitiatedExit;
     private long resultPosition = C.TIME_UNSET;
@@ -272,9 +276,72 @@ public class PlayerActivity extends Activity {
     private PlayerMessage nextEpisodePrefetchMessage;
     private int nextEpisodePrefetchScheduleGeneration;
     private boolean nextEpisodePrefetchRequested;
+    @Nullable private NextEpisodeTransition nextEpisodeTransition;
+    private int acceptedNextEpisodeGeneration = -1;
     private long nextEpisodeNoticeMs = TimeUnit.SECONDS.toMillis(30L);
     private final Runnable nextEpisodePopupWatchdog = this::runNextEpisodePopupWatchdog;
     private static final long AI_SUBTITLE_ATTACH_TIMEOUT_MS = 30_000L;
+    private static final long NEXT_EPISODE_PLAN_TIMEOUT_MS = 12_000L;
+    private static final long NEXT_EPISODE_CANDIDATE_TIMEOUT_MS = 12_000L;
+    private static final int NEXT_EPISODE_HTTP_TIMEOUT_MS = 6_000;
+
+    private static final class NextEpisodeTransition {
+        final int session;
+        final NextEpisodeInfo info;
+        final String trigger;
+        final StremioConnectorStore.Content targetContent;
+        final String targetTitle;
+        final NextEpisodeTrackContract trackContract;
+        @Nullable final StremioConnectorStore.StreamFallback currentStream;
+        @Nullable final MediaItem originalMediaItem;
+        final long originalPositionMs;
+        final float originalVolume;
+        final boolean originalPlayWhenReady;
+        final long startPositionMs;
+        final boolean sameEpisodeFailover;
+        final long startedAtMs;
+        List<StremioConnectorStore.StreamFallback> candidates = Collections.emptyList();
+        List<MediaItem.SubtitleConfiguration> subtitles = Collections.emptyList();
+        int candidateIndex = -1;
+        @Nullable StremioConnectorStore.StreamFallback candidate;
+        @Nullable Runnable planTimeout;
+        @Nullable Runnable candidateTimeout;
+        boolean subtitlesLoaded;
+        boolean planLoaded;
+        boolean prefetchRequested;
+        boolean accepted;
+
+        NextEpisodeTransition(
+                int session,
+                NextEpisodeInfo info,
+                String trigger,
+                StremioConnectorStore.Content targetContent,
+                String targetTitle,
+                NextEpisodeTrackContract trackContract,
+                @Nullable StremioConnectorStore.StreamFallback currentStream,
+                @Nullable MediaItem originalMediaItem,
+                long originalPositionMs,
+                float originalVolume,
+                boolean originalPlayWhenReady,
+                long startPositionMs,
+                boolean sameEpisodeFailover,
+                long startedAtMs) {
+            this.session = session;
+            this.info = info;
+            this.trigger = trigger;
+            this.targetContent = targetContent;
+            this.targetTitle = targetTitle;
+            this.trackContract = trackContract;
+            this.currentStream = currentStream;
+            this.originalMediaItem = originalMediaItem;
+            this.originalPositionMs = originalPositionMs;
+            this.originalVolume = originalVolume;
+            this.originalPlayWhenReady = originalPlayWhenReady;
+            this.startPositionMs = startPositionMs;
+            this.sameEpisodeFailover = sameEpisodeFailover;
+            this.startedAtMs = startedAtMs;
+        }
+    }
 
     private static final class AiSubtitleAttachTransaction {
         final int playerGeneration;
@@ -1603,7 +1670,7 @@ public class PlayerActivity extends Activity {
                         currentId, "", result.seriesTitle != null, false, "no_next_episode");
                 return;
             }
-            if (!intentReturnResult) {
+            if (!intentReturnResult && !internalNextEpisodePlayback) {
                 externalDiagnostics.recordNextEpisode(
                         currentId, info.next.raw, result.seriesTitle != null,
                         info.artworkUrl != null, "title_only_no_return_result");
@@ -1633,6 +1700,7 @@ public class PlayerActivity extends Activity {
     }
 
     private void resetNextEpisodeSession() {
+        cancelNextEpisodeTransition(true);
         cancelStartupSubtitlePreload();
         nextEpisodeSession++;
         if (openSubtitlesRestClient != null) {
@@ -1898,7 +1966,8 @@ public class PlayerActivity extends Activity {
     }
 
     private void playNextEpisodeNow() {
-        if (nextEpisodeInfo == null || !intentReturnResult) {
+        if (nextEpisodeInfo == null
+                || !intentReturnResult && !internalNextEpisodePlayback) {
             dismissNextEpisode();
             return;
         }
@@ -1912,22 +1981,631 @@ public class PlayerActivity extends Activity {
             dismissNextEpisode();
             return;
         }
+        beginNextEpisodeTransition("play_now");
+    }
 
+    private void beginNextEpisodeTransition(String trigger) {
+        beginNextEpisodeTransition(trigger, null);
+    }
+
+    private void beginNextEpisodeTransition(
+            String trigger, @Nullable NextEpisodeTransition retryTransition) {
+        NextEpisodeInfo info = retryTransition == null
+                ? nextEpisodeInfo : retryTransition.info;
+        if (nextEpisodeTransition != null || info == null || player == null
+                || stremioPlaybackContent == null
+                || !stremioPlaybackContent.isSeries()
+                || !StremioAggregationPreferences.isEnabled(this)) {
+            failNextEpisodeBeforeTransition(
+                    info, "playback_plan_unavailable");
+            return;
+        }
+        NextEpisodeTrackContract trackContract = retryTransition == null
+                ? NextEpisodeTrackContract.fromSelection(
+                buildNextEpisodeContractSelection())
+                : retryTransition.trackContract;
+        if (!trackContract.hasVerifiableAudioIdentity()) {
+            failNextEpisodeBeforeTransition(
+                    info, "audio_identity_unavailable");
+            return;
+        }
+
+        long nowMs = System.currentTimeMillis();
+        StremioConnectorStore store = new StremioConnectorStore(this);
+        StremioConnectorStore.StreamFallback currentStream = retryTransition == null
+                ? mPrefs.mediaUri == null ? null : store.findStreamCandidate(
+                        stremioPlaybackContent,
+                        mPrefs.mediaUri.toString(),
+                        nowMs)
+                : retryTransition.currentStream;
+        MediaItem currentItem = retryTransition == null
+                ? player.getCurrentMediaItem() : retryTransition.originalMediaItem;
+        NextEpisodeTransition transition = new NextEpisodeTransition(
+                nextEpisodeSession,
+                info,
+                trigger,
+                StremioConnectorStore.Content.series(info.next),
+                buildNextEpisodeTitle(info),
+                trackContract,
+                currentStream,
+                currentItem,
+                retryTransition == null
+                        ? Math.max(0L, player.getCurrentPosition())
+                        : retryTransition.originalPositionMs,
+                retryTransition == null
+                        ? player.getVolume() : retryTransition.originalVolume,
+                retryTransition == null
+                        ? player.getPlayWhenReady() : retryTransition.originalPlayWhenReady,
+                0L,
+                false,
+                nowMs);
+        nextEpisodeTransition = transition;
         nextEpisodeDismissed = true;
         cancelNextEpisodePopupMessage();
         cancelNextEpisodePopupWatchdog();
+        cancelNextEpisodePrefetchMessage();
+        trackMemoryArmed = false;
+        trackSelectionChangePending = false;
         if (nextEpisodeOverlay != null) {
             nextEpisodeOverlay.hide(false);
         }
-        new StremioConnectorStore(this).expectEpisode(
-                nextEpisodeInfo.next, System.currentTimeMillis());
-        externalDiagnostics.recordStremioConnector(
-                "next_episode_result_handoff",
-                "trigger=play_now target=" + nextEpisodeInfo.next.raw);
         player.pause();
-        restorePlayStateAllowed = false;
-        playbackFinished = true;
-        finish();
+        player.setVolume(0f);
+        updateLoading(true);
+        externalDiagnostics.recordStremioConnector(
+                "next_episode_transition_started",
+                "trigger=" + trigger
+                        + " current=" + transition.info.current.raw
+                        + " target=" + transition.info.next.raw
+                        + " audio=" + (trackContract.audioLanguage == null
+                        ? "label" : trackContract.audioLanguage)
+                        + " subtitles=" + (trackContract.subtitlesDisabled
+                        ? "disabled" : "required"));
+        loadNextEpisodeSubtitles(transition);
+        pollNextEpisodePlaybackPlan(transition);
+    }
+
+    private RememberedTrackStore.Selection buildNextEpisodeContractSelection() {
+        RememberedTrackStore.Selection selected = RememberedTrackStore.capture(
+                player.getCurrentTracks(),
+                player.getTrackSelectionParameters(),
+                false,
+                false);
+        mPlusPrefs.reload();
+        RememberedTrackStore.Selection remembered = rememberedTrackStore.load(
+                mPlusPrefs.rememberTrackScope,
+                trackMemoryIdentity(mPlusPrefs.rememberTrackScope),
+                mPrefs.mediaUri);
+        if (remembered == null) {
+            return selected;
+        }
+        if (!remembered.audioAutomatic
+                && (!remembered.audioLanguage.isEmpty()
+                || !remembered.audioLabel.isEmpty())) {
+            selected.audioAutomatic = false;
+            selected.audioLanguage = remembered.audioLanguage;
+            selected.audioMime = remembered.audioMime;
+            selected.audioChannels = remembered.audioChannels;
+            selected.audioRole = remembered.audioRole;
+            selected.audioLabel = remembered.audioLabel;
+        }
+        if (remembered.subtitleDisabled || !remembered.subtitleAutomatic) {
+            selected.subtitleDisabled = remembered.subtitleDisabled;
+            selected.subtitleAutomatic = false;
+            selected.subtitleLanguage = remembered.subtitleLanguage;
+            selected.subtitleMime = remembered.subtitleMime;
+            selected.subtitleForced = remembered.subtitleForced;
+            selected.subtitleLabel = remembered.subtitleLabel;
+        }
+        return selected;
+    }
+
+    private void loadNextEpisodeSubtitles(NextEpisodeTransition transition) {
+        if (transition.trackContract.subtitlesDisabled) {
+            transition.subtitlesLoaded = true;
+            maybeStartNextEpisodeCandidate(transition);
+            return;
+        }
+        mPlusPrefs.reload();
+        final String[] preferredLanguages = mPlusPrefs.getPreferredSubtitleLanguages();
+        Thread lookup = new Thread(() -> {
+            List<MediaItem.SubtitleConfiguration> configurations = new ArrayList<>();
+            String state = "unavailable";
+            StremioConnectorStore store = new StremioConnectorStore(
+                    getApplicationContext());
+            StremioSubtitlePreloadCache.Lookup cached = store.findPreloadedSubtitles(
+                    transition.targetContent,
+                    preferredLanguages,
+                    System.currentTimeMillis());
+            if (cached != null) {
+                for (StremioPreloadedSubtitle.Parsed subtitle : cached.tracks) {
+                    configurations.add(subtitle.toConfiguration(false));
+                }
+                state = "cache_" + cached.match;
+            } else {
+                StremioSubtitleRequest request = StremioSubtitleRequest.forContent(
+                        transition.targetContent);
+                OkHttpClient client = null;
+                if (request != null) {
+                    try {
+                        client = StremioConnectorOpenSubtitles.newHttpClient();
+                        StremioConnectorOpenSubtitles.Result result =
+                                new StremioConnectorOpenSubtitles(client).load(
+                                        request, preferredLanguages);
+                        state = result.state;
+                        if ("loaded".equals(result.state)) {
+                            store.recordPreloadedSubtitles(
+                                    request,
+                                    preferredLanguages,
+                                    result.candidates,
+                                    System.currentTimeMillis());
+                        }
+                        for (OpenSubtitlesV3Client.Candidate candidate : result.candidates) {
+                            StremioPreloadedSubtitle.Parsed parsed =
+                                    StremioPreloadedSubtitle.parse(
+                                            StremioPreloadedSubtitle.buildUrl(candidate));
+                            if (parsed != null) {
+                                configurations.add(parsed.toConfiguration(false));
+                            }
+                        }
+                    } catch (RuntimeException ignored) {
+                        state = "invalid_response";
+                    } finally {
+                        if (client != null) {
+                            client.dispatcher().cancelAll();
+                            client.connectionPool().evictAll();
+                        }
+                    }
+                }
+            }
+            final String completedState = state;
+            runOnUiThread(() -> {
+                if (nextEpisodeTransition != transition || transition.accepted) {
+                    return;
+                }
+                transition.subtitles = configurations;
+                transition.subtitlesLoaded = true;
+                externalDiagnostics.recordStremioConnector(
+                        "next_episode_subtitles_" + completedState,
+                        transition.info.next.raw
+                                + " count=" + configurations.size());
+                maybeStartNextEpisodeCandidate(transition);
+            });
+        }, "next-episode-subtitles");
+        try {
+            lookup.start();
+        } catch (RuntimeException error) {
+            transition.subtitlesLoaded = true;
+            maybeStartNextEpisodeCandidate(transition);
+        }
+    }
+
+    private void pollNextEpisodePlaybackPlan(NextEpisodeTransition transition) {
+        if (nextEpisodeTransition != transition || transition.accepted
+                || playerView == null) {
+            return;
+        }
+        StremioConnectorStore store = new StremioConnectorStore(this);
+        List<StremioConnectorStore.StreamFallback> available =
+                store.findStreamCandidates(
+                        transition.targetContent, System.currentTimeMillis());
+        if (!available.isEmpty()) {
+            transition.candidates = NextEpisodePlaybackPlan.order(
+                    available,
+                    transition.currentStream,
+                    transition.trackContract.requiredAudioLanguage());
+            transition.planLoaded = true;
+            externalDiagnostics.recordStremioConnector(
+                    "next_episode_plan_ready",
+                    transition.info.next.raw
+                            + " candidates=" + transition.candidates.size()
+                            + " waitMs=" + (System.currentTimeMillis()
+                            - transition.startedAtMs));
+            maybeStartNextEpisodeCandidate(transition);
+            return;
+        }
+        if (!transition.prefetchRequested) {
+            transition.prefetchRequested = true;
+            StremioConnectorService.prefetchNextEpisode(this, transition.info.next);
+        }
+        if (System.currentTimeMillis() - transition.startedAtMs
+                >= NEXT_EPISODE_PLAN_TIMEOUT_MS) {
+            failNextEpisodeTransition(transition, "no_direct_streams");
+            return;
+        }
+        transition.planTimeout = () -> pollNextEpisodePlaybackPlan(transition);
+        playerView.postDelayed(transition.planTimeout, 300L);
+    }
+
+    private void maybeStartNextEpisodeCandidate(NextEpisodeTransition transition) {
+        if (nextEpisodeTransition != transition || transition.accepted
+                || !transition.planLoaded || !transition.subtitlesLoaded) {
+            return;
+        }
+        prepareNextEpisodeCandidate(transition, "initial");
+    }
+
+    private void prepareNextEpisodeCandidate(
+            NextEpisodeTransition transition, String reason) {
+        if (nextEpisodeTransition != transition || transition.accepted || player == null) {
+            return;
+        }
+        cancelNextEpisodeCandidateTimeout(transition);
+        transition.candidateIndex++;
+        if (transition.candidateIndex >= transition.candidates.size()) {
+            failNextEpisodeTransition(transition, "no_compatible_stream");
+            return;
+        }
+        StremioConnectorStore.StreamFallback candidate =
+                transition.candidates.get(transition.candidateIndex);
+        transition.candidate = candidate;
+        trackMemoryArmed = false;
+        trackSelectionChangePending = false;
+        player.pause();
+        player.setVolume(0f);
+        player.setTrackSelectionParameters(
+                player.getTrackSelectionParameters().buildUpon()
+                        .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                        .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                        .build());
+        MediaItem item = buildNextEpisodeMediaItem(transition, candidate);
+        try {
+            player.setMediaSource(
+                    buildNextEpisodeMediaSource(item, candidate),
+                    Math.max(0L, transition.startPositionMs));
+            player.prepare();
+            videoLoading = true;
+            updateLoading(true);
+            transition.candidateTimeout = () -> rejectNextEpisodeCandidate(
+                    transition, "prepare_timeout");
+            playerView.postDelayed(
+                    transition.candidateTimeout, NEXT_EPISODE_CANDIDATE_TIMEOUT_MS);
+            externalDiagnostics.recordStremioConnector(
+                    "next_episode_candidate_started",
+                    transition.info.next.raw
+                            + " attempt=" + (transition.candidateIndex + 1)
+                            + "/" + transition.candidates.size()
+                            + " reason=" + reason
+                            + " source=" + safeDiagnostic(candidate.sourceName)
+                            + " quality=" + safeDiagnostic(candidate.quality));
+        } catch (RuntimeException error) {
+            rejectNextEpisodeCandidate(
+                    transition, "prepare_exception_" + error.getClass().getSimpleName());
+        }
+    }
+
+    private MediaItem buildNextEpisodeMediaItem(
+            NextEpisodeTransition transition,
+            StremioConnectorStore.StreamFallback candidate) {
+        MediaItem.Builder builder = new MediaItem.Builder()
+                .setUri(candidate.url)
+                .setMediaMetadata(new MediaMetadata.Builder()
+                        .setTitle(transition.targetTitle)
+                        .setDisplayTitle(transition.targetTitle)
+                        .build());
+        if (!transition.trackContract.subtitlesDisabled
+                && !transition.subtitles.isEmpty()) {
+            builder.setSubtitleConfigurations(transition.subtitles);
+        }
+        return builder.build();
+    }
+
+    private MediaSource buildNextEpisodeMediaSource(
+            MediaItem item,
+            StremioConnectorStore.StreamFallback candidate) {
+        DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
+                .setConnectTimeoutMs(NEXT_EPISODE_HTTP_TIMEOUT_MS)
+                .setReadTimeoutMs(NEXT_EPISODE_HTTP_TIMEOUT_MS);
+        if (!candidate.requestHeaders.isEmpty()) {
+            httpFactory.setDefaultRequestProperties(candidate.requestHeaders);
+        }
+        OffsetSubtitleParserFactory subtitleParserFactory = new OffsetSubtitleParserFactory(
+                () -> (long) mPlusPrefs.subtitleDelayMs * 1_000L);
+        DefaultExtractorsFactory extractorsFactory = new DefaultExtractorsFactory()
+                .setSubtitleParserFactory(subtitleParserFactory)
+                .setTsExtractorFlags(
+                        DefaultTsPayloadReaderFactory.FLAG_ENABLE_HDMV_DTS_AUDIO_STREAMS)
+                .setTsExtractorTimestampSearchBytes(1500 * TsExtractor.TS_PACKET_SIZE);
+        List<MediaItem.SubtitleConfiguration> subtitles =
+                item.localConfiguration == null
+                        ? Collections.emptyList()
+                        : item.localConfiguration.subtitleConfigurations;
+        MediaItem primaryItem = subtitles.isEmpty() ? item : item.buildUpon()
+                .setSubtitleConfigurations(Collections.emptyList())
+                .build();
+        MediaSource primary = new DefaultMediaSourceFactory(
+                new DefaultDataSource.Factory(this, httpFactory), extractorsFactory)
+                .setSubtitleParserFactory(subtitleParserFactory)
+                .setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(0))
+                .createMediaSource(primaryItem);
+        if (subtitles.isEmpty()) {
+            return primary;
+        }
+        DefaultHttpDataSource.Factory subtitleHttpFactory =
+                new DefaultHttpDataSource.Factory()
+                        .setConnectTimeoutMs(NEXT_EPISODE_HTTP_TIMEOUT_MS)
+                        .setReadTimeoutMs(NEXT_EPISODE_HTTP_TIMEOUT_MS);
+        DefaultDataSource.Factory subtitleDataSource =
+                new DefaultDataSource.Factory(this, subtitleHttpFactory);
+        List<MediaSource> sources = new ArrayList<>();
+        sources.add(primary);
+        SingleSampleMediaSource.Factory subtitleFactory =
+                new SingleSampleMediaSource.Factory(subtitleDataSource);
+        for (MediaItem.SubtitleConfiguration subtitle : subtitles) {
+            sources.add(subtitleFactory.createMediaSource(subtitle, C.TIME_UNSET));
+        }
+        return new MergingMediaSource(sources.toArray(new MediaSource[0]));
+    }
+
+    private boolean acceptNextEpisodeCandidateIfReady() {
+        NextEpisodeTransition transition = nextEpisodeTransition;
+        if (transition == null || transition.accepted || player == null
+                || player.getPlaybackState() != Player.STATE_READY) {
+            return transition != null;
+        }
+        TrackSelectionOverride audio =
+                transition.trackContract.findAudioOverride(player.getCurrentTracks());
+        if (audio == null) {
+            rejectNextEpisodeCandidate(transition, "required_audio_missing");
+            return true;
+        }
+        TrackSelectionOverride subtitle =
+                transition.trackContract.findSubtitleOverride(player.getCurrentTracks());
+        if (!transition.trackContract.subtitlesDisabled && subtitle == null) {
+            rejectNextEpisodeCandidate(transition, "required_subtitle_missing");
+            return true;
+        }
+
+        TrackSelectionParameters.Builder parameters =
+                player.getTrackSelectionParameters().buildUpon()
+                        .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                        .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                        .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                        .setOverrideForType(audio);
+        if (transition.trackContract.subtitlesDisabled) {
+            parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true);
+        } else {
+            parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                    .setOverrideForType(subtitle);
+        }
+        player.setTrackSelectionParameters(parameters.build());
+        acceptNextEpisodeCandidate(transition);
+        return true;
+    }
+
+    private void acceptNextEpisodeCandidate(NextEpisodeTransition transition) {
+        if (nextEpisodeTransition != transition || player == null
+                || transition.candidate == null) {
+            return;
+        }
+        transition.accepted = true;
+        cancelNextEpisodeTransitionCallbacks(transition);
+        StremioConnectorStore.StreamFallback candidate = transition.candidate;
+        mPrefs.updateMedia(this, Uri.parse(candidate.url), null);
+        mPrefs.updatePosition(Math.max(0L, transition.startPositionMs));
+        apiSubs = new ArrayList<>(transition.subtitles);
+        apiTitle = transition.targetTitle;
+        if (titleView != null) {
+            titleView.setText(apiTitle);
+        }
+        player.setVolume(transition.originalVolume);
+        nextEpisodeTransition = null;
+        acceptedNextEpisodeGeneration = playerGeneration;
+        StremioConnectorStore.Content target = transition.targetContent
+                .withMediaFilename(candidate.filename)
+                .withCorrelation(transition.sameEpisodeFailover
+                        ? "validated_stream_failover" : "internal_continuation", 0L);
+        if (transition.sameEpisodeFailover) {
+            stremioFallbackAttemptedUrls.add(candidate.url);
+            stremioPlaybackContent = target;
+            acceptStableStremioIdentity(target);
+            audioSelectionExplicit = true;
+            subtitleSelectionExplicit = true;
+            play = transition.originalPlayWhenReady;
+            externalDiagnostics.recordStremioConnector(
+                    "stream_fallback_accepted",
+                    target.id
+                            + " attempt=" + (transition.candidateIndex + 1)
+                            + " positionMs=" + transition.startPositionMs
+                            + " source=" + safeDiagnostic(candidate.sourceName)
+                            + " durationMs=" + (System.currentTimeMillis()
+                            - transition.startedAtMs));
+            return;
+        }
+
+        new StremioWatchJournal(this).record(
+                transition.info.current,
+                System.currentTimeMillis(),
+                transition.info.seriesTitle,
+                null);
+        resetNextEpisodeSession();
+        internalNextEpisodePlayback = true;
+        // A later callback would describe a different episode than the Activity Stremio opened.
+        // Suppress it instead of corrupting progress for the original episode.
+        intentReturnResult = false;
+        playbackFinished = false;
+        resultPosition = C.TIME_UNSET;
+        resultDuration = C.TIME_UNSET;
+        acceptStableStremioIdentity(target);
+        audioSelectionExplicit = true;
+        subtitleSelectionExplicit = true;
+        play = true;
+        externalDiagnostics.recordStremioConnector(
+                "next_episode_candidate_accepted",
+                transition.info.next.raw
+                        + " attempt=" + (transition.candidateIndex + 1)
+                        + " source=" + safeDiagnostic(candidate.sourceName)
+                        + " quality=" + safeDiagnostic(candidate.quality)
+                        + " durationMs=" + (System.currentTimeMillis()
+                        - transition.startedAtMs));
+        startNextEpisodeResolution();
+    }
+
+    private void rejectNextEpisodeCandidate(
+            NextEpisodeTransition transition, String reason) {
+        if (nextEpisodeTransition != transition || transition.accepted) {
+            return;
+        }
+        cancelNextEpisodeCandidateTimeout(transition);
+        StremioConnectorStore.StreamFallback candidate = transition.candidate;
+        externalDiagnostics.recordStremioConnector(
+                "next_episode_candidate_rejected",
+                transition.info.next.raw
+                        + " attempt=" + (transition.candidateIndex + 1)
+                        + " reason=" + reason
+                        + " source=" + (candidate == null
+                        ? "unknown" : safeDiagnostic(candidate.sourceName)));
+        prepareNextEpisodeCandidate(transition, reason);
+    }
+
+    private void failNextEpisodeBeforeTransition(
+            @Nullable NextEpisodeInfo info, String reason) {
+        if (info != null) {
+            externalDiagnostics.recordStremioConnector(
+                    "next_episode_transition_unavailable",
+                    info.next.raw + " reason=" + reason);
+        }
+        showNextEpisodeFailure(info, reason, null);
+    }
+
+    private void failNextEpisodeTransition(
+            NextEpisodeTransition transition, String reason) {
+        if (nextEpisodeTransition != transition) {
+            return;
+        }
+        cancelNextEpisodeTransitionCallbacks(transition);
+        nextEpisodeTransition = null;
+        if (transition.sameEpisodeFailover) {
+            if (player != null) {
+                player.setVolume(transition.originalVolume);
+                player.stop();
+            }
+            updateLoading(false);
+            externalDiagnostics.recordStremioConnector(
+                    "stream_fallback_unavailable",
+                    transition.targetContent.id
+                            + " reason=" + reason
+                            + " attempts=" + Math.max(0, transition.candidateIndex + 1));
+            Toast.makeText(
+                    this, R.string.stream_fallback_failed, Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (player != null) {
+            player.setVolume(transition.originalVolume);
+            if ("play_now".equals(transition.trigger)
+                    && transition.originalMediaItem != null) {
+                try {
+                    player.setMediaItem(
+                            transition.originalMediaItem,
+                            transition.originalPositionMs);
+                    player.prepare();
+                    play = transition.originalPlayWhenReady;
+                    videoLoading = true;
+                } catch (RuntimeException ignored) {
+                    player.stop();
+                }
+            } else {
+                player.stop();
+            }
+        }
+        updateLoading(false);
+        externalDiagnostics.recordStremioConnector(
+                "next_episode_transition_failed",
+                transition.info.next.raw
+                        + " reason=" + reason
+                        + " attempts=" + Math.max(0, transition.candidateIndex + 1)
+                        + " durationMs=" + (System.currentTimeMillis()
+                        - transition.startedAtMs));
+        showNextEpisodeFailure(transition.info, reason, transition);
+    }
+
+    private void showNextEpisodeFailure(
+            @Nullable NextEpisodeInfo info,
+            String reason,
+            @Nullable NextEpisodeTransition retryTransition) {
+        if (isFinishing() || info == null) {
+            return;
+        }
+        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+                .setTitle(R.string.next_episode_failed_title)
+                .setMessage(getString(
+                        R.string.next_episode_failed_message,
+                        info.next.displayCode()))
+                .setNegativeButton(android.R.string.cancel, null)
+                .setNeutralButton(R.string.next_episode_open_stremio,
+                        (dialog, which) -> openNextEpisodeInStremio(info));
+        if (retryTransition != null) {
+            builder.setPositiveButton(R.string.next_episode_retry,
+                    (dialog, which) -> {
+                        nextEpisodeDismissed = false;
+                        nextEpisodeInfo = info;
+                        beginNextEpisodeTransition(
+                                "retry_" + reason, retryTransition);
+                    });
+        }
+        builder.show();
+    }
+
+    private void openNextEpisodeInStremio(NextEpisodeInfo info) {
+        String uri = "stremio:///detail/series/"
+                + Uri.encode(info.next.metaId)
+                + "/" + Uri.encode(info.next.raw, ":");
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(uri)));
+        } catch (RuntimeException error) {
+            Toast.makeText(
+                    this, R.string.pref_stremio_connector_install_failed,
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void cancelNextEpisodeTransition(boolean restoreVolume) {
+        NextEpisodeTransition transition = nextEpisodeTransition;
+        if (transition == null) {
+            return;
+        }
+        cancelNextEpisodeTransitionCallbacks(transition);
+        nextEpisodeTransition = null;
+        if (restoreVolume && player != null) {
+            player.setVolume(transition.originalVolume);
+        }
+    }
+
+    private void cancelNextEpisodeTransitionCallbacks(NextEpisodeTransition transition) {
+        if (playerView != null) {
+            if (transition.planTimeout != null) {
+                playerView.removeCallbacks(transition.planTimeout);
+            }
+            if (transition.candidateTimeout != null) {
+                playerView.removeCallbacks(transition.candidateTimeout);
+            }
+        }
+        transition.planTimeout = null;
+        transition.candidateTimeout = null;
+    }
+
+    private void cancelNextEpisodeCandidateTimeout(NextEpisodeTransition transition) {
+        if (playerView != null && transition.candidateTimeout != null) {
+            playerView.removeCallbacks(transition.candidateTimeout);
+        }
+        transition.candidateTimeout = null;
+    }
+
+    private static String buildNextEpisodeTitle(NextEpisodeInfo info) {
+        StringBuilder title = new StringBuilder();
+        if (info.seriesTitle != null) {
+            title.append(info.seriesTitle).append("  ·  ");
+        }
+        title.append(info.next.displayCode());
+        if (info.episodeTitle != null) {
+            title.append("  ·  ").append(info.episodeTitle);
+        }
+        return title.toString();
+    }
+
+    private static String safeDiagnostic(@Nullable String value) {
+        return value == null || value.isEmpty() ? "unknown" : value;
     }
 
     private void snapshotPlaybackResult() {
@@ -1944,6 +2622,18 @@ public class PlayerActivity extends Activity {
         if (isPlaybackComplete(resultPosition, resultDuration)) {
             playbackFinished = true;
         }
+    }
+
+    private void recordCurrentEpisodeWatched() {
+        StremioConnectorStore.Content content = stremioPlaybackContent;
+        if (content == null || content.episode == null) {
+            return;
+        }
+        new StremioWatchJournal(this).record(
+                content.episode,
+                System.currentTimeMillis(),
+                nextEpisodeInfo == null ? null : nextEpisodeInfo.seriesTitle,
+                null);
     }
 
     private boolean isPlaybackComplete(long position, long duration) {
@@ -1977,6 +2667,7 @@ public class PlayerActivity extends Activity {
     private void finishFromBack() {
         restorePlayStateAllowed = false;
         userInitiatedExit = true;
+        cancelNextEpisodeTransition(true);
         new StremioConnectorStore(this).clearExpectedEpisode();
         finish();
     }
@@ -2034,6 +2725,9 @@ public class PlayerActivity extends Activity {
     @Override
     public void finish() {
         snapshotPlaybackResult();
+        if (playbackFinished) {
+            recordCurrentEpisodeWatched();
+        }
         // Crossing the configured watched threshold must never turn an explicit Back action or
         // an explicit next-episode dismissal into automatic continuation in the calling app.
         // A natural end returns the standard external-player completion result so the caller
@@ -2363,6 +3057,7 @@ public class PlayerActivity extends Activity {
         apiSubs.clear();
         preloadedOpenSubtitlesCount = 0;
         intentReturnResult = false;
+        internalNextEpisodePlayback = false;
         playbackFinished = false;
         userInitiatedExit = false;
         resultPosition = C.TIME_UNSET;
@@ -3019,7 +3714,7 @@ public class PlayerActivity extends Activity {
     }
 
     private boolean tryStremioStreamFallback(PlaybackException error) {
-        if (!intentReturnResult
+        if (!intentReturnResult && !internalNextEpisodePlayback
                 || stremioPlaybackContent == null
                 || !stremioPlaybackContent.isSeries()
                 || !StremioAggregationPreferences.isEnabled(this)
@@ -3031,12 +3726,26 @@ public class PlayerActivity extends Activity {
         String currentUrl = mPrefs.mediaUri.toString();
         stremioFallbackAttemptedUrls.add(currentUrl);
         StremioConnectorStore store = new StremioConnectorStore(this);
-        StremioConnectorStore.StreamFallback fallback = store.findNextStreamFallback(
-                stremioPlaybackContent,
-                currentUrl,
-                stremioFallbackAttemptedUrls,
-                System.currentTimeMillis());
-        if (fallback == null) {
+        long nowMs = System.currentTimeMillis();
+        List<StremioConnectorStore.StreamFallback> available =
+                store.findStreamCandidates(stremioPlaybackContent, nowMs);
+        StremioConnectorStore.StreamFallback current = store.findStreamCandidate(
+                stremioPlaybackContent, currentUrl, nowMs);
+        RememberedTrackStore.Selection contractSelection =
+                buildNextEpisodeContractSelection();
+        List<StremioConnectorStore.StreamFallback> ordered =
+                NextEpisodePlaybackPlan.order(
+                        available,
+                        current,
+                        contractSelection.audioLanguage);
+        List<StremioConnectorStore.StreamFallback> remaining = new ArrayList<>();
+        for (StremioConnectorStore.StreamFallback candidate : ordered) {
+            if (!candidate.url.equals(currentUrl)
+                    && !stremioFallbackAttemptedUrls.contains(candidate.url)) {
+                remaining.add(candidate);
+            }
+        }
+        if (remaining.isEmpty()) {
             externalDiagnostics.recordStremioConnector(
                     "stream_fallback_unavailable",
                     stremioPlaybackContent.type + "/" + stremioPlaybackContent.id
@@ -3048,27 +3757,55 @@ public class PlayerActivity extends Activity {
         long positionMs = player.isCurrentMediaItemSeekable()
                 ? Math.max(0L, player.getCurrentPosition()) : 0L;
         boolean resumePlayback = player.getPlayWhenReady();
-        stremioFallbackAttemptedUrls.add(fallback.url);
+        NextEpisodeTrackContract trackContract =
+                NextEpisodeTrackContract.fromSelection(contractSelection);
+        if (!trackContract.hasVerifiableAudioIdentity()) {
+            externalDiagnostics.recordStremioConnector(
+                    "stream_fallback_unavailable",
+                    stremioPlaybackContent.id + " reason=audio_identity_unavailable");
+            return false;
+        }
+        StremioEpisodeId episode = stremioPlaybackContent.episode;
+        if (episode == null) {
+            return false;
+        }
+        String title = apiTitle == null || apiTitle.trim().isEmpty()
+                ? episode.displayCode() : apiTitle;
+        MediaItem currentItem = player.getCurrentMediaItem();
+        NextEpisodeTransition transition = new NextEpisodeTransition(
+                nextEpisodeSession,
+                new NextEpisodeInfo(episode, episode, null, title, null),
+                "stream_error_" + error.errorCode,
+                stremioPlaybackContent,
+                title,
+                trackContract,
+                current,
+                currentItem,
+                positionMs,
+                player.getVolume(),
+                resumePlayback,
+                positionMs,
+                true,
+                nowMs);
+        transition.candidates = remaining;
+        transition.planLoaded = true;
+        transition.subtitlesLoaded = true;
+        if (currentItem != null && currentItem.localConfiguration != null) {
+            transition.subtitles = new ArrayList<>(
+                    currentItem.localConfiguration.subtitleConfigurations);
+        }
+        nextEpisodeTransition = transition;
+        trackMemoryArmed = false;
+        trackSelectionChangePending = false;
+        player.pause();
+        player.setVolume(0f);
         externalDiagnostics.recordStremioConnector(
                 "stream_fallback_attempt",
                 stremioPlaybackContent.type + "/" + stremioPlaybackContent.id
-                        + " attempt=" + (stremioFallbackAttemptedUrls.size() - 1)
+                        + " candidates=" + remaining.size()
                         + " positionMs=" + positionMs
-                        + " candidate=" + (fallback.label == null
-                        ? "unlabeled" : fallback.label)
                         + " error=" + error.errorCode);
-
-        releasePlayer(false);
-        // The next source may use a different container. Let Media3 sniff it instead of carrying
-        // a source-specific MIME type from the failed URL.
-        mPrefs.updateMedia(this, Uri.parse(fallback.url), null);
-        mPrefs.updatePosition(positionMs);
-        play = resumePlayback;
-        initializePlayer();
-        externalDiagnostics.recordStremioConnector(
-                "stream_fallback_started",
-                stremioPlaybackContent.type + "/" + stremioPlaybackContent.id
-                        + " attempt=" + (stremioFallbackAttemptedUrls.size() - 1));
+        prepareNextEpisodeCandidate(transition, "source_error_" + error.errorCode);
         return true;
     }
 
@@ -3157,6 +3894,11 @@ public class PlayerActivity extends Activity {
             setEndControlsVisible(haveMedia && (state == Player.STATE_ENDED || isNearEnd));
 
             if (state == Player.STATE_READY) {
+                if (nextEpisodeTransition != null
+                        && acceptNextEpisodeCandidateIfReady()
+                        && nextEpisodeTransition != null) {
+                    return;
+                }
                 completeAiSubtitleAttachIfReady();
                 scheduleOpenSubtitlesExactMatch(nextEpisodeSession);
                 frameRendered = true;
@@ -3243,6 +3985,17 @@ public class PlayerActivity extends Activity {
                     if (initialPlaybackSpeed <= 0.99f || initialPlaybackSpeed >= 1.01f) {
                         player.setPlaybackSpeed(initialPlaybackSpeed);
                     }
+                    if (acceptedNextEpisodeGeneration == playerGeneration) {
+                        acceptedNextEpisodeGeneration = -1;
+                        armTrackMemory();
+                        if (isExternalPlayerLaunch()) {
+                            externalDiagnostics.recordTracks(
+                                    player,
+                                    "strict_next_episode_contract",
+                                    "strict_next_episode_contract");
+                        }
+                        return;
+                    }
                     boolean restoredSubtitleSelection = false;
                     boolean restoredAudioSelection = false;
                     String audioSelectionReason = "media_default";
@@ -3319,17 +4072,15 @@ public class PlayerActivity extends Activity {
                 cancelNextEpisodePopupMessage();
                 cancelNextEpisodePopupWatchdog();
                 if (nextEpisodeInfo != null && !nextEpisodeContinuationDeclined) {
+                    recordCurrentEpisodeWatched();
                     externalDiagnostics.recordNextEpisode(
                             nextEpisodeInfo.current.raw,
                             nextEpisodeInfo.next.raw,
                             nextEpisodeInfo.seriesTitle != null,
                             nextEpisodeInfo.artworkUrl != null,
                             "natural_end");
-                    new StremioConnectorStore(PlayerActivity.this).expectEpisode(
-                            nextEpisodeInfo.next, System.currentTimeMillis());
-                    externalDiagnostics.recordStremioConnector(
-                            "next_episode_result_handoff",
-                            "trigger=natural_end target=" + nextEpisodeInfo.next.raw);
+                    beginNextEpisodeTransition("natural_end");
+                    return;
                 } else if (nextEpisodeContinuationDeclined) {
                     new StremioConnectorStore(PlayerActivity.this).clearExpectedEpisode();
                 }
@@ -3380,6 +4131,12 @@ public class PlayerActivity extends Activity {
         public void onPlayerError(PlaybackException error) {
             if (isExternalPlayerLaunch()) {
                 externalDiagnostics.recordError(error);
+            }
+            NextEpisodeTransition transition = nextEpisodeTransition;
+            if (transition != null && !transition.accepted) {
+                rejectNextEpisodeCandidate(
+                        transition, "player_error_" + error.errorCode);
+                return;
             }
             updateLoading(false);
             if (error instanceof ExoPlaybackException) {

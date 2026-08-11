@@ -123,9 +123,9 @@ for snippet in protected_snippets:
         errors.append(f"Protected playback snippet must occur once: {snippet!r}; found {count}")
 
 parser_injections = player.count(".setSubtitleParserFactory(subtitleParserFactory)")
-if parser_injections != 2:
+if parser_injections != 4:
     errors.append(
-        "Subtitle delay parser must be injected into the extractor and unified media source; "
+        "Subtitle delay parser must cover normal playback and the isolated next-episode probe; "
         f"found {parser_injections} injections"
     )
 
@@ -198,21 +198,27 @@ for forbidden in (
 for forbidden in (
     "StremioNextEpisodeDeepLink",
     "next_episode_deep_link",
-    "stremio:///detail/series/",
+    "autoPlay=true",
 ):
     if forbidden in external_java:
         errors.append(
-            "Next-episode continuation must return the external-player result to its caller, "
-            "not launch a Stremio detail deep link: " + forbidden
+            "Next-episode continuation must stay inside JustPlayer Plus and a safe-failure "
+            "link must never autoplay an unverified Stremio stream: " + forbidden
         )
 
-for handoff_anchor in (
-    '"next_episode_result_handoff"',
-    "playbackFinished = true;",
+for continuation_anchor in (
+    'beginNextEpisodeTransition("natural_end")',
+    'beginNextEpisodeTransition("play_now")',
+    "NextEpisodePlaybackPlan.order(",
+    "NextEpisodeTrackContract.fromSelection(",
+    '"strict_next_episode_contract"',
+    "new StremioWatchJournal(this).record(",
     "ExternalPlaybackResultPolicy.endBy(",
 ):
-    if handoff_anchor not in player:
-        errors.append("Missing caller-owned next-episode handoff: " + handoff_anchor)
+    if continuation_anchor not in player:
+        errors.append(
+            "Missing in-player next-episode continuation hook: " + continuation_anchor
+        )
 
 if not EXTERNAL_RESULT_TEST_PATH.exists():
     errors.append("External-player result regression tests are missing")

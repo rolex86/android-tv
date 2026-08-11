@@ -248,4 +248,9 @@
     <string name="ai_subtitle_failed">Translation could not be completed.</string>
     <string name="ai_subtitle_attach_failed">The translation finished, but the subtitle track could not be activated. Playback was restored.</string>
     <string name="ai_subtitle_too_large">The subtitle file is larger than 2 MB.</string>
+    <string name="next_episode_failed_title">Next episode was not started</string>
+    <string name="next_episode_failed_message">No playable %1$s stream matched the current audio and subtitle selection. A different language was not started.</string>
+    <string name="next_episode_retry">Try again</string>
+    <string name="next_episode_open_stremio">Open streams in Stremio</string>
+    <string name="stream_fallback_failed">Playback stopped because no replacement stream matched the current audio and subtitle selection.</string>
 </resources>
