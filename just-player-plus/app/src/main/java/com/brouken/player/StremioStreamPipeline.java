@@ -302,6 +302,28 @@ final class StremioStreamPipeline {
 
     private static List<Candidate> order(List<Candidate> values,
                                          StremioAggregationPreferences.Snapshot settings) {
+        List<Candidate> relevant = new ArrayList<>();
+        List<Candidate> weakFallbacks = new ArrayList<>();
+        for (Candidate value : values) {
+            if (value.upstreamWeakMatch) {
+                weakFallbacks.add(value);
+            } else {
+                relevant.add(value);
+            }
+        }
+        List<Candidate> result = orderWithinRelevance(relevant, settings);
+        result.addAll(orderWithinRelevance(weakFallbacks, settings));
+        return result;
+    }
+
+    /**
+     * Keeps an add-on's explicit relevance boundary ahead of technical preferences. Some source
+     * add-ons intentionally return weak fallback matches after their real title matches. File-size
+     * sorting must not promote those fallbacks above results the source marked as strong.
+     */
+    private static List<Candidate> orderWithinRelevance(
+            List<Candidate> values,
+            StremioAggregationPreferences.Snapshot settings) {
         Comparator<Candidate> preferences = preferenceComparator(settings, true);
         Comparator<Candidate> rankedPreferences = preferenceComparator(settings, false);
         if ("quality_interleaved".equals(settings.sortMode)) {
@@ -655,6 +677,7 @@ final class StremioStreamPipeline {
         final List<String> audio;
         final long sizeBytes;
         final boolean cached;
+        final boolean upstreamWeakMatch;
 
         private Candidate(JSONObject stream,
                           SourceStreams sourceResult,
@@ -671,7 +694,8 @@ final class StremioStreamPipeline {
                           Set<String> releaseTypes,
                           List<String> audio,
                           long sizeBytes,
-                          boolean cached) {
+                          boolean cached,
+                          boolean upstreamWeakMatch) {
             this.stream = stream;
             source = sourceResult.source;
             sourcePriority = sourceResult.priority;
@@ -690,6 +714,7 @@ final class StremioStreamPipeline {
             this.audio = audio;
             this.sizeBytes = sizeBytes;
             this.cached = cached;
+            this.upstreamWeakMatch = upstreamWeakMatch;
         }
 
         @Nullable
@@ -724,7 +749,12 @@ final class StremioStreamPipeline {
                     stream, sourceResult, sourceOrder, originalName, originalDescription,
                     filename, lower, resolution, streamType, codec, hdr,
                     detectLanguages(text), detectReleaseTypes(text), detectAudio(text),
-                    detectSize(stream, text), cached);
+                    detectSize(stream, text), cached, isExplicitWeakMatch(stream));
+        }
+
+        private static boolean isExplicitWeakMatch(JSONObject stream) {
+            Object value = stream.opt("strongMatch");
+            return value instanceof Boolean && !((Boolean) value);
         }
 
         private static String detectResolution(String text) {

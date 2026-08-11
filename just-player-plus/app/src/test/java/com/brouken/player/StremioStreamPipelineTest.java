@@ -134,6 +134,49 @@ public class StremioStreamPipelineTest {
     }
 
     @Test
+    public void explicitWeakMatchNeverDisplacesStrongMatchByFileSizeOrLimit()
+            throws Exception {
+        StremioStreamSourceStore.Source source = source(
+                "11111111-1111-1111-1111-111111111111", "Webshare");
+        JSONObject bluey = direct(
+                "https://video.test/bluey",
+                "Bluey.S01E05.1080p.WEB-DL.x264-CZ_SK_EN.mkv",
+                350_080_000L)
+                .put("strongMatch", true)
+                .put("match", 0.92d);
+        JSONObject killBlue = direct(
+                "https://video.test/kill-blue",
+                "KILL.BLUE.S01E05.1080p.WEB-DL.DUAL.DDP2.0.H264.mkv",
+                1_500_000_000L)
+                .put("strongMatch", false)
+                .put("weakMatch", true)
+                .put("match", 0.50d);
+
+        StremioAggregationPreferences.Builder settings =
+                new StremioAggregationPreferences.Builder()
+                        .setSortMode("quality_source")
+                        .setSizeSort("larger");
+        JSONArray allStreams = new JSONObject(StremioStreamPipeline.process(
+                Collections.singletonList(sourceStreams(source, 0, bluey, killBlue)),
+                settings.build())).getJSONArray("streams");
+
+        assertEquals(2, allStreams.length());
+        assertEquals("https://video.test/bluey",
+                allStreams.getJSONObject(0).getString("url"));
+        assertEquals("https://video.test/kill-blue",
+                allStreams.getJSONObject(1).getString("url"));
+
+        JSONArray limitedStreams = new JSONObject(StremioStreamPipeline.process(
+                Collections.singletonList(sourceStreams(source, 0, bluey, killBlue)),
+                settings.setMaxPerSource(1).build())).getJSONArray("streams");
+
+        assertEquals(1, limitedStreams.length());
+        assertEquals("https://video.test/bluey",
+                limitedStreams.getJSONObject(0).getString("url"));
+        assertTrue(limitedStreams.getJSONObject(0).getBoolean("strongMatch"));
+    }
+
+    @Test
     public void safeDeduplicationUsesExactPlaybackIdentityAndHigherSourcePriority() throws Exception {
         StremioStreamSourceStore.Source preferred = source(
                 "11111111-1111-1111-1111-111111111111", "Preferred");
