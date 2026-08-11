@@ -44,37 +44,61 @@ final class StremioAddonClient {
     }
 
     ManifestResult inspectManifest(String manifestUrl) {
+        ManifestDocument document = loadManifest(manifestUrl, null);
+        if (document.manifest == null) {
+            return new ManifestResult(false, "", document.state);
+        }
+        JSONObject manifest = document.manifest;
+        if (!hasStreamResource(manifest)) {
+            return new ManifestResult(false, "", "missing_stream_resource");
+        }
+        String name = manifest.optString("name", "").trim();
+        if (name.length() > 120) {
+            name = name.substring(0, 120);
+        }
+        return new ManifestResult(true, name, "loaded");
+    }
+
+    private ManifestDocument loadManifest(
+            String manifestUrl,
+            @Nullable StremioRequestCancellation cancellation) {
         HttpUrl url = parseManifestUrl(manifestUrl);
         if (url == null) {
-            return new ManifestResult(false, "", "invalid_url");
+            return new ManifestDocument(null, "invalid_url");
         }
         Request request = request(url);
         Call call = httpClient.newCall(request);
         call.timeout().timeout(SOURCE_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        if (cancellation != null && !cancellation.register(call)) {
+            return new ManifestDocument(null, "cancelled");
+        }
         try (Response response = call.execute()) {
             if (!response.isSuccessful()) {
-                return new ManifestResult(false, "", "http_" + response.code());
+                return new ManifestDocument(null, "http_" + response.code());
             }
             ResponseBody body = response.body();
             if (body == null) {
-                return new ManifestResult(false, "", "invalid_body");
+                return new ManifestDocument(null, "invalid_body");
             }
             JSONObject manifest = new JSONObject(
                     BoundedResponseBody.readUtf8(body, MAX_MANIFEST_BYTES));
-            if (!hasStreamResource(manifest)) {
-                return new ManifestResult(false, "", "missing_stream_resource");
-            }
-            String name = manifest.optString("name", "").trim();
-            if (name.length() > 120) {
-                name = name.substring(0, 120);
-            }
-            return new ManifestResult(true, name, "loaded");
+            return new ManifestDocument(manifest, "loaded");
         } catch (InterruptedIOException error) {
-            return new ManifestResult(false, "", "timeout");
+            return new ManifestDocument(null,
+                    call.isCanceled()
+                            || (cancellation != null && cancellation.isCancelled())
+                            ? "cancelled" : "timeout");
         } catch (BoundedResponseBody.ResponseTooLargeException error) {
-            return new ManifestResult(false, "", "response_too_large");
+            return new ManifestDocument(null, "response_too_large");
         } catch (IOException | JSONException | RuntimeException error) {
-            return new ManifestResult(false, "", "invalid_response");
+            return new ManifestDocument(null,
+                    call.isCanceled()
+                            || (cancellation != null && cancellation.isCancelled())
+                            ? "cancelled" : "invalid_response");
+        } finally {
+            if (cancellation != null) {
+                cancellation.unregister(call);
+            }
         }
     }
 
@@ -89,6 +113,16 @@ final class StremioAddonClient {
                              String id,
                              @Nullable StremioRequestCancellation cancellation) {
         long startedAt = System.currentTimeMillis();
+        ManifestDocument document = loadManifest(source.manifestUrl, cancellation);
+        if (document.manifest == null) {
+            return new StreamResult(source, Collections.emptyList(),
+                    "manifest_" + document.state, elapsed(startedAt));
+        }
+        String support = streamSupport(document.manifest, type, id);
+        if (!"supported".equals(support)) {
+            return new StreamResult(source, Collections.emptyList(),
+                    support, elapsed(startedAt));
+        }
         HttpUrl streamUrl = buildStreamUrl(source.manifestUrl, type, id);
         if (streamUrl == null) {
             return new StreamResult(source, Collections.emptyList(),
@@ -215,6 +249,81 @@ final class StremioAddonClient {
         return false;
     }
 
+    /** Applies the same manifest resource/type/id-prefix routing described by the Stremio SDK. */
+    static String streamSupport(JSONObject manifest, String type, String id) {
+        if (manifest == null || type == null || id == null) {
+            return "invalid_request";
+        }
+        JSONArray resources = manifest.optJSONArray("resources");
+        if (resources == null) {
+            return "missing_stream_resource";
+        }
+        boolean foundStream = false;
+        boolean foundType = false;
+        for (int index = 0; index < resources.length(); index++) {
+            Object raw = resources.opt(index);
+            JSONArray types;
+            JSONArray idPrefixes;
+            boolean restrictIds;
+            if (raw instanceof String) {
+                if (!"stream".equals(raw)) {
+                    continue;
+                }
+                foundStream = true;
+                types = manifest.optJSONArray("types");
+                restrictIds = manifest.has("idPrefixes");
+                idPrefixes = manifest.optJSONArray("idPrefixes");
+            } else if (raw instanceof JSONObject) {
+                JSONObject resource = (JSONObject) raw;
+                if (!"stream".equals(resource.optString("name", ""))) {
+                    continue;
+                }
+                foundStream = true;
+                types = resource.optJSONArray("types");
+                restrictIds = resource.has("idPrefixes");
+                idPrefixes = resource.optJSONArray("idPrefixes");
+            } else {
+                continue;
+            }
+            if (!contains(types, type)) {
+                continue;
+            }
+            foundType = true;
+            if (!restrictIds || startsWithAny(id, idPrefixes)) {
+                return "supported";
+            }
+        }
+        if (!foundStream) {
+            return "missing_stream_resource";
+        }
+        return foundType ? "unsupported_id" : "unsupported_type";
+    }
+
+    private static boolean contains(@Nullable JSONArray values, String expected) {
+        if (values == null) {
+            return false;
+        }
+        for (int index = 0; index < values.length(); index++) {
+            if (expected.equals(values.optString(index, null))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean startsWithAny(String id, @Nullable JSONArray prefixes) {
+        if (prefixes == null) {
+            return false;
+        }
+        for (int index = 0; index < prefixes.length(); index++) {
+            String prefix = prefixes.optString(index, null);
+            if (prefix != null && id.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static long elapsed(long startedAt) {
         return Math.max(0L, System.currentTimeMillis() - startedAt);
     }
@@ -227,6 +336,16 @@ final class StremioAddonClient {
         ManifestResult(boolean success, String name, String state) {
             this.success = success;
             this.name = name;
+            this.state = state;
+        }
+    }
+
+    private static final class ManifestDocument {
+        @Nullable final JSONObject manifest;
+        @NonNull final String state;
+
+        ManifestDocument(@Nullable JSONObject manifest, String state) {
+            this.manifest = manifest;
             this.state = state;
         }
     }

@@ -145,6 +145,7 @@ final class StremioStreamPipeline {
             List<Candidate> ordered = order(candidates, settings);
             JSONArray streams = new JSONArray();
             Map<String, Integer> qualityCounts = new HashMap<>();
+            Map<String, Integer> sourceCounts = new HashMap<>();
             for (int index = 0; index < ordered.size(); index++) {
                 Candidate candidate = ordered.get(index);
                 if (streams.length() >= ABSOLUTE_MAX_RESULTS) {
@@ -155,12 +156,19 @@ final class StremioStreamPipeline {
                     stats.resultLimit += ordered.size() - index;
                     break;
                 }
+                int sourceCount = sourceCounts.containsKey(candidate.source.id)
+                        ? sourceCounts.get(candidate.source.id) : 0;
+                if (settings.maxPerSource > 0 && sourceCount >= settings.maxPerSource) {
+                    stats.sourceLimit++;
+                    continue;
+                }
                 int qualityCount = qualityCounts.containsKey(candidate.resolution)
                         ? qualityCounts.get(candidate.resolution) : 0;
                 if (settings.maxPerQuality > 0 && qualityCount >= settings.maxPerQuality) {
                     stats.qualityLimit++;
                     continue;
                 }
+                sourceCounts.put(candidate.source.id, sourceCount + 1);
                 qualityCounts.put(candidate.resolution, qualityCount + 1);
                 streams.put(format(candidate, settings));
             }
@@ -184,7 +192,6 @@ final class StremioStreamPipeline {
                 Integer.compare(first.priority, second.priority));
         List<Candidate> accepted = new ArrayList<>();
         Set<String> seen = new HashSet<>();
-        Map<String, Integer> sourceCounts = new HashMap<>();
         int processed = 0;
         candidateLoop:
         for (SourceStreams sourceResult : sortedSources) {
@@ -211,12 +218,6 @@ final class StremioStreamPipeline {
                     stats.reject(rejection);
                     continue;
                 }
-                int sourceCount = sourceCounts.containsKey(candidate.source.id)
-                        ? sourceCounts.get(candidate.source.id) : 0;
-                if (settings.maxPerSource > 0 && sourceCount >= settings.maxPerSource) {
-                    stats.sourceLimit++;
-                    continue;
-                }
                 if (!"off".equals(settings.deduplication)) {
                     List<String> keys = candidate.deduplicationKeys(
                             "extended".equals(settings.deduplication));
@@ -233,7 +234,6 @@ final class StremioStreamPipeline {
                     }
                     seen.addAll(keys);
                 }
-                sourceCounts.put(candidate.source.id, sourceCount + 1);
                 accepted.add(candidate);
             }
         }
@@ -302,7 +302,8 @@ final class StremioStreamPipeline {
 
     private static List<Candidate> order(List<Candidate> values,
                                          StremioAggregationPreferences.Snapshot settings) {
-        Comparator<Candidate> preferences = preferenceComparator(settings);
+        Comparator<Candidate> preferences = preferenceComparator(settings, true);
+        Comparator<Candidate> rankedPreferences = preferenceComparator(settings, false);
         if ("quality_interleaved".equals(settings.sortMode)) {
             return interleaveByQuality(values, preferences);
         }
@@ -311,15 +312,19 @@ final class StremioStreamPipeline {
             Collections.sort(result, (first, second) -> {
                 int quality = Integer.compare(first.resolutionRank, second.resolutionRank);
                 if (quality != 0) return quality;
+                int preference = rankedPreferences.compare(first, second);
+                if (preference != 0) return preference;
                 int source = Integer.compare(first.sourcePriority, second.sourcePriority);
-                return source != 0 ? source : preferences.compare(first, second);
+                return source != 0 ? source
+                        : Integer.compare(first.sourceOrder, second.sourceOrder);
             });
         } else if ("source_priority".equals(settings.sortMode)) {
             Collections.sort(result, (first, second) -> {
                 int source = Integer.compare(first.sourcePriority, second.sourcePriority);
                 if (source != 0) return source;
                 int quality = Integer.compare(first.resolutionRank, second.resolutionRank);
-                return quality != 0 ? quality : preferences.compare(first, second);
+                if (quality != 0) return quality;
+                return preferences.compare(first, second);
             });
         } else {
             Collections.sort(result, (first, second) -> {
@@ -367,7 +372,8 @@ final class StremioStreamPipeline {
     }
 
     private static Comparator<Candidate> preferenceComparator(
-            StremioAggregationPreferences.Snapshot settings) {
+            StremioAggregationPreferences.Snapshot settings,
+            boolean includeOriginalOrder) {
         return (first, second) -> {
             if (settings.preferCached && first.cached != second.cached) {
                 return first.cached ? -1 : 1;
@@ -390,7 +396,8 @@ final class StremioStreamPipeline {
                     return size;
                 }
             }
-            return Integer.compare(first.sourceOrder, second.sourceOrder);
+            return includeOriginalOrder
+                    ? Integer.compare(first.sourceOrder, second.sourceOrder) : 0;
         };
     }
 

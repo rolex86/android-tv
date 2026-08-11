@@ -76,6 +76,64 @@ public class StremioStreamPipelineTest {
     }
 
     @Test
+    public void qualitySourceOrderingRanksFileSizeBeforeSourcePriority() throws Exception {
+        StremioStreamSourceStore.Source first = source(
+                "11111111-1111-1111-1111-111111111111", "First");
+        StremioStreamSourceStore.Source second = source(
+                "22222222-2222-2222-2222-222222222222", "Second");
+
+        String response = StremioStreamPipeline.process(Arrays.asList(
+                        sourceStreams(first, 0,
+                                direct("https://video.test/first-small",
+                                        "Show.1080p.first-small.mkv", 2_000_000_000L),
+                                direct("https://video.test/first-large",
+                                        "Show.1080p.first-large.mkv", 10_000_000_000L)),
+                        sourceStreams(second, 1,
+                                direct("https://video.test/second-large",
+                                        "Show.1080p.second-large.mkv", 8_000_000_000L),
+                                direct("https://video.test/second-small",
+                                        "Show.1080p.second-small.mkv", 6_000_000_000L))),
+                new StremioAggregationPreferences.Builder()
+                        .setSortMode("quality_source")
+                        .setSizeSort("larger")
+                        .build());
+        JSONArray streams = new JSONObject(response).getJSONArray("streams");
+
+        assertEquals("https://video.test/first-large",
+                streams.getJSONObject(0).getString("url"));
+        assertEquals("https://video.test/second-large",
+                streams.getJSONObject(1).getString("url"));
+        assertEquals("https://video.test/second-small",
+                streams.getJSONObject(2).getString("url"));
+        assertEquals("https://video.test/first-small",
+                streams.getJSONObject(3).getString("url"));
+    }
+
+    @Test
+    public void perSourceLimitKeepsHighestRankedResultInsteadOfFirstUpstreamResult()
+            throws Exception {
+        StremioStreamSourceStore.Source source = source(
+                "11111111-1111-1111-1111-111111111111", "Source");
+
+        String response = StremioStreamPipeline.process(
+                Collections.singletonList(sourceStreams(source, 0,
+                        direct("https://video.test/small",
+                                "Show.1080p.small.mkv", 2_000_000_000L),
+                        direct("https://video.test/large",
+                                "Show.1080p.large.mkv", 10_000_000_000L))),
+                new StremioAggregationPreferences.Builder()
+                        .setSortMode("quality_source")
+                        .setSizeSort("larger")
+                        .setMaxPerSource(1)
+                        .build());
+        JSONArray streams = new JSONObject(response).getJSONArray("streams");
+
+        assertEquals(1, streams.length());
+        assertEquals("https://video.test/large",
+                streams.getJSONObject(0).getString("url"));
+    }
+
+    @Test
     public void safeDeduplicationUsesExactPlaybackIdentityAndHigherSourcePriority() throws Exception {
         StremioStreamSourceStore.Source preferred = source(
                 "11111111-1111-1111-1111-111111111111", "Preferred");
@@ -207,6 +265,54 @@ public class StremioStreamPipelineTest {
                 "https://addon.test/config") == null);
         assertTrue(StremioAddonClient.parseManifestUrl(
                 "http://127.0.0.1:16745/manifest.json") == null);
+    }
+
+    @Test
+    public void shortStreamResourceUsesManifestTypesAndIdPrefixes() throws Exception {
+        JSONObject manifest = new JSONObject()
+                .put("resources", new JSONArray().put("stream"))
+                .put("types", new JSONArray().put("series"))
+                .put("idPrefixes", new JSONArray().put("tt"));
+
+        assertEquals("supported", StremioAddonClient.streamSupport(
+                manifest, "series", "tt7678620:3:37"));
+        assertEquals("unsupported_type", StremioAddonClient.streamSupport(
+                manifest, "movie", "tt7678620"));
+        assertEquals("unsupported_id", StremioAddonClient.streamSupport(
+                manifest, "series", "kitsu:123:1"));
+    }
+
+    @Test
+    public void fullStreamResourceOverridesGlobalRouting() throws Exception {
+        JSONObject manifest = new JSONObject()
+                .put("resources", new JSONArray()
+                        .put(new JSONObject()
+                                .put("name", "stream")
+                                .put("types", new JSONArray().put("series"))))
+                .put("types", new JSONArray().put("movie"))
+                .put("idPrefixes", new JSONArray().put("kitsu:"));
+
+        assertEquals("supported", StremioAddonClient.streamSupport(
+                manifest, "series", "tt7678620:3:37"));
+        assertEquals("unsupported_type", StremioAddonClient.streamSupport(
+                manifest, "movie", "kitsu:123"));
+    }
+
+    @Test
+    public void multipleStreamDeclarationsMatchWhenAnyResourceSupportsRequest() throws Exception {
+        JSONObject manifest = new JSONObject()
+                .put("resources", new JSONArray()
+                        .put(new JSONObject()
+                                .put("name", "stream")
+                                .put("types", new JSONArray().put("series"))
+                                .put("idPrefixes", new JSONArray().put("kitsu:")))
+                        .put(new JSONObject()
+                                .put("name", "stream")
+                                .put("types", new JSONArray().put("series"))
+                                .put("idPrefixes", new JSONArray().put("tt"))));
+
+        assertEquals("supported", StremioAddonClient.streamSupport(
+                manifest, "series", "tt7678620:3:37"));
     }
 
     private static JSONObject firstStream(
