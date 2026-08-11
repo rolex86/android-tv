@@ -14,8 +14,9 @@ final class ExternalPlaybackResultPolicy {
     }
 
     /**
-     * Completed playback must contain only {@code end_by}. Position and duration describe an
-     * interrupted session and make Stremio resume the episode that just ended.
+     * Completed playback must contain only {@code end_by}. The caller owns continuation and may
+     * select its next episode; position and duration describe an interrupted session and can make
+     * callers such as Stremio resume the episode that just ended instead.
      */
     static boolean shouldIncludeProgress(String endBy) {
         return !END_BY_PLAYBACK_COMPLETION.equals(endBy);

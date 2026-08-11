@@ -9,11 +9,19 @@ import org.junit.Test;
 public class ExternalPlaybackResultPolicyTest {
 
     @Test
-    public void completedPlaybackReturnsCompletionWithoutProgress() {
+    public void completedPlaybackDelegatesContinuationWithoutOldEpisodeProgress() {
         String endBy = ExternalPlaybackResultPolicy.endBy(true, false);
 
         assertEquals(ExternalPlaybackResultPolicy.END_BY_PLAYBACK_COMPLETION, endBy);
         assertFalse(ExternalPlaybackResultPolicy.shouldIncludeProgress(endBy));
+    }
+
+    @Test
+    public void dismissedNextEpisodeCannotTriggerCallerContinuation() {
+        String endBy = ExternalPlaybackResultPolicy.endBy(true, true);
+
+        assertEquals(ExternalPlaybackResultPolicy.END_BY_USER, endBy);
+        assertTrue(ExternalPlaybackResultPolicy.shouldIncludeProgress(endBy));
     }
 
     @Test

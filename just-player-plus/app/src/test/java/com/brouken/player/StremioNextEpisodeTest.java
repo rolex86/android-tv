@@ -120,31 +120,6 @@ public class StremioNextEpisodeTest {
     }
 
     @Test
-    public void nextEpisodeDeepLinkTargetsTheResolvedVideoAndRequestsAutoplay() {
-        assertEquals(
-                "stremio:///detail/series/tt7678620/tt7678620:3:43?autoPlay=true",
-                StremioNextEpisodeDeepLink.build(
-                        StremioEpisodeId.parse("tt7678620:3:43")));
-        assertEquals(
-                "stremio:///detail/series/custom%2Fshow/custom%2Fshow:2:7?autoPlay=true",
-                StremioNextEpisodeDeepLink.build(
-                        StremioEpisodeId.parse("custom/show:2:7")));
-        assertNull(StremioNextEpisodeDeepLink.build(null));
-    }
-
-    @Test
-    public void naturalEndLaunchesOnlyWhenContinuationWasNotDismissed() {
-        assertTrue(StremioNextEpisodeDeepLink.shouldLaunchAtNaturalEnd(
-                true, true, false));
-        assertFalse(StremioNextEpisodeDeepLink.shouldLaunchAtNaturalEnd(
-                true, true, true));
-        assertFalse(StremioNextEpisodeDeepLink.shouldLaunchAtNaturalEnd(
-                true, false, false));
-        assertFalse(StremioNextEpisodeDeepLink.shouldLaunchAtNaturalEnd(
-                false, true, false));
-    }
-
-    @Test
     public void matcherUsesLatestEpisodeRequestAsCurrent() {
         long now = 1_000_000L;
 

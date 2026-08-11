@@ -20,6 +20,7 @@ OFFSET_TEST_PATH = TEST_PATH.with_name("OffsetSubtitleParserFactoryTest.java")
 END_TIME_TEST_PATH = TEST_PATH.with_name("PlaybackEndTimeTest.java")
 STREMIO_TEST_PATH = TEST_PATH.with_name("StremioNextEpisodeTest.java")
 STREMIO_STREAM_TEST_PATH = TEST_PATH.with_name("StremioStreamPipelineTest.java")
+EXTERNAL_RESULT_TEST_PATH = TEST_PATH.with_name("ExternalPlaybackResultPolicyTest.java")
 STREMIO_AGGREGATION_PREFS_PATH = APP / "java" / "com" / "brouken" / "player" / "StremioAggregationPreferences.java"
 AI_TEST_PATH = (
     ROOT / "just-player-plus" / "app" / "src" / "test" / "java"
@@ -193,6 +194,36 @@ for forbidden in (
         errors.append(
             "Late OpenSubtitles must not rebuild the active media item: " + forbidden
         )
+
+for forbidden in (
+    "StremioNextEpisodeDeepLink",
+    "next_episode_deep_link",
+    "stremio:///detail/series/",
+):
+    if forbidden in external_java:
+        errors.append(
+            "Next-episode continuation must return the external-player result to its caller, "
+            "not launch a Stremio detail deep link: " + forbidden
+        )
+
+for handoff_anchor in (
+    '"next_episode_result_handoff"',
+    "playbackFinished = true;",
+    "ExternalPlaybackResultPolicy.endBy(",
+):
+    if handoff_anchor not in player:
+        errors.append("Missing caller-owned next-episode handoff: " + handoff_anchor)
+
+if not EXTERNAL_RESULT_TEST_PATH.exists():
+    errors.append("External-player result regression tests are missing")
+else:
+    external_result_tests = EXTERNAL_RESULT_TEST_PATH.read_text(encoding="utf-8")
+    for test_name in (
+        "completedPlaybackDelegatesContinuationWithoutOldEpisodeProgress",
+        "dismissedNextEpisodeCannotTriggerCallerContinuation",
+    ):
+        if test_name not in external_result_tests:
+            errors.append(f"Missing external-player result regression test: {test_name}")
 
 if not TEST_PATH.exists():
     errors.append("Smart-selection regression tests are missing")

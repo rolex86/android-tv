@@ -1,5 +1,21 @@
 # JustPlayer Plus changelog
 
+## Step 26 — Return next-episode control to Stremio
+
+- Removed the custom `stremio:///detail/...?...autoPlay=true` launch that opened an episode detail
+  or stream list instead of continuing through Stremio's active external-player session.
+- Natural completion now returns the standard MX Player-compatible
+  `end_by=playback_completion` result without old-episode position or duration, leaving episode
+  selection and autoplay to the calling Stremio activity.
+- The popup's explicit Play action uses the same result handoff immediately instead of seeking the
+  old stream to its final frame or launching a second Stremio activity.
+- The exact resolved next episode remains stored as a short-lived Connector correlation hint before
+  the result is returned, preserving track memory, prefetch and direct-stream fallback identity.
+- Dismissing the popup still returns a user exit at natural end and therefore opts out of automatic
+  continuation.
+- Raised the application version code to 268; the Connector remains at `1.13.0` because its stream
+  API and ordering are unchanged.
+
 ## Step 25 — Preserve complete upstream stream relevance
 
 - Source-provided numeric match scores now take precedence over cache, language and file-size
