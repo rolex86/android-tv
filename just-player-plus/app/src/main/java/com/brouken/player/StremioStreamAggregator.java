@@ -29,7 +29,7 @@ import okhttp3.OkHttpClient;
 
 /** Runs all enabled upstream sources concurrently and never proxies the video itself. */
 final class StremioStreamAggregator {
-    private static final String CACHE_SCHEMA = "next-episode-resilience-v4";
+    private static final String CACHE_SCHEMA = "upstream-relevance-v5";
     private static final long TOTAL_DEADLINE_MS = 9_000L;
     private static final long REGULAR_CACHE_AGE_MS = 30_000L;
     private static final int MAX_CACHE_ENTRIES = 32;

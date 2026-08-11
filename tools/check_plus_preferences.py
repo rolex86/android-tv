@@ -379,6 +379,7 @@ else:
     for test_name in (
         "disabledGateReturnsExactVersion258ResponseWithoutInvokingAggregator",
         "qualityOrderingInterleavesSourcesAndKeepsOriginalPlaybackFields",
+        "fullUpstreamRelevanceKeepsActualBlueyAheadOfLargerFalseTitles",
         "safeDeduplicationUsesExactPlaybackIdentityAndHigherSourcePriority",
         "filtersReleaseLanguageSizeTypeAndUserTextConservatively",
         "bingeModesAreStableAndNonePreservesOriginalHint",

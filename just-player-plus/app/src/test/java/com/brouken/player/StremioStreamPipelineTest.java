@@ -134,20 +134,29 @@ public class StremioStreamPipelineTest {
     }
 
     @Test
-    public void explicitWeakMatchNeverDisplacesStrongMatchByFileSizeOrLimit()
+    public void fullUpstreamRelevanceKeepsActualBlueyAheadOfLargerFalseTitles()
             throws Exception {
         StremioStreamSourceStore.Source source = source(
                 "11111111-1111-1111-1111-111111111111", "Webshare");
         JSONObject bluey = direct(
                 "https://video.test/bluey",
-                "Bluey.S01E05.1080p.WEB-DL.x264-CZ_SK_EN.mkv",
+                "Bluey.S01E05.Země.stínů.1080p.WEB-DL.x264-CZ_SK_EN.mkv",
                 350_080_000L)
                 .put("strongMatch", true)
-                .put("match", 0.92d);
+                .put("match", 1.0d);
         JSONObject killBlue = direct(
                 "https://video.test/kill-blue",
-                "KILL.BLUE.S01E05.1080p.WEB-DL.DUAL.DDP2.0.H264.mkv",
+                "KILL.BLUE.S01E05.Theres.a.Unicorn.Up.Ahead.1080p.CR.WEB-DL."
+                        + "DUAL.DDP2.0.H264-Kitsune.mkv",
                 1_500_000_000L)
+                // The real Webshare parser classifies this false title as strong: 6 / 11.
+                .put("strongMatch", true)
+                .put("weakMatch", true)
+                .put("match", 0.5454545454545454d);
+        JSONObject blueSkies = direct(
+                "https://video.test/blue-skies",
+                "BLUE.SKIES.2026.S01E05.1080p.WEBRip.x264.mkv",
+                1_900_000_000L)
                 .put("strongMatch", false)
                 .put("weakMatch", true)
                 .put("match", 0.50d);
@@ -157,23 +166,60 @@ public class StremioStreamPipelineTest {
                         .setSortMode("quality_source")
                         .setSizeSort("larger");
         JSONArray allStreams = new JSONObject(StremioStreamPipeline.process(
-                Collections.singletonList(sourceStreams(source, 0, bluey, killBlue)),
+                Collections.singletonList(sourceStreams(
+                        source, 0, bluey, killBlue, blueSkies)),
                 settings.build())).getJSONArray("streams");
 
-        assertEquals(2, allStreams.length());
+        assertEquals(3, allStreams.length());
         assertEquals("https://video.test/bluey",
                 allStreams.getJSONObject(0).getString("url"));
         assertEquals("https://video.test/kill-blue",
                 allStreams.getJSONObject(1).getString("url"));
+        assertEquals("https://video.test/blue-skies",
+                allStreams.getJSONObject(2).getString("url"));
 
         JSONArray limitedStreams = new JSONObject(StremioStreamPipeline.process(
-                Collections.singletonList(sourceStreams(source, 0, bluey, killBlue)),
+                Collections.singletonList(sourceStreams(
+                        source, 0, bluey, killBlue, blueSkies)),
                 settings.setMaxPerSource(1).build())).getJSONArray("streams");
 
         assertEquals(1, limitedStreams.length());
         assertEquals("https://video.test/bluey",
                 limitedStreams.getJSONObject(0).getString("url"));
         assertTrue(limitedStreams.getJSONObject(0).getBoolean("strongMatch"));
+    }
+
+    @Test
+    public void upstreamRelevanceChangesOnlySlotsAlreadyAssignedToThatSource()
+            throws Exception {
+        StremioStreamSourceStore.Source webshare = source(
+                "11111111-1111-1111-1111-111111111111", "Webshare");
+        StremioStreamSourceStore.Source other = source(
+                "22222222-2222-2222-2222-222222222222", "Other");
+        JSONObject bluey = direct(
+                "https://video.test/bluey", "Bluey.S01E05.1080p.mkv", 350_080_000L)
+                .put("strongMatch", true)
+                .put("match", 1.0d);
+        JSONObject killBlue = direct(
+                "https://video.test/kill-blue", "KILL.BLUE.S01E05.1080p.mkv",
+                1_500_000_000L)
+                .put("strongMatch", true)
+                .put("match", 0.5454545454545454d);
+        JSONObject otherLarge = direct(
+                "https://video.test/other", "Other.Show.S01E05.1080p.mkv",
+                2_000_000_000L);
+
+        JSONArray streams = new JSONObject(StremioStreamPipeline.process(Arrays.asList(
+                        sourceStreams(webshare, 0, bluey, killBlue),
+                        sourceStreams(other, 1, otherLarge)),
+                new StremioAggregationPreferences.Builder()
+                        .setSortMode("quality_source")
+                        .setSizeSort("larger")
+                        .build())).getJSONArray("streams");
+
+        assertEquals("https://video.test/other", streams.getJSONObject(0).getString("url"));
+        assertEquals("https://video.test/bluey", streams.getJSONObject(1).getString("url"));
+        assertEquals("https://video.test/kill-blue", streams.getJSONObject(2).getString("url"));
     }
 
     @Test

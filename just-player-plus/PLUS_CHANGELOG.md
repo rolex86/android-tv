@@ -1,5 +1,17 @@
 # JustPlayer Plus changelog
 
+## Step 25 — Preserve complete upstream stream relevance
+
+- Source-provided numeric match scores now take precedence over cache, language and file-size
+  preferences inside that source's already assigned result positions.
+- Fixed the real Webshare false-positive case where both `Bluey` and `KILL BLUE` are marked as
+  strong matches, but their numeric scores are `1.0` and `0.545454…` respectively.
+- Per-source limits now retain the source's most relevant candidates instead of allowing a larger
+  similarly named file to consume the available slots.
+- Sources without explicit relevance metadata keep the existing technical sorting behavior.
+- Invalidated pre-version-267 aggregation and protected-prefetch cache entries, raised the
+  Connector manifest to `1.13.0`, and raised the application version code to 267.
+
 ## Step 24 — Resilient next-episode stream handoff
 
 - Protected next-episode prefetch now requires a complete, non-empty response from every

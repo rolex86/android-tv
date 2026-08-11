@@ -313,6 +313,49 @@ final class StremioStreamPipeline {
         }
         List<Candidate> result = orderWithinRelevance(relevant, settings);
         result.addAll(orderWithinRelevance(weakFallbacks, settings));
+        return restoreUpstreamRelevance(result);
+    }
+
+    /**
+     * Restores an add-on's full relevance order inside the positions that the selected technical
+     * sort assigned to that source. This keeps source interleaving, quality and source priorities
+     * intact while preventing file size or cache preference from reversing explicit match scores.
+     *
+     * <p>Webshare, for example, can mark both the requested title and a similarly named fallback
+     * as {@code strongMatch=true}; its numeric {@code match} field is what distinguishes them.
+     * Add-ons that expose no relevance metadata retain the existing Connector ordering.</p>
+     */
+    private static List<Candidate> restoreUpstreamRelevance(List<Candidate> ordered) {
+        List<Candidate> result = new ArrayList<>(ordered);
+        Map<String, List<Integer>> positionsBySource = new LinkedHashMap<>();
+        Map<String, List<Candidate>> candidatesBySource = new LinkedHashMap<>();
+        Set<String> explicitlyRankedSources = new HashSet<>();
+        for (int index = 0; index < result.size(); index++) {
+            Candidate candidate = result.get(index);
+            String sourceId = candidate.source.id;
+            List<Integer> positions = positionsBySource.get(sourceId);
+            if (positions == null) {
+                positions = new ArrayList<>();
+                positionsBySource.put(sourceId, positions);
+                candidatesBySource.put(sourceId, new ArrayList<>());
+            }
+            positions.add(index);
+            candidatesBySource.get(sourceId).add(candidate);
+            if (candidate.hasUpstreamRelevance()) {
+                explicitlyRankedSources.add(sourceId);
+            }
+        }
+        for (String sourceId : explicitlyRankedSources) {
+            List<Candidate> candidates = candidatesBySource.get(sourceId);
+            List<Integer> positions = positionsBySource.get(sourceId);
+            if (candidates == null || positions == null || candidates.size() < 2) {
+                continue;
+            }
+            Collections.sort(candidates, Candidate::compareUpstreamRelevance);
+            for (int index = 0; index < positions.size(); index++) {
+                result.set(positions.get(index), candidates.get(index));
+            }
+        }
         return result;
     }
 
@@ -678,6 +721,8 @@ final class StremioStreamPipeline {
         final long sizeBytes;
         final boolean cached;
         final boolean upstreamWeakMatch;
+        @Nullable final Boolean upstreamStrongMatch;
+        final double upstreamMatch;
 
         private Candidate(JSONObject stream,
                           SourceStreams sourceResult,
@@ -695,7 +740,8 @@ final class StremioStreamPipeline {
                           List<String> audio,
                           long sizeBytes,
                           boolean cached,
-                          boolean upstreamWeakMatch) {
+                          @Nullable Boolean upstreamStrongMatch,
+                          double upstreamMatch) {
             this.stream = stream;
             source = sourceResult.source;
             sourcePriority = sourceResult.priority;
@@ -714,7 +760,9 @@ final class StremioStreamPipeline {
             this.audio = audio;
             this.sizeBytes = sizeBytes;
             this.cached = cached;
-            this.upstreamWeakMatch = upstreamWeakMatch;
+            this.upstreamStrongMatch = upstreamStrongMatch;
+            upstreamWeakMatch = Boolean.FALSE.equals(upstreamStrongMatch);
+            this.upstreamMatch = upstreamMatch;
         }
 
         @Nullable
@@ -749,12 +797,63 @@ final class StremioStreamPipeline {
                     stream, sourceResult, sourceOrder, originalName, originalDescription,
                     filename, lower, resolution, streamType, codec, hdr,
                     detectLanguages(text), detectReleaseTypes(text), detectAudio(text),
-                    detectSize(stream, text), cached, isExplicitWeakMatch(stream));
+                    detectSize(stream, text), cached, explicitStrongMatch(stream),
+                    explicitMatch(stream));
         }
 
-        private static boolean isExplicitWeakMatch(JSONObject stream) {
+        @Nullable
+        private static Boolean explicitStrongMatch(JSONObject stream) {
             Object value = stream.opt("strongMatch");
-            return value instanceof Boolean && !((Boolean) value);
+            return value instanceof Boolean ? (Boolean) value : null;
+        }
+
+        private static double explicitMatch(JSONObject stream) {
+            Object value = stream.opt("match");
+            double parsed;
+            if (value instanceof Number) {
+                parsed = ((Number) value).doubleValue();
+            } else if (value instanceof String) {
+                try {
+                    parsed = Double.parseDouble((String) value);
+                } catch (NumberFormatException ignored) {
+                    return Double.NaN;
+                }
+            } else {
+                return Double.NaN;
+            }
+            return Double.isNaN(parsed) || Double.isInfinite(parsed)
+                    || parsed < 0d || parsed > 1d ? Double.NaN : parsed;
+        }
+
+        boolean hasUpstreamRelevance() {
+            return upstreamStrongMatch != null || !Double.isNaN(upstreamMatch);
+        }
+
+        static int compareUpstreamRelevance(Candidate first, Candidate second) {
+            int strong = Integer.compare(
+                    upstreamStrongRank(first.upstreamStrongMatch),
+                    upstreamStrongRank(second.upstreamStrongMatch));
+            if (strong != 0) {
+                return strong;
+            }
+            boolean firstHasMatch = !Double.isNaN(first.upstreamMatch);
+            boolean secondHasMatch = !Double.isNaN(second.upstreamMatch);
+            if (firstHasMatch != secondHasMatch) {
+                return firstHasMatch ? -1 : 1;
+            }
+            if (firstHasMatch) {
+                int match = Double.compare(second.upstreamMatch, first.upstreamMatch);
+                if (match != 0) {
+                    return match;
+                }
+            }
+            return Integer.compare(first.sourceOrder, second.sourceOrder);
+        }
+
+        private static int upstreamStrongRank(@Nullable Boolean value) {
+            if (Boolean.TRUE.equals(value)) return 0;
+            if (value == null) return 1;
+            return 2;
         }
 
         private static String detectResolution(String text) {
