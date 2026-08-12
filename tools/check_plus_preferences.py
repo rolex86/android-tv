@@ -35,6 +35,7 @@ APPLICATION_PATH = STREMIO_ACCOUNT_SYNC_COORDINATOR_PATH.with_name(
 )
 MANIFEST_PATH = APP / "AndroidManifest.xml"
 APP_BUILD_PATH = ROOT / "just-player-plus" / "app" / "build.gradle"
+CHANGELOG_PATH = ROOT / "just-player-plus" / "PLUS_CHANGELOG.md"
 STREMIO_STREAM_TEST_PATH = TEST_PATH.with_name("StremioStreamPipelineTest.java")
 EXTERNAL_RESULT_TEST_PATH = TEST_PATH.with_name("ExternalPlaybackResultPolicyTest.java")
 STREMIO_AGGREGATION_PREFS_PATH = APP / "java" / "com" / "brouken" / "player" / "StremioAggregationPreferences.java"
@@ -379,6 +380,23 @@ if not STREMIO_BOOT_RECEIVER_PATH.exists() or (
 app_build = APP_BUILD_PATH.read_text(encoding="utf-8")
 if "androidx.work:work-runtime:2.11.2" not in app_build:
     errors.append("Stremio retry requires the audited WorkManager 2.11.2 runtime")
+
+changelog = CHANGELOG_PATH.read_text(encoding="utf-8")
+version_match = re.search(r"^\s*versionCode\s+(\d+)\s*$", app_build, re.MULTILINE)
+step_match = re.search(r"^## Step (\d+)\b", changelog, re.MULTILINE)
+if version_match is None or step_match is None:
+    errors.append("Application version or latest changelog step could not be parsed")
+else:
+    version_code = int(version_match.group(1))
+    latest_step = int(step_match.group(1))
+    expected_version = 242 + latest_step
+    if version_code != expected_version:
+        errors.append(
+            "Every new JustPlayer Plus step must increment versionCode: "
+            f"Step {latest_step} requires {expected_version}, found {version_code}"
+        )
+    if f"Raised the application version code to {version_code}" not in changelog:
+        errors.append("Latest application version is missing from PLUS_CHANGELOG.md")
 
 manifest = MANIFEST_PATH.read_text(encoding="utf-8")
 if 'android:name=".JustPlayerPlusApplication"' not in manifest:

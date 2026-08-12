@@ -1,5 +1,17 @@
 # JustPlayer Plus changelog
 
+## Step 29 — Keep account synchronization off media startup
+
+- Disabled WorkManager's automatic process-start initializer and switched it to supported
+  on-demand configuration.
+- Removed the account queue flush from `PlayerActivity.onCreate()` so first media preparation does
+  not read the encrypted account key, parse the retry queue or initialize background schedulers.
+- Dispatch the persisted-queue check only once after playback is actually running, with Keystore
+  and queue work performed off the main thread.
+- Preserved network-constrained retry, checkpoint scheduling and reboot recovery.
+- Raised the application version code to 271; the Connector remains at `1.14.0` because its local
+  addon protocol is unchanged.
+
 ## Step 28 — Optional Stremio account progress synchronization
 
 - Added a single default-off gate for synchronizing only episodes that continue inside JustPlayer
@@ -15,9 +27,6 @@
   immediate snapshots on pause or exit. A network-constrained WorkManager task survives app and
   device restarts and retries failed delivery with exponential backoff until the queue is verified
   on the server. Disabling the gate cancels scheduled/running work and clears the queue.
-- Deferred WorkManager initialization and the startup queue flush until playback is actually
-  running, then moved Keystore and queue checks off the main thread. First media preparation is
-  now free of account-sync initialization and I/O.
 - Movies and a single Stremio-launched episode that exits without internal continuation remain on
   the standard callback path. Once an internal continuation is accepted and that callback must be
   suppressed, account sync records the completed current episode as well as every later episode.
