@@ -49,6 +49,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.MissingResourceException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
@@ -112,6 +114,16 @@ public class SettingsActivity extends AppCompatActivity {
         private static final String KEY_OPENSUBTITLES_CREDENTIALS =
                 "openSubtitlesCredentials";
         private static final String KEY_OPENSUBTITLES_TEST = "openSubtitlesTest";
+        private static final String KEY_STREMIO_ACCOUNT = "stremioAccountSyncAccount";
+        private final ExecutorService stremioLinkExecutor =
+                Executors.newSingleThreadExecutor();
+        private final StremioAccountClient stremioAccountClient =
+                new StremioAccountClient();
+        private final Object stremioLinkLock = new Object();
+        private volatile int stremioLinkGeneration;
+        private volatile boolean stremioLinkInProgress;
+        @Nullable
+        private AlertDialog stremioLinkDialog;
 
         @Override
         public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
@@ -169,6 +181,7 @@ public class SettingsActivity extends AppCompatActivity {
 
             setupAiSubtitlePreferences();
             setupOpenSubtitlesPreferences();
+            setupStremioAccountSyncPreferences();
 
             Preference diagnostics = findPreference("externalPlayerDiagnosticsView");
             if (diagnostics != null) {
@@ -257,6 +270,242 @@ public class SettingsActivity extends AppCompatActivity {
 
             if (new PlusPrefs(requireContext()).stremioConnectorEnabled) {
                 StremioConnectorService.start(requireContext());
+            }
+        }
+
+        @Override
+        public void onDestroy() {
+            synchronized (stremioLinkLock) {
+                stremioLinkGeneration++;
+                stremioLinkInProgress = false;
+            }
+            dismissStremioLinkDialog();
+            stremioAccountClient.cancelAll();
+            stremioLinkExecutor.shutdownNow();
+            super.onDestroy();
+        }
+
+        private void setupStremioAccountSyncPreferences() {
+            SwitchPreferenceCompat enabled = findPreference(
+                    PlusPrefs.KEY_STREMIO_ACCOUNT_SYNC_ENABLED);
+            Preference account = findPreference(KEY_STREMIO_ACCOUNT);
+            if (enabled == null || account == null) return;
+
+            StremioAuthKeyStore store = new StremioAuthKeyStore(requireContext());
+            Runnable refresh = () -> {
+                boolean linked = store.isConfigured();
+                account.setSummary(linked
+                        ? R.string.pref_stremio_account_linked
+                        : R.string.pref_stremio_account_missing);
+                boolean selected = PreferenceManager.getDefaultSharedPreferences(
+                        requireContext()).getBoolean(
+                        PlusPrefs.KEY_STREMIO_ACCOUNT_SYNC_ENABLED, false);
+                if (selected && !linked) {
+                    StremioAccountSyncCoordinator.disable(requireContext());
+                    PreferenceManager.getDefaultSharedPreferences(requireContext())
+                            .edit()
+                            .putBoolean(PlusPrefs.KEY_STREMIO_ACCOUNT_SYNC_ENABLED, false)
+                            .commit();
+                    selected = false;
+                }
+                enabled.setChecked(selected);
+            };
+
+            enabled.setOnPreferenceChangeListener((preference, newValue) -> {
+                boolean requested = Boolean.TRUE.equals(newValue);
+                if (!requested) {
+                    StremioAccountSyncCoordinator.disable(requireContext());
+                    return true;
+                }
+                if (store.isConfigured()) {
+                    StremioAccountSyncCoordinator.enable(requireContext());
+                    new Handler(Looper.getMainLooper()).postDelayed(
+                            () -> StremioAccountSyncCoordinator.flush(requireContext()),
+                            100L);
+                    return true;
+                }
+                beginStremioAccountLink(enabled, account, store, refresh);
+                return false;
+            });
+            account.setOnPreferenceClickListener(preference -> {
+                if (!store.isConfigured()) {
+                    beginStremioAccountLink(enabled, account, store, refresh);
+                    return true;
+                }
+                new AlertDialog.Builder(requireContext())
+                        .setTitle(R.string.pref_stremio_account_disconnect_title)
+                        .setMessage(R.string.pref_stremio_account_disconnect_message)
+                        .setPositiveButton(R.string.pref_stremio_account_disconnect,
+                                (dialog, which) -> {
+                                    StremioAccountSyncCoordinator.disable(requireContext());
+                                    PreferenceManager.getDefaultSharedPreferences(
+                                            requireContext())
+                                            .edit()
+                                            .putBoolean(
+                                                    PlusPrefs.KEY_STREMIO_ACCOUNT_SYNC_ENABLED,
+                                                    false)
+                                            .commit();
+                                    store.clear();
+                                    refresh.run();
+                                    Toast.makeText(requireContext(),
+                                            R.string.pref_stremio_account_disconnected,
+                                            Toast.LENGTH_SHORT).show();
+                                })
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .show();
+                return true;
+            });
+            refresh.run();
+        }
+
+        private void beginStremioAccountLink(
+                SwitchPreferenceCompat enabled,
+                Preference account,
+                StremioAuthKeyStore store,
+                Runnable refresh) {
+            if (stremioLinkInProgress) return;
+            Context appContext = requireContext().getApplicationContext();
+            stremioLinkInProgress = true;
+            int generation = ++stremioLinkGeneration;
+            enabled.setEnabled(false);
+            account.setEnabled(false);
+            Toast.makeText(requireContext(),
+                    R.string.pref_stremio_account_link_waiting,
+                    Toast.LENGTH_SHORT).show();
+            stremioLinkExecutor.execute(() -> {
+                try {
+                    StremioAccountClient.Link link = stremioAccountClient.createLink();
+                    new Handler(Looper.getMainLooper()).post(() -> {
+                        if (!isAdded() || generation != stremioLinkGeneration) return;
+                        stremioLinkDialog = new AlertDialog.Builder(requireContext())
+                                .setTitle(R.string.pref_stremio_account_link_title)
+                                .setMessage(getString(
+                                        R.string.pref_stremio_account_link_message,
+                                        link.url,
+                                        link.code))
+                                .setPositiveButton(R.string.pref_stremio_account_open, null)
+                                .setNeutralButton(R.string.pref_stremio_account_copy, null)
+                                .setNegativeButton(android.R.string.cancel, null)
+                                .create();
+                        stremioLinkDialog.setCanceledOnTouchOutside(false);
+                        stremioLinkDialog.setOnCancelListener(ignored -> {
+                            cancelStremioAccountLink(generation, enabled, account);
+                            stremioLinkDialog = null;
+                        });
+                        stremioLinkDialog.setOnShowListener(ignored -> {
+                            if (stremioLinkDialog == null) return;
+                            stremioLinkDialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                                    .setOnClickListener(button ->
+                                            openStremioAccountLink(link.url));
+                            stremioLinkDialog.getButton(AlertDialog.BUTTON_NEUTRAL)
+                                    .setOnClickListener(button ->
+                                            copyStremioAccountLink(link.url));
+                            stremioLinkDialog.getButton(AlertDialog.BUTTON_NEGATIVE)
+                                    .setOnClickListener(button -> {
+                                        cancelStremioAccountLink(
+                                                generation, enabled, account);
+                                        dismissStremioLinkDialog();
+                                    });
+                        });
+                        stremioLinkDialog.show();
+                    });
+
+                    long deadline = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(5);
+                    String authKey = null;
+                    while (generation == stremioLinkGeneration
+                            && System.currentTimeMillis() < deadline) {
+                        authKey = stremioAccountClient.readLink(link.code);
+                        if (authKey != null) break;
+                        Thread.sleep(2_000L);
+                    }
+                    if (generation != stremioLinkGeneration) return;
+                    if (authKey == null || !stremioAccountClient.validateAuthKey(authKey)) {
+                        throw new IllegalStateException("Stremio authorization timed out");
+                    }
+                    synchronized (stremioLinkLock) {
+                        if (generation != stremioLinkGeneration) return;
+                        if (!store.save(authKey)) {
+                            throw new SecurityException(
+                                    "Could not encrypt Stremio auth key");
+                        }
+                        boolean enabledStored = PreferenceManager
+                                .getDefaultSharedPreferences(appContext)
+                                .edit()
+                                .putBoolean(
+                                        PlusPrefs.KEY_STREMIO_ACCOUNT_SYNC_ENABLED, true)
+                                .commit();
+                        if (!enabledStored) {
+                            store.clear();
+                            throw new SecurityException(
+                                    "Could not persist Stremio sync setting");
+                        }
+                        stremioLinkInProgress = false;
+                    }
+                    new Handler(Looper.getMainLooper()).post(() -> {
+                        if (!isAdded() || generation != stremioLinkGeneration) return;
+                        dismissStremioLinkDialog();
+                        stremioLinkInProgress = false;
+                        enabled.setEnabled(true);
+                        account.setEnabled(true);
+                        refresh.run();
+                        StremioAccountSyncCoordinator.enable(requireContext());
+                        Toast.makeText(requireContext(),
+                                R.string.pref_stremio_account_linked_done,
+                                Toast.LENGTH_LONG).show();
+                    });
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                } catch (Exception error) {
+                    new Handler(Looper.getMainLooper()).post(() -> {
+                        if (!isAdded() || generation != stremioLinkGeneration) return;
+                        dismissStremioLinkDialog();
+                        stremioLinkInProgress = false;
+                        enabled.setEnabled(true);
+                        account.setEnabled(true);
+                        Toast.makeText(requireContext(),
+                                error instanceof SecurityException
+                                        ? R.string.pref_stremio_account_store_failed
+                                        : R.string.pref_stremio_account_link_failed,
+                                Toast.LENGTH_LONG).show();
+                    });
+                }
+            });
+        }
+
+        private void cancelStremioAccountLink(
+                int generation,
+                SwitchPreferenceCompat enabled,
+                Preference account) {
+            synchronized (stremioLinkLock) {
+                if (generation != stremioLinkGeneration || !stremioLinkInProgress) return;
+                stremioLinkGeneration++;
+                stremioLinkInProgress = false;
+            }
+            stremioAccountClient.cancelAll();
+            enabled.setEnabled(true);
+            account.setEnabled(true);
+        }
+
+        private void dismissStremioLinkDialog() {
+            if (stremioLinkDialog == null) return;
+            stremioLinkDialog.setOnCancelListener(null);
+            stremioLinkDialog.dismiss();
+            stremioLinkDialog = null;
+        }
+
+        private void openStremioAccountLink(String url) {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            } catch (RuntimeException error) {
+                copyStremioAccountLink(url);
+            }
+        }
+
+        private void copyStremioAccountLink(String url) {
+            ClipboardManager clipboard = (ClipboardManager) requireContext()
+                    .getSystemService(Context.CLIPBOARD_SERVICE);
+            if (clipboard != null) {
+                clipboard.setPrimaryClip(ClipData.newPlainText("Stremio account link", url));
             }
         }
 

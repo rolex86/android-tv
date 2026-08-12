@@ -285,6 +285,19 @@
             app:title="@string/pref_stremio_connector_install" />
 
         <SwitchPreferenceCompat
+            app:key="stremioAccountSyncEnabled"
+            app:dependency="stremioConnectorEnabled"
+            app:defaultValue="false"
+            app:summaryOn="@string/pref_stremio_account_sync_on"
+            app:summaryOff="@string/pref_stremio_account_sync_off"
+            app:title="@string/pref_stremio_account_sync" />
+
+        <Preference
+            app:key="stremioAccountSyncAccount"
+            app:summary="@string/pref_stremio_account_missing"
+            app:title="@string/pref_stremio_account" />
+
+        <SwitchPreferenceCompat
             app:key="stremioAggregationEnabled"
             app:dependency="stremioConnectorEnabled"
             app:defaultValue="false"

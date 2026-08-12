@@ -270,6 +270,12 @@ public class PlayerActivity extends Activity {
     private boolean userInitiatedExit;
     private long resultPosition = C.TIME_UNSET;
     private long resultDuration = C.TIME_UNSET;
+    private final Runnable stremioAccountCheckpoint = () -> {
+        if (internalNextEpisodePlayback && player != null && player.isPlaying()) {
+            checkpointCurrentInternalEpisode(false);
+        }
+        scheduleStremioAccountCheckpoint();
+    };
     private AlertDialog exitDialog;
     private PlayerMessage nextEpisodePopupMessage;
     private int nextEpisodePopupScheduleGeneration;
@@ -295,6 +301,7 @@ public class PlayerActivity extends Activity {
         @Nullable final StremioConnectorStore.StreamFallback currentStream;
         @Nullable final MediaItem originalMediaItem;
         final long originalPositionMs;
+        final long originalDurationMs;
         final float originalVolume;
         final boolean originalPlayWhenReady;
         final long startPositionMs;
@@ -321,6 +328,7 @@ public class PlayerActivity extends Activity {
                 @Nullable StremioConnectorStore.StreamFallback currentStream,
                 @Nullable MediaItem originalMediaItem,
                 long originalPositionMs,
+                long originalDurationMs,
                 float originalVolume,
                 boolean originalPlayWhenReady,
                 long startPositionMs,
@@ -335,6 +343,7 @@ public class PlayerActivity extends Activity {
             this.currentStream = currentStream;
             this.originalMediaItem = originalMediaItem;
             this.originalPositionMs = originalPositionMs;
+            this.originalDurationMs = originalDurationMs;
             this.originalVolume = originalVolume;
             this.originalPlayWhenReady = originalPlayWhenReady;
             this.startPositionMs = startPositionMs;
@@ -457,6 +466,7 @@ public class PlayerActivity extends Activity {
         Utils.setOrientation(this, mPrefs.orientation);
 
         super.onCreate(savedInstanceState);
+        StremioAccountSyncCoordinator.flush(this);
         plusPreferences = android.preference.PreferenceManager
                 .getDefaultSharedPreferences(this);
         plusPreferences.registerOnSharedPreferenceChangeListener(plusPreferenceListener);
@@ -954,6 +964,7 @@ public class PlayerActivity extends Activity {
     protected void onPause() {
         super.onPause();
         savePlayer();
+        checkpointCurrentInternalEpisode(false);
     }
 
     @Override
@@ -969,6 +980,7 @@ public class PlayerActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        cancelStremioAccountCheckpoint();
         releaseAiSubtitleFeature(true);
         if (plusPreferences != null) {
             plusPreferences.unregisterOnSharedPreferenceChangeListener(plusPreferenceListener);
@@ -1713,6 +1725,7 @@ public class PlayerActivity extends Activity {
         cancelNextEpisodePopupMessage();
         cancelNextEpisodePopupWatchdog();
         cancelNextEpisodePrefetchMessage();
+        cancelStremioAccountCheckpoint();
         nextEpisodePrefetchRequested = false;
         nextEpisodeInfo = null;
         nextEpisodeDismissed = false;
@@ -2032,6 +2045,9 @@ public class PlayerActivity extends Activity {
                 retryTransition == null
                         ? Math.max(0L, player.getCurrentPosition())
                         : retryTransition.originalPositionMs,
+                retryTransition == null
+                        ? Math.max(0L, player.getDuration())
+                        : retryTransition.originalDurationMs,
                 retryTransition == null
                         ? player.getVolume() : retryTransition.originalVolume,
                 retryTransition == null
@@ -2419,6 +2435,15 @@ public class PlayerActivity extends Activity {
                 System.currentTimeMillis(),
                 transition.info.seriesTitle,
                 null);
+        // Accepting an internal continuation suppresses the Activity result below, including for
+        // the episode that originally came from Stremio. Account sync therefore owns the completed
+        // current episode from this point on; its default-off gate remains the final write guard.
+        StremioAccountSyncCoordinator.checkpoint(
+                this,
+                transition.info.current,
+                transition.originalPositionMs,
+                transition.originalDurationMs,
+                true);
         resetNextEpisodeSession();
         internalNextEpisodePlayback = true;
         // A later callback would describe a different episode than the Activity Stremio opened.
@@ -2431,6 +2456,7 @@ public class PlayerActivity extends Activity {
         audioSelectionExplicit = true;
         subtitleSelectionExplicit = true;
         play = true;
+        scheduleStremioAccountCheckpoint();
         externalDiagnostics.recordStremioConnector(
                 "next_episode_candidate_accepted",
                 transition.info.next.raw
@@ -2634,6 +2660,38 @@ public class PlayerActivity extends Activity {
                 System.currentTimeMillis(),
                 nextEpisodeInfo == null ? null : nextEpisodeInfo.seriesTitle,
                 null);
+        if (internalNextEpisodePlayback) {
+            checkpointCurrentInternalEpisode(true);
+        }
+    }
+
+    private void checkpointCurrentInternalEpisode(boolean completed) {
+        if (!internalNextEpisodePlayback || player == null) return;
+        StremioConnectorStore.Content content = stremioPlaybackContent;
+        if (content == null || content.episode == null) return;
+        long duration = player.getDuration();
+        if (duration == C.TIME_UNSET || duration <= 0L) return;
+        long position = player.isCurrentMediaItemSeekable()
+                ? Math.max(0L, player.getCurrentPosition()) : 0L;
+        StremioAccountSyncCoordinator.checkpoint(
+                this, content.episode, position, duration, completed);
+    }
+
+    private void scheduleStremioAccountCheckpoint() {
+        if (playerView == null) return;
+        playerView.removeCallbacks(stremioAccountCheckpoint);
+        if (internalNextEpisodePlayback
+                && StremioAccountSyncCoordinator.isEnabled(this)) {
+            playerView.postDelayed(
+                    stremioAccountCheckpoint,
+                    StremioAccountSyncCoordinator.CHECKPOINT_INTERVAL_MS);
+        }
+    }
+
+    private void cancelStremioAccountCheckpoint() {
+        if (playerView != null) {
+            playerView.removeCallbacks(stremioAccountCheckpoint);
+        }
     }
 
     private boolean isPlaybackComplete(long position, long duration) {
@@ -2727,6 +2785,8 @@ public class PlayerActivity extends Activity {
         snapshotPlaybackResult();
         if (playbackFinished) {
             recordCurrentEpisodeWatched();
+        } else {
+            checkpointCurrentInternalEpisode(false);
         }
         // Crossing the configured watched threshold must never turn an explicit Back action or
         // an explicit next-episode dismissal into automatic continuation in the calling app.
@@ -3048,6 +3108,7 @@ public class PlayerActivity extends Activity {
     }
 
     void resetApiAccess() {
+        cancelStremioAccountCheckpoint();
         cancelStartupSubtitlePreload();
         apiAccess = false;
         apiAccessPartial = false;
@@ -3617,6 +3678,7 @@ public class PlayerActivity extends Activity {
     public void releasePlayer(boolean save) {
         releaseAiSubtitleController();
         abandonAiSubtitleAttach();
+        cancelStremioAccountCheckpoint();
         cancelNextEpisodePopupMessage();
         cancelNextEpisodePopupWatchdog();
         cancelNextEpisodePrefetchMessage();
@@ -3782,6 +3844,7 @@ public class PlayerActivity extends Activity {
                 current,
                 currentItem,
                 positionMs,
+                Math.max(0L, player.getDuration()),
                 player.getVolume(),
                 resumePlayback,
                 positionMs,
@@ -3827,6 +3890,11 @@ public class PlayerActivity extends Activity {
         public void onIsPlayingChanged(boolean isPlaying) {
             playerView.setKeepScreenOn(isPlaying);
             updateExpectedEndTime();
+            if (isPlaying) {
+                scheduleStremioAccountCheckpoint();
+            } else if (player != null && !player.getPlayWhenReady()) {
+                checkpointCurrentInternalEpisode(false);
+            }
 
             if (Utils.isPiPSupported(PlayerActivity.this)) {
                 if (isPlaying) {

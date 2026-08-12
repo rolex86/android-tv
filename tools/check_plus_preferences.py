@@ -19,6 +19,18 @@ TEST_PATH = (
 OFFSET_TEST_PATH = TEST_PATH.with_name("OffsetSubtitleParserFactoryTest.java")
 END_TIME_TEST_PATH = TEST_PATH.with_name("PlaybackEndTimeTest.java")
 STREMIO_TEST_PATH = TEST_PATH.with_name("StremioNextEpisodeTest.java")
+STREMIO_ACCOUNT_SYNC_TEST_PATH = TEST_PATH.with_name("StremioAccountSyncTest.java")
+STREMIO_ACCOUNT_SYNC_COORDINATOR_PATH = (
+    APP / "java" / "com" / "brouken" / "player"
+    / "StremioAccountSyncCoordinator.java"
+)
+STREMIO_ACCOUNT_SYNC_WORKER_PATH = STREMIO_ACCOUNT_SYNC_COORDINATOR_PATH.with_name(
+    "StremioAccountSyncWorker.java"
+)
+STREMIO_BOOT_RECEIVER_PATH = STREMIO_ACCOUNT_SYNC_COORDINATOR_PATH.with_name(
+    "StremioConnectorBootReceiver.java"
+)
+APP_BUILD_PATH = ROOT / "just-player-plus" / "app" / "build.gradle"
 STREMIO_STREAM_TEST_PATH = TEST_PATH.with_name("StremioStreamPipelineTest.java")
 EXTERNAL_RESULT_TEST_PATH = TEST_PATH.with_name("ExternalPlaybackResultPolicyTest.java")
 STREMIO_AGGREGATION_PREFS_PATH = APP / "java" / "com" / "brouken" / "player" / "StremioAggregationPreferences.java"
@@ -73,6 +85,7 @@ runtime_anchors = {
     "KEY_COMPLETION_RULE": "mPlusPrefs.completionRule",
     "KEY_EXTERNAL_PLAYER_DIAGNOSTICS": "PlusPrefs.KEY_EXTERNAL_PLAYER_DIAGNOSTICS",
     "KEY_STREMIO_CONNECTOR_ENABLED": "mPlusPrefs.stremioConnectorEnabled",
+    "KEY_STREMIO_ACCOUNT_SYNC_ENABLED": "PlusPrefs.KEY_STREMIO_ACCOUNT_SYNC_ENABLED",
     "KEY_NEXT_EPISODE_NOTICE_SECONDS": "mPlusPrefs.nextEpisodeNoticeSeconds",
     "KEY_NEXT_EPISODE_POPUP_SIZE": "mPlusPrefs.nextEpisodePopupSize",
     "KEY_AI_SUBTITLES_ENABLED": "mPlusPrefs.aiSubtitlesEnabled",
@@ -294,6 +307,61 @@ else:
     ):
         if test_name not in stremio_tests:
             errors.append(f"Missing Stremio metadata regression test: {test_name}")
+
+if not STREMIO_ACCOUNT_SYNC_TEST_PATH.exists():
+    errors.append("Stremio account sync regression tests are missing")
+else:
+    account_sync_tests = STREMIO_ACCOUNT_SYNC_TEST_PATH.read_text(encoding="utf-8")
+    for test_name in (
+        "officialWatchedFieldRoundTripsAndPreservesExistingEpisodes",
+        "anchorOffsetSurvivesAChangedVideoPrefix",
+        "partialCheckpointChangesOnlyResumeState",
+        "completedCheckpointAddsOnlyTheTargetWatchedBit",
+        "newerServerProgressAcceptsRfc3339FractionsAndOffsets",
+    ):
+        if test_name not in account_sync_tests:
+            errors.append(f"Missing Stremio account sync regression test: {test_name}")
+
+if not STREMIO_ACCOUNT_SYNC_COORDINATOR_PATH.exists():
+    errors.append("Stremio account sync coordinator is missing")
+else:
+    account_sync_coordinator = STREMIO_ACCOUNT_SYNC_COORDINATOR_PATH.read_text(
+        encoding="utf-8"
+    )
+    for anchor in (
+        "NetworkType.CONNECTED",
+        "BackoffPolicy.EXPONENTIAL",
+        "ExistingWorkPolicy.REPLACE",
+        "ExistingWorkPolicy.KEEP",
+        "cancelUniqueWork(UNIQUE_WORK_NAME)",
+        "while (isEnabled(app))",
+        "queue.removeIfCurrent(checkpoint)",
+    ):
+        if anchor not in account_sync_coordinator:
+            errors.append(f"Missing durable Stremio retry hook: {anchor}")
+
+if not STREMIO_ACCOUNT_SYNC_WORKER_PATH.exists():
+    errors.append("Stremio account sync WorkManager worker is missing")
+else:
+    account_sync_worker = STREMIO_ACCOUNT_SYNC_WORKER_PATH.read_text(encoding="utf-8")
+    for anchor in (
+        "StremioAccountSyncCoordinator.drainQueue(getApplicationContext())",
+        "Result.success()",
+        "Result.retry()",
+        "StremioAccountSyncCoordinator.cancelCurrentAttempt()",
+    ):
+        if anchor not in account_sync_worker:
+            errors.append(f"Missing Stremio background worker hook: {anchor}")
+
+if not STREMIO_BOOT_RECEIVER_PATH.exists() or (
+    "StremioAccountSyncCoordinator.flush(context)"
+    not in STREMIO_BOOT_RECEIVER_PATH.read_text(encoding="utf-8")
+):
+    errors.append("Shield reboot must restore pending Stremio account sync work")
+
+app_build = APP_BUILD_PATH.read_text(encoding="utf-8")
+if "androidx.work:work-runtime:2.11.2" not in app_build:
+    errors.append("Stremio retry requires the audited WorkManager 2.11.2 runtime")
 
 if not AI_TEST_PATH.exists():
     errors.append("AI subtitle policy regression tests are missing")

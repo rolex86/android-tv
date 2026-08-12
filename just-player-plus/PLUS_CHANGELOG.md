@@ -1,5 +1,26 @@
 # JustPlayer Plus changelog
 
+## Step 28 — Optional Stremio account progress synchronization
+
+- Added a single default-off gate for synchronizing only episodes that continue inside JustPlayer
+  Plus and therefore cannot use Stremio's original external-player callback.
+- Account linking uses Stremio's one-time link flow; the resulting auth key is encrypted with a
+  non-exportable Android Keystore key in the no-backup directory and is never stored in preferences.
+- Read–modify–write synchronization preserves the complete current `libraryItem`, verifies a
+  second pre-write snapshot and rereads the server object after every update.
+- Completed episodes update the official anchored watched bitfield while preserving all existing
+  episode bits. Partial episodes update the exact video ID, resume position, duration and
+  `lastWatched` state without inferring watched time from seeks.
+- Added durable, credential-free retry checkpoints, 90-second in-player progress snapshots and
+  immediate snapshots on pause or exit. A network-constrained WorkManager task survives app and
+  device restarts and retries failed delivery with exponential backoff until the queue is verified
+  on the server. Disabling the gate cancels scheduled/running work and clears the queue.
+- Movies and a single Stremio-launched episode that exits without internal continuation remain on
+  the standard callback path. Once an internal continuation is accepted and that callback must be
+  suppressed, account sync records the completed current episode as well as every later episode.
+- Raised the application version code to 270; the Connector remains at `1.14.0` because its local
+  addon protocol is unchanged.
+
 ## Step 27 — Shield-safe in-player episode continuation
 
 - JustPlayer Plus now keeps the external-player activity alive and resolves the exact next series
