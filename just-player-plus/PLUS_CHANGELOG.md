@@ -15,6 +15,9 @@
   immediate snapshots on pause or exit. A network-constrained WorkManager task survives app and
   device restarts and retries failed delivery with exponential backoff until the queue is verified
   on the server. Disabling the gate cancels scheduled/running work and clears the queue.
+- Deferred WorkManager initialization and the startup queue flush until playback is actually
+  running, then moved Keystore and queue checks off the main thread. First media preparation is
+  now free of account-sync initialization and I/O.
 - Movies and a single Stremio-launched episode that exits without internal continuation remain on
   the standard callback path. Once an internal continuation is accepted and that callback must be
   suppressed, account sync records the completed current episode as well as every later episode.

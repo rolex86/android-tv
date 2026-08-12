@@ -30,6 +30,10 @@ STREMIO_ACCOUNT_SYNC_WORKER_PATH = STREMIO_ACCOUNT_SYNC_COORDINATOR_PATH.with_na
 STREMIO_BOOT_RECEIVER_PATH = STREMIO_ACCOUNT_SYNC_COORDINATOR_PATH.with_name(
     "StremioConnectorBootReceiver.java"
 )
+APPLICATION_PATH = STREMIO_ACCOUNT_SYNC_COORDINATOR_PATH.with_name(
+    "JustPlayerPlusApplication.java"
+)
+MANIFEST_PATH = APP / "AndroidManifest.xml"
 APP_BUILD_PATH = ROOT / "just-player-plus" / "app" / "build.gradle"
 STREMIO_STREAM_TEST_PATH = TEST_PATH.with_name("StremioStreamPipelineTest.java")
 EXTERNAL_RESULT_TEST_PATH = TEST_PATH.with_name("ExternalPlaybackResultPolicyTest.java")
@@ -333,12 +337,25 @@ else:
         "BackoffPolicy.EXPONENTIAL",
         "ExistingWorkPolicy.REPLACE",
         "ExistingWorkPolicy.KEEP",
+        "Executors.newSingleThreadExecutor",
+        "static void flushAsync(Context context)",
         "cancelUniqueWork(UNIQUE_WORK_NAME)",
         "while (isEnabled(app))",
         "queue.removeIfCurrent(checkpoint)",
     ):
         if anchor not in account_sync_coordinator:
             errors.append(f"Missing durable Stremio retry hook: {anchor}")
+
+if "StremioAccountSyncCoordinator.flush(this);" in player:
+    errors.append("Player startup must not synchronously flush the Stremio account queue")
+if player.count(
+    "StremioAccountSyncCoordinator.flushAsync(PlayerActivity.this)"
+) != 1:
+    errors.append(
+        "Stremio account queue must be flushed asynchronously once after playback starts"
+    )
+if "stremioAccountStartupFlushDispatched" not in player:
+    errors.append("Playback-start Stremio account flush is missing its one-shot gate")
 
 if not STREMIO_ACCOUNT_SYNC_WORKER_PATH.exists():
     errors.append("Stremio account sync WorkManager worker is missing")
@@ -362,6 +379,26 @@ if not STREMIO_BOOT_RECEIVER_PATH.exists() or (
 app_build = APP_BUILD_PATH.read_text(encoding="utf-8")
 if "androidx.work:work-runtime:2.11.2" not in app_build:
     errors.append("Stremio retry requires the audited WorkManager 2.11.2 runtime")
+
+manifest = MANIFEST_PATH.read_text(encoding="utf-8")
+if 'android:name=".JustPlayerPlusApplication"' not in manifest:
+    errors.append("WorkManager on-demand configuration Application is not registered")
+if (
+    'android:name="androidx.work.WorkManagerInitializer"' not in manifest
+    or 'tools:node="remove"' not in manifest
+):
+    errors.append("Default WorkManager cold-start initialization must remain disabled")
+if not APPLICATION_PATH.exists():
+    errors.append("WorkManager on-demand configuration Application is missing")
+else:
+    application = APPLICATION_PATH.read_text(encoding="utf-8")
+    for anchor in (
+        "implements Configuration.Provider",
+        "getWorkManagerConfiguration()",
+        "new Configuration.Builder().build()",
+    ):
+        if anchor not in application:
+            errors.append(f"Missing WorkManager on-demand initialization hook: {anchor}")
 
 if not AI_TEST_PATH.exists():
     errors.append("AI subtitle policy regression tests are missing")

@@ -270,6 +270,7 @@ public class PlayerActivity extends Activity {
     private boolean userInitiatedExit;
     private long resultPosition = C.TIME_UNSET;
     private long resultDuration = C.TIME_UNSET;
+    private boolean stremioAccountStartupFlushDispatched;
     private final Runnable stremioAccountCheckpoint = () -> {
         if (internalNextEpisodePlayback && player != null && player.isPlaying()) {
             checkpointCurrentInternalEpisode(false);
@@ -466,7 +467,6 @@ public class PlayerActivity extends Activity {
         Utils.setOrientation(this, mPrefs.orientation);
 
         super.onCreate(savedInstanceState);
-        StremioAccountSyncCoordinator.flush(this);
         plusPreferences = android.preference.PreferenceManager
                 .getDefaultSharedPreferences(this);
         plusPreferences.registerOnSharedPreferenceChangeListener(plusPreferenceListener);
@@ -2681,7 +2681,8 @@ public class PlayerActivity extends Activity {
         if (playerView == null) return;
         playerView.removeCallbacks(stremioAccountCheckpoint);
         if (internalNextEpisodePlayback
-                && StremioAccountSyncCoordinator.isEnabled(this)) {
+                && mPlusPrefs != null
+                && mPlusPrefs.stremioAccountSyncEnabled) {
             playerView.postDelayed(
                     stremioAccountCheckpoint,
                     StremioAccountSyncCoordinator.CHECKPOINT_INTERVAL_MS);
@@ -3891,6 +3892,10 @@ public class PlayerActivity extends Activity {
             playerView.setKeepScreenOn(isPlaying);
             updateExpectedEndTime();
             if (isPlaying) {
+                if (!stremioAccountStartupFlushDispatched) {
+                    stremioAccountStartupFlushDispatched = true;
+                    StremioAccountSyncCoordinator.flushAsync(PlayerActivity.this);
+                }
                 scheduleStremioAccountCheckpoint();
             } else if (player != null && !player.getPlayWhenReady()) {
                 checkpointCurrentInternalEpisode(false);
