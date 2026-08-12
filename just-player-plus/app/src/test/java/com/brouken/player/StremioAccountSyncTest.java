@@ -87,7 +87,6 @@ public class StremioAccountSyncTest {
         Set<String> changed = StremioLibraryItemPatch.changedPaths(before, updated);
         assertEquals(new java.util.HashSet<>(Arrays.asList(
                 "_mtime",
-                "state.duration",
                 "state.flaggedWatched",
                 "state.lastWatched",
                 "state.overallTimeWatched",
@@ -106,6 +105,7 @@ public class StremioAccountSyncTest {
                 0L,
                 300_000L,
                 1);
+        before.getJSONObject("state").put("flaggedWatched", 0);
         StremioLibraryItemPatch.Checkpoint checkpoint =
                 new StremioLibraryItemPatch.Checkpoint(
                         StremioEpisodeId.parse("tt10986410:1:2"),
