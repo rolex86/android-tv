@@ -195,4 +195,142 @@
         <item>percent_98</item>
         <item>remaining_5m</item>
     </string-array>
+
+    <string-array name="plus_stremio_sort_entries">
+        <item>Resolution, then interleave sources</item>
+        <item>Resolution, then source priority</item>
+        <item>Source priority, then resolution</item>
+        <item>Original order within each source</item>
+    </string-array>
+    <string-array name="plus_stremio_sort_values" translatable="false">
+        <item>quality_interleaved</item>
+        <item>quality_source</item>
+        <item>source_priority</item>
+        <item>original</item>
+    </string-array>
+
+    <string-array name="plus_stremio_size_sort_entries">
+        <item>Do not sort by size</item>
+        <item>Larger files first</item>
+        <item>Smaller files first</item>
+    </string-array>
+    <string-array name="plus_stremio_size_sort_values" translatable="false">
+        <item>none</item>
+        <item>larger</item>
+        <item>smaller</item>
+    </string-array>
+
+    <string-array name="plus_stremio_resolution_entries">
+        <item>4K / 2160p</item>
+        <item>Full HD / 1080p</item>
+        <item>HD / 720p</item>
+        <item>SD / 480p / 576p</item>
+        <item>Unknown resolution</item>
+    </string-array>
+    <string-array name="plus_stremio_resolution_values" translatable="false">
+        <item>2160p</item>
+        <item>1080p</item>
+        <item>720p</item>
+        <item>sd</item>
+        <item>unknown</item>
+    </string-array>
+
+    <string-array name="plus_stremio_stream_type_entries">
+        <item>Direct URL streams</item>
+        <item>Torrent infoHash streams</item>
+        <item>External links</item>
+    </string-array>
+    <string-array name="plus_stremio_stream_type_values" translatable="false">
+        <item>direct</item>
+        <item>torrent</item>
+        <item>external</item>
+    </string-array>
+
+    <string-array name="plus_stremio_bad_release_entries">
+        <item>CAM / CAMRip</item>
+        <item>TS / Telesync</item>
+        <item>TC / Telecine</item>
+        <item>SCR / Screener</item>
+        <item>3D / SBS / TAB</item>
+    </string-array>
+    <string-array name="plus_stremio_bad_release_values" translatable="false">
+        <item>cam</item>
+        <item>ts</item>
+        <item>tc</item>
+        <item>scr</item>
+        <item>3d</item>
+    </string-array>
+
+    <string-array name="plus_stremio_codec_entries">
+        <item>H.264 / AVC</item>
+        <item>HEVC / H.265</item>
+        <item>AV1</item>
+        <item>Other recognized codecs</item>
+    </string-array>
+    <string-array name="plus_stremio_codec_values" translatable="false">
+        <item>h264</item>
+        <item>hevc</item>
+        <item>av1</item>
+        <item>other</item>
+    </string-array>
+
+    <string-array name="plus_stremio_hdr_entries">
+        <item>SDR</item>
+        <item>HDR / HDR10</item>
+        <item>Dolby Vision</item>
+    </string-array>
+    <string-array name="plus_stremio_hdr_values" translatable="false">
+        <item>sdr</item>
+        <item>hdr</item>
+        <item>dv</item>
+    </string-array>
+
+    <string-array name="plus_stremio_deduplication_entries">
+        <item>Off</item>
+        <item>Safe — exact playback identity</item>
+        <item>Extended — also exact filename and size</item>
+    </string-array>
+    <string-array name="plus_stremio_deduplication_values" translatable="false">
+        <item>off</item>
+        <item>safe</item>
+        <item>extended</item>
+    </string-array>
+
+    <string-array name="plus_stremio_binge_entries">
+        <item>Same resolution across all sources</item>
+        <item>Same source at any resolution</item>
+        <item>Same source and resolution</item>
+        <item>Any aggregated stream</item>
+        <item>Keep the add-on binge group unchanged</item>
+    </string-array>
+    <string-array name="plus_stremio_binge_values" translatable="false">
+        <item>quality</item>
+        <item>source</item>
+        <item>source_quality</item>
+        <item>any</item>
+        <item>none</item>
+    </string-array>
+
+    <string-array name="plus_stremio_display_entries">
+        <item>Resolution</item>
+        <item>Languages</item>
+        <item>Codec</item>
+        <item>HDR / Dolby Vision</item>
+        <item>Audio format and channels</item>
+        <item>File size</item>
+        <item>Cached / ready state</item>
+        <item>Filename</item>
+        <item>Original add-on description</item>
+    </string-array>
+    <string-array name="plus_stremio_display_values" translatable="false">
+        <item>resolution</item>
+        <item>language</item>
+        <item>codec</item>
+        <item>hdr</item>
+        <item>audio</item>
+        <item>size</item>
+        <item>cached</item>
+        <item>filename</item>
+        <item>original</item>
+    </string-array>
 </resources>
