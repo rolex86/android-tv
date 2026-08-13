@@ -33,6 +33,8 @@ import okhttp3.ResponseBody;
 /** Generic bounded client for any upstream add-on implementing Stremio's stream resource. */
 final class StremioAddonClient {
     static final long SOURCE_TIMEOUT_MS = 8_000L;
+    static final long MIN_SOURCE_WAIT_MS = 3_000L;
+    static final long MAX_SOURCE_WAIT_MS = 30_000L;
     private static final int MAX_MANIFEST_BYTES = 1 * 1024 * 1024;
     private static final int MAX_STREAM_RESPONSE_BYTES = 4 * 1024 * 1024;
     private static final int MAX_STREAMS_PER_RESPONSE = 500;
@@ -71,8 +73,8 @@ final class StremioAddonClient {
     static OkHttpClient newHttpClient() {
         return new OkHttpClient.Builder()
                 .connectTimeout(4, TimeUnit.SECONDS)
-                .readTimeout(SOURCE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                .callTimeout(SOURCE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .readTimeout(MAX_SOURCE_WAIT_MS, TimeUnit.MILLISECONDS)
+                .callTimeout(MAX_SOURCE_WAIT_MS, TimeUnit.MILLISECONDS)
                 .retryOnConnectionFailure(false)
                 .build();
     }
@@ -97,13 +99,21 @@ final class StremioAddonClient {
             String manifestUrl,
             @Nullable StremioRequestCancellation cancellation,
             @Nullable StremioManifestCache.Entry validators) {
+        return loadManifest(manifestUrl, cancellation, validators, SOURCE_TIMEOUT_MS);
+    }
+
+    private ManifestDocument loadManifest(
+            String manifestUrl,
+            @Nullable StremioRequestCancellation cancellation,
+            @Nullable StremioManifestCache.Entry validators,
+            long timeoutMs) {
         HttpUrl url = parseManifestUrl(manifestUrl);
         if (url == null) {
             return new ManifestDocument(null, "invalid_url");
         }
         Request request = request(url, validators);
         Call call = httpClient.newCall(request);
-        call.timeout().timeout(SOURCE_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        call.timeout().timeout(timeoutMs, TimeUnit.MILLISECONDS);
         if (cancellation != null && !cancellation.register(call)) {
             return new ManifestDocument(null, "cancelled");
         }
@@ -151,14 +161,38 @@ final class StremioAddonClient {
     StreamResult loadStreams(StremioStreamSourceStore.Source source,
                              String type,
                              String id) {
-        return loadStreams(source, type, id, null);
+        return loadStreams(
+                source,
+                type,
+                id,
+                TimeUnit.SECONDS.toMillis(
+                        StremioAggregationPreferences.DEFAULT_SOURCE_WAIT_SECONDS),
+                null);
     }
 
     StreamResult loadStreams(StremioStreamSourceStore.Source source,
                              String type,
                              String id,
                              @Nullable StremioRequestCancellation cancellation) {
+        return loadStreams(
+                source,
+                type,
+                id,
+                TimeUnit.SECONDS.toMillis(
+                        StremioAggregationPreferences.DEFAULT_SOURCE_WAIT_SECONDS),
+                cancellation);
+    }
+
+    StreamResult loadStreams(StremioStreamSourceStore.Source source,
+                             String type,
+                             String id,
+                             long sourceWaitMs,
+                             @Nullable StremioRequestCancellation cancellation) {
         long startedAt = System.currentTimeMillis();
+        long boundedSourceWaitMs = Math.max(
+                MIN_SOURCE_WAIT_MS, Math.min(MAX_SOURCE_WAIT_MS, sourceWaitMs));
+        long deadlineNanos = System.nanoTime()
+                + TimeUnit.MILLISECONDS.toNanos(boundedSourceWaitMs);
         String cacheKey = streamCacheKey(source, type, id);
         StreamResult cachedResult = findStreamCache(
                 source, cacheKey, System.currentTimeMillis());
@@ -183,8 +217,16 @@ final class StremioAddonClient {
             return new StreamResult(source, Collections.emptyList(),
                     "manifest_cache_expired", elapsed(startedAt));
         } else {
+            long manifestTimeoutMs = remainingTimeoutMs(deadlineNanos);
+            if (manifestTimeoutMs <= 0L) {
+                return new StreamResult(source, Collections.emptyList(),
+                        "timeout", elapsed(startedAt));
+            }
             ManifestDocument document = loadManifest(
-                    source.manifestUrl, cancellation, null);
+                    source.manifestUrl,
+                    cancellation,
+                    null,
+                    manifestTimeoutMs);
             if (document.manifest == null) {
                 invalidateManifestOnHardFailure(source, document.state);
                 return new StreamResult(source, Collections.emptyList(),
@@ -215,8 +257,13 @@ final class StremioAddonClient {
                     "invalid_url", elapsed(startedAt));
         }
         Request request = request(streamUrl);
+        long remainingTimeoutMs = remainingTimeoutMs(deadlineNanos);
+        if (remainingTimeoutMs <= 0L) {
+            return new StreamResult(source, Collections.emptyList(),
+                    "timeout", elapsed(startedAt));
+        }
         Call call = httpClient.newCall(request);
-        call.timeout().timeout(SOURCE_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        call.timeout().timeout(remainingTimeoutMs, TimeUnit.MILLISECONDS);
         if (cancellation != null && !cancellation.register(call)) {
             return new StreamResult(source, Collections.emptyList(),
                     "cancelled", elapsed(startedAt));
@@ -270,6 +317,14 @@ final class StremioAddonClient {
                 cancellation.unregister(call);
             }
         }
+    }
+
+    private static long remainingTimeoutMs(long deadlineNanos) {
+        long remainingNanos = deadlineNanos - System.nanoTime();
+        if (remainingNanos <= 0L) {
+            return 0L;
+        }
+        return Math.max(1L, TimeUnit.NANOSECONDS.toMillis(remainingNanos));
     }
 
     void shutdown() {

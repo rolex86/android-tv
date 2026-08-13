@@ -30,7 +30,6 @@ import okhttp3.OkHttpClient;
 /** Runs all enabled upstream sources concurrently and never proxies the video itself. */
 final class StremioStreamAggregator {
     private static final String CACHE_SCHEMA = "upstream-relevance-v5";
-    static final long TOTAL_DEADLINE_MS = 9_000L;
     static final long DEGRADED_PROBE_GRACE_MS = 250L;
     private static final long COMPLETION_POLL_SLICE_MS = 100L;
     private static final long REGULAR_CACHE_AGE_MS = 30_000L;
@@ -344,7 +343,11 @@ final class StremioStreamAggregator {
                     () -> {
                         try {
                             StremioAddonClient.StreamResult result = addonClient.loadStreams(
-                                    source, request.type, request.id, cancellation);
+                                    source,
+                                    request.type,
+                                    request.id,
+                                    request.settings.sourceWaitMs(),
+                                    cancellation);
                             sourceHealthTracker.recordState(
                                     source, result.state, System.currentTimeMillis());
                             return result;
@@ -361,7 +364,7 @@ final class StremioStreamAggregator {
         }
 
         long deadlineNanos = startedAtNanos
-                + TimeUnit.MILLISECONDS.toNanos(TOTAL_DEADLINE_MS);
+                + TimeUnit.MILLISECONDS.toNanos(request.settings.sourceWaitMs());
         long degradedProbeDeadlineNanos = startedAtNanos
                 + TimeUnit.MILLISECONDS.toNanos(DEGRADED_PROBE_GRACE_MS);
         List<StremioStreamPipeline.SourceStreams> loaded = new ArrayList<>();
@@ -498,6 +501,7 @@ final class StremioStreamAggregator {
                 "aggregation_complete",
                 "configuredSources=" + request.allSources.size()
                         + " enabledSources=" + request.sources.size()
+                        + " sourceWaitSeconds=" + request.settings.sourceWaitSeconds
                         + " loadedSources=" + loaded.size() + ' '
                         + "failedSources=" + failedSources
                         + " complete=" + complete

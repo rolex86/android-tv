@@ -35,6 +35,8 @@
     <string name="pref_stremio_sources">Zdroje streamů</string>
     <string name="pref_stremio_sources_empty">Není nastaven žádný zdrojový doplněk</string>
     <string name="pref_stremio_sources_count">Nastaveno: %1$d · zapnuto: %2$d</string>
+    <string name="pref_stremio_source_wait">Čekání na zdroje (sekundy)</string>
+    <string name="pref_stremio_source_wait_summary">Maximální čekání na zdravé zdroje v jednom požadavku Connectoru</string>
     <string name="pref_stremio_sort">Řazení výsledků</string>
     <string name="pref_stremio_prefer_cached">Preferovat cached / ready streamy</string>
     <string name="pref_stremio_prefer_cached_summary">Použije se pouze tehdy, když doplněk stav jednoznačně uvede</string>

@@ -9,12 +9,14 @@ import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 /** Non-sensitive aggregation preferences. Manifest URLs live in StremioStreamSourceStore. */
 final class StremioAggregationPreferences {
     static final String KEY_ENABLED = "stremioAggregationEnabled";
     static final String KEY_CATEGORY = "stremioAggregationCategory";
     static final String KEY_SOURCES = "stremioAggregationSources";
+    static final String KEY_SOURCE_WAIT_SECONDS = "stremioAggregationSourceWaitSeconds";
     static final String KEY_SORT_MODE = "stremioAggregationSortMode";
     static final String KEY_PREFER_CACHED = "stremioAggregationPreferCached";
     static final String KEY_SIZE_SORT = "stremioAggregationSizeSort";
@@ -39,6 +41,10 @@ final class StremioAggregationPreferences {
     static final String KEY_DISPLAY_FIELDS = "stremioAggregationDisplayFields";
     static final String KEY_RESET = "stremioAggregationReset";
 
+    static final int MIN_SOURCE_WAIT_SECONDS = 3;
+    static final int MAX_SOURCE_WAIT_SECONDS = 30;
+    static final int DEFAULT_SOURCE_WAIT_SECONDS = 9;
+
     static final Set<String> DEFAULT_RESOLUTIONS = setOf(
             "2160p", "1080p", "720p", "sd", "unknown");
     static final Set<String> DEFAULT_STREAM_TYPES = setOf(
@@ -60,6 +66,8 @@ final class StremioAggregationPreferences {
     static Snapshot read(Context context) {
         SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
         return new Builder()
+                .setSourceWaitSeconds(preferences.getInt(
+                        KEY_SOURCE_WAIT_SECONDS, DEFAULT_SOURCE_WAIT_SECONDS))
                 .setSortMode(preferences.getString(KEY_SORT_MODE, "quality_interleaved"))
                 .setPreferCached(preferences.getBoolean(KEY_PREFER_CACHED, false))
                 .setSizeSort(preferences.getString(KEY_SIZE_SORT, "none"))
@@ -99,6 +107,7 @@ final class StremioAggregationPreferences {
 
     static void reset(Context context) {
         PreferenceManager.getDefaultSharedPreferences(context).edit()
+                .remove(KEY_SOURCE_WAIT_SECONDS)
                 .remove(KEY_SORT_MODE)
                 .remove(KEY_PREFER_CACHED)
                 .remove(KEY_SIZE_SORT)
@@ -179,6 +188,7 @@ final class StremioAggregationPreferences {
     }
 
     static final class Snapshot {
+        final int sourceWaitSeconds;
         final String sortMode;
         final boolean preferCached;
         final String sizeSort;
@@ -203,6 +213,7 @@ final class StremioAggregationPreferences {
         final Set<String> displayFields;
 
         Snapshot(Builder builder) {
+            sourceWaitSeconds = builder.sourceWaitSeconds;
             sortMode = builder.sortMode;
             preferCached = builder.preferCached;
             sizeSort = builder.sizeSort;
@@ -228,7 +239,8 @@ final class StremioAggregationPreferences {
         }
 
         String cacheKey() {
-            return sortMode + '|' + preferCached + '|' + sizeSort + '|'
+            return sourceWaitSeconds + "s|" + sortMode + '|'
+                    + preferCached + '|' + sizeSort + '|'
                     + preferredLanguages + '|' + resolutions + '|' + streamTypes + '|'
                     + blockedReleases + '|' + codecs + '|' + hdrFormats + '|'
                     + keepUnknownTech + '|' + allowedLanguages + '|'
@@ -238,12 +250,17 @@ final class StremioAggregationPreferences {
                     + bingeGroup + '|' + displayFields;
         }
 
+        long sourceWaitMs() {
+            return TimeUnit.SECONDS.toMillis(sourceWaitSeconds);
+        }
+
         private static Set<String> immutable(Set<String> value) {
             return Collections.unmodifiableSet(new LinkedHashSet<>(value));
         }
     }
 
     static final class Builder {
+        private int sourceWaitSeconds = DEFAULT_SOURCE_WAIT_SECONDS;
         private String sortMode = "quality_interleaved";
         private boolean preferCached;
         private String sizeSort = "none";
@@ -267,6 +284,10 @@ final class StremioAggregationPreferences {
         private String bingeGroup = "quality";
         private Set<String> displayFields = DEFAULT_DISPLAY_FIELDS;
 
+        Builder setSourceWaitSeconds(int value) {
+            sourceWaitSeconds = clampSourceWaitSeconds(value);
+            return this;
+        }
         Builder setSortMode(String value) { sortMode = safe(value, "quality_interleaved"); return this; }
         Builder setPreferCached(boolean value) { preferCached = value; return this; }
         Builder setSizeSort(String value) { sizeSort = safe(value, "none"); return this; }
@@ -294,5 +315,9 @@ final class StremioAggregationPreferences {
         private static String safe(String value, String fallback) {
             return value == null || value.isEmpty() ? fallback : value;
         }
+    }
+
+    static int clampSourceWaitSeconds(int value) {
+        return Math.max(MIN_SOURCE_WAIT_SECONDS, Math.min(MAX_SOURCE_WAIT_SECONDS, value));
     }
 }

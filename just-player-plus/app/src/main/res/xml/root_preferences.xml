@@ -362,6 +362,18 @@
             app:summary="@string/pref_stremio_sources_empty"
             app:title="@string/pref_stremio_sources" />
 
+        <SeekBarPreference
+            app:key="stremioAggregationSourceWaitSeconds"
+            app:adjustable="true"
+            app:defaultValue="9"
+            app:max="30"
+            app:min="3"
+            app:seekBarIncrement="1"
+            app:showSeekBarValue="true"
+            app:summary="@string/pref_stremio_source_wait_summary"
+            app:title="@string/pref_stremio_source_wait"
+            app:updatesContinuously="true" />
+
         <ListPreference
             app:key="stremioAggregationSortMode"
             app:defaultValue="quality_interleaved"

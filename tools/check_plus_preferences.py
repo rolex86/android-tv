@@ -502,6 +502,7 @@ if "AiSubtitlePreferences.KEY_API_TOKEN" not in external_java:
 aggregation_keys = (
     "stremioAggregationEnabled",
     "stremioAggregationSources",
+    "stremioAggregationSourceWaitSeconds",
     "stremioAggregationSortMode",
     "stremioAggregationPreferCached",
     "stremioAggregationSizeSort",
@@ -537,6 +538,18 @@ else:
             errors.append(
                 f"Aggregation preference must occur once in XML: {aggregation_key}"
             )
+
+for source_wait_hook in (
+    'app:min="3"',
+    'app:max="30"',
+    'app:defaultValue="9"',
+    'app:seekBarIncrement="1"',
+    'app:updatesContinuously="true"',
+    "request.settings.sourceWaitMs()",
+    "remainingTimeoutMs(deadlineNanos)",
+):
+    if source_wait_hook not in preferences_xml + external_java:
+        errors.append(f"Missing configurable source-wait hook: {source_wait_hook}")
 
 for aggregation_hook in (
     "StremioAggregationPreferences.isEnabled(this)",
@@ -609,6 +622,7 @@ else:
     connector_tests = STREMIO_CONNECTOR_TEST_PATH.read_text(encoding="utf-8")
     for test_name in (
         "foregroundAwaitsEveryHealthySourceButBackgroundsDegradedSources",
+        "sourceWaitDefaultsToNineSecondsAndStaysWithinTvSliderRange",
         "sourceHealthRecoversOnSuccessAndDoesNotFollowAnEditedUrl",
         "manifestCacheUsesOneHourFreshAnd24HourStaleWindows",
         "manifestCachePersistsRoutingButNoUrlsOrArbitraryFields",

@@ -140,8 +140,29 @@ public class StremioConnectorServiceTest {
         assertFalse(StremioStreamAggregator.shouldAwaitSource(true, true));
         assertTrue(StremioStreamAggregator.shouldAwaitSource(false, false));
         assertTrue(StremioStreamAggregator.shouldAwaitSource(false, true));
-        assertEquals(9_000L, StremioStreamAggregator.TOTAL_DEADLINE_MS);
         assertEquals(250L, StremioStreamAggregator.DEGRADED_PROBE_GRACE_MS);
+    }
+
+    @Test
+    public void sourceWaitDefaultsToNineSecondsAndStaysWithinTvSliderRange() {
+        StremioAggregationPreferences.Snapshot defaults =
+                new StremioAggregationPreferences.Builder().build();
+        StremioAggregationPreferences.Snapshot minimum =
+                new StremioAggregationPreferences.Builder()
+                        .setSourceWaitSeconds(-1)
+                        .build();
+        StremioAggregationPreferences.Snapshot maximum =
+                new StremioAggregationPreferences.Builder()
+                        .setSourceWaitSeconds(100)
+                        .build();
+
+        assertEquals(9, defaults.sourceWaitSeconds);
+        assertEquals(9_000L, defaults.sourceWaitMs());
+        assertEquals(3, minimum.sourceWaitSeconds);
+        assertEquals(30, maximum.sourceWaitSeconds);
+        assertFalse(defaults.cacheKey().equals(maximum.cacheKey()));
+        assertEquals(3_000L, StremioAddonClient.MIN_SOURCE_WAIT_MS);
+        assertEquals(30_000L, StremioAddonClient.MAX_SOURCE_WAIT_MS);
     }
 
     @Test

@@ -1,5 +1,19 @@
 # JustPlayer Plus changelog
 
+## Step 33 — Make the Connector source wait configurable on TV
+
+- Added a TV-friendly source-wait slider to the aggregation settings with a range of 3–30 seconds,
+  one-second remote-control steps and the existing nine-second behavior as its default.
+- Persist each slider step immediately. A running lookup keeps the snapshot it started with, while
+  the next lookup uses the new value without requiring the user to leave the settings row.
+- Apply the selected value to both the overall aggregation deadline and the bounded upstream stream
+  request, including a cold manifest lookup, so increasing the slider genuinely allows a slow
+  healthy source more time without creating an unbounded request.
+- Include the selected wait in aggregation cache identity and Connector diagnostics so changing the
+  value cannot reuse a partial response produced under a different deadline and remains auditable.
+- Raised the application version code to 275; the Connector remains at `1.14.0` because its local
+  add-on protocol and response schema are unchanged.
+
 ## Step 32 — Let slow Connector sources finish without blocking on broken ones
 
 - Removed the 1.5-second post-result cutoff. Every healthy enabled source can now use the normal
