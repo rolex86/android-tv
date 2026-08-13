@@ -1,5 +1,28 @@
 # JustPlayer Plus changelog
 
+## Step 32 — Let slow Connector sources finish without blocking on broken ones
+
+- Removed the 1.5-second post-result cutoff. Every healthy enabled source can now use the normal
+  nine-second aggregation window, so a fast add-on no longer suppresses slower Torrentio-like
+  results merely by finishing first.
+- Added a two-minute in-memory circuit breaker per source and manifest URL. A source that times out
+  or fails is still queried on later requests, but outside the foreground critical path; any clean
+  background result immediately restores it to normal waiting.
+- Let unfinished source calls continue within their own bounded HTTP timeout instead of cancelling
+  them when the foreground response is ready. Their exact stream response is cached briefly, so a
+  later lookup can include results that completed after the current Stremio response was returned.
+- Added a persistent routing-only manifest cache. A validated manifest is fresh for one hour, can
+  be used while it is revalidated in the background for at most 24 hours, and supports conditional
+  `ETag` / `Last-Modified` requests when the add-on supplies validators.
+- Manifest URL changes select a different cache fingerprint. Definitive `401`, `403`, `404` and
+  `410` responses, or a valid manifest without a stream resource, invalidate the cached route;
+  timeouts, throttling and server failures retain only the bounded stale fallback.
+- Kept incomplete aggregate responses on a one-second cache while complete responses retain the
+  existing 30-second cache. Protected next-episode prefetch still requires every source to finish
+  cleanly before it is persisted.
+- Raised the application version code to 274; the Connector remains at `1.14.0` because its local
+  add-on protocol and response schema are unchanged.
+
 ## Step 31 — Isolate stalled Connector sources
 
 - Kept all enabled stream add-ons concurrent, but once a foreground request has at least one

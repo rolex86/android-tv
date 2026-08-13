@@ -1,5 +1,7 @@
 package com.brouken.player;
 
+import android.content.Context;
+
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
@@ -12,6 +14,13 @@ import java.io.InterruptedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.Call;
@@ -27,11 +36,36 @@ final class StremioAddonClient {
     private static final int MAX_MANIFEST_BYTES = 1 * 1024 * 1024;
     private static final int MAX_STREAM_RESPONSE_BYTES = 4 * 1024 * 1024;
     private static final int MAX_STREAMS_PER_RESPONSE = 500;
+    private static final long STREAM_CACHE_AGE_MS = 30_000L;
+    private static final int MAX_STREAM_CACHE_ENTRIES = 64;
 
     private final OkHttpClient httpClient;
+    @Nullable private final StremioManifestCache manifestCache;
+    @Nullable private final ExecutorService manifestRefreshExecutor;
+    private final Set<String> manifestRefreshes = Collections.newSetFromMap(
+            new ConcurrentHashMap<String, Boolean>());
+    private final ConcurrentHashMap<String, StreamCacheEntry> streamCache =
+            new ConcurrentHashMap<>();
 
     StremioAddonClient(OkHttpClient httpClient) {
         this.httpClient = httpClient;
+        manifestCache = null;
+        manifestRefreshExecutor = null;
+    }
+
+    StremioAddonClient(Context context, OkHttpClient httpClient) {
+        this.httpClient = httpClient;
+        manifestCache = new StremioManifestCache(context);
+        manifestRefreshExecutor = Executors.newFixedThreadPool(2, new ThreadFactory() {
+            private int index;
+
+            @Override
+            public synchronized Thread newThread(@NonNull Runnable task) {
+                Thread thread = new Thread(task, "stremio-manifest-refresh-" + (++index));
+                thread.setDaemon(true);
+                return thread;
+            }
+        });
     }
 
     static OkHttpClient newHttpClient() {
@@ -44,7 +78,7 @@ final class StremioAddonClient {
     }
 
     ManifestResult inspectManifest(String manifestUrl) {
-        ManifestDocument document = loadManifest(manifestUrl, null);
+        ManifestDocument document = loadManifest(manifestUrl, null, null);
         if (document.manifest == null) {
             return new ManifestResult(false, "", document.state);
         }
@@ -61,18 +95,26 @@ final class StremioAddonClient {
 
     private ManifestDocument loadManifest(
             String manifestUrl,
-            @Nullable StremioRequestCancellation cancellation) {
+            @Nullable StremioRequestCancellation cancellation,
+            @Nullable StremioManifestCache.Entry validators) {
         HttpUrl url = parseManifestUrl(manifestUrl);
         if (url == null) {
             return new ManifestDocument(null, "invalid_url");
         }
-        Request request = request(url);
+        Request request = request(url, validators);
         Call call = httpClient.newCall(request);
         call.timeout().timeout(SOURCE_TIMEOUT_MS, TimeUnit.MILLISECONDS);
         if (cancellation != null && !cancellation.register(call)) {
             return new ManifestDocument(null, "cancelled");
         }
         try (Response response = call.execute()) {
+            if (response.code() == 304 && validators != null) {
+                return new ManifestDocument(
+                        null,
+                        "not_modified",
+                        response.header("ETag"),
+                        response.header("Last-Modified"));
+            }
             if (!response.isSuccessful()) {
                 return new ManifestDocument(null, "http_" + response.code());
             }
@@ -82,7 +124,11 @@ final class StremioAddonClient {
             }
             JSONObject manifest = new JSONObject(
                     BoundedResponseBody.readUtf8(body, MAX_MANIFEST_BYTES));
-            return new ManifestDocument(manifest, "loaded");
+            return new ManifestDocument(
+                    manifest,
+                    "loaded",
+                    response.header("ETag"),
+                    response.header("Last-Modified"));
         } catch (InterruptedIOException error) {
             return new ManifestDocument(null,
                     call.isCanceled()
@@ -113,12 +159,52 @@ final class StremioAddonClient {
                              String id,
                              @Nullable StremioRequestCancellation cancellation) {
         long startedAt = System.currentTimeMillis();
-        ManifestDocument document = loadManifest(source.manifestUrl, cancellation);
-        if (document.manifest == null) {
-            return new StreamResult(source, Collections.emptyList(),
-                    "manifest_" + document.state, elapsed(startedAt));
+        String cacheKey = streamCacheKey(source, type, id);
+        StreamResult cachedResult = findStreamCache(
+                source, cacheKey, System.currentTimeMillis());
+        if (cachedResult != null) {
+            return cachedResult;
         }
-        String support = streamSupport(document.manifest, type, id);
+
+        JSONObject manifest;
+        long nowMs = System.currentTimeMillis();
+        StremioManifestCache.Entry cachedManifest = manifestCache == null
+                ? null : manifestCache.find(source);
+        if (cachedManifest != null
+                && StremioManifestCache.isFresh(cachedManifest.validatedAtMs, nowMs)) {
+            manifest = cachedManifest.manifest;
+        } else if (cachedManifest != null
+                && StremioManifestCache.isUsableStale(
+                        cachedManifest.validatedAtMs, nowMs)) {
+            scheduleManifestRefresh(source, cachedManifest);
+            manifest = cachedManifest.manifest;
+        } else if (cachedManifest != null) {
+            scheduleManifestRefresh(source, cachedManifest);
+            return new StreamResult(source, Collections.emptyList(),
+                    "manifest_cache_expired", elapsed(startedAt));
+        } else {
+            ManifestDocument document = loadManifest(
+                    source.manifestUrl, cancellation, null);
+            if (document.manifest == null) {
+                invalidateManifestOnHardFailure(source, document.state);
+                return new StreamResult(source, Collections.emptyList(),
+                        "manifest_" + document.state, elapsed(startedAt));
+            }
+            manifest = document.manifest;
+            if (hasStreamResource(manifest)) {
+                if (manifestCache != null) {
+                    manifestCache.replace(
+                            source,
+                            manifest,
+                            document.etag,
+                            document.lastModified,
+                            System.currentTimeMillis());
+                }
+            } else if (manifestCache != null) {
+                manifestCache.invalidate(source);
+            }
+        }
+        String support = streamSupport(manifest, type, id);
         if (!"supported".equals(support)) {
             return new StreamResult(source, Collections.emptyList(),
                     support, elapsed(startedAt));
@@ -160,7 +246,10 @@ final class StremioAddonClient {
                     parsed.add(stream);
                 }
             }
-            return new StreamResult(source, parsed, "loaded", elapsed(startedAt));
+            StreamResult result = new StreamResult(
+                    source, parsed, "loaded", elapsed(startedAt));
+            putStreamCache(cacheKey, result, System.currentTimeMillis());
+            return result;
         } catch (InterruptedIOException error) {
             return new StreamResult(source, Collections.emptyList(),
                     call.isCanceled()
@@ -180,6 +269,14 @@ final class StremioAddonClient {
             if (cancellation != null) {
                 cancellation.unregister(call);
             }
+        }
+    }
+
+    void shutdown() {
+        streamCache.clear();
+        manifestRefreshes.clear();
+        if (manifestRefreshExecutor != null) {
+            manifestRefreshExecutor.shutdownNow();
         }
     }
 
@@ -224,14 +321,28 @@ final class StremioAddonClient {
     }
 
     private static Request request(HttpUrl url) {
-        return new Request.Builder()
-                .url(url)
-                .header("Accept", "application/json")
-                .header("User-Agent", "JustPlayer Plus Connector")
-                .build();
+        return request(url, null);
     }
 
-    private static boolean hasStreamResource(JSONObject manifest) {
+    private static Request request(
+            HttpUrl url,
+            @Nullable StremioManifestCache.Entry validators) {
+        Request.Builder builder = new Request.Builder()
+                .url(url)
+                .header("Accept", "application/json")
+                .header("User-Agent", "JustPlayer Plus Connector");
+        if (validators != null) {
+            if (validators.etag != null) {
+                builder.header("If-None-Match", validators.etag);
+            }
+            if (validators.lastModified != null) {
+                builder.header("If-Modified-Since", validators.lastModified);
+            }
+        }
+        return builder.build();
+    }
+
+    static boolean hasStreamResource(JSONObject manifest) {
         JSONArray resources = manifest.optJSONArray("resources");
         if (resources == null) {
             return false;
@@ -247,6 +358,130 @@ final class StremioAddonClient {
             }
         }
         return false;
+    }
+
+    private void scheduleManifestRefresh(
+            StremioStreamSourceStore.Source source,
+            StremioManifestCache.Entry cached) {
+        if (manifestCache == null || manifestRefreshExecutor == null) {
+            return;
+        }
+        String refreshKey = source.id + '|'
+                + StremioManifestCache.fingerprint(source.manifestUrl);
+        if (!manifestRefreshes.add(refreshKey)) {
+            return;
+        }
+        try {
+            manifestRefreshExecutor.execute(() -> {
+                try {
+                    ManifestDocument document = loadManifest(
+                            source.manifestUrl, null, cached);
+                    long refreshedAtMs = System.currentTimeMillis();
+                    if ("not_modified".equals(document.state)) {
+                        manifestCache.touch(
+                                source,
+                                cached,
+                                document.etag,
+                                document.lastModified,
+                                refreshedAtMs);
+                    } else if (document.manifest != null) {
+                        if (hasStreamResource(document.manifest)) {
+                            manifestCache.replace(
+                                    source,
+                                    document.manifest,
+                                    document.etag,
+                                    document.lastModified,
+                                    refreshedAtMs);
+                        } else {
+                            manifestCache.invalidate(source);
+                        }
+                    } else {
+                        invalidateManifestOnHardFailure(source, document.state);
+                    }
+                } finally {
+                    manifestRefreshes.remove(refreshKey);
+                }
+            });
+        } catch (RejectedExecutionException error) {
+            manifestRefreshes.remove(refreshKey);
+        }
+    }
+
+    private void invalidateManifestOnHardFailure(
+            StremioStreamSourceStore.Source source,
+            String state) {
+        if (manifestCache != null && isHardManifestFailure(state)) {
+            manifestCache.invalidate(source);
+        }
+    }
+
+    static boolean isHardManifestFailure(String state) {
+        return "http_401".equals(state)
+                || "http_403".equals(state)
+                || "http_404".equals(state)
+                || "http_410".equals(state);
+    }
+
+    @Nullable
+    private StreamResult findStreamCache(
+            StremioStreamSourceStore.Source source,
+            String key,
+            long nowMs) {
+        StreamCacheEntry entry = streamCache.get(key);
+        if (entry == null) {
+            return null;
+        }
+        if (entry.createdAtMs < 0L
+                || nowMs < entry.createdAtMs
+                || nowMs - entry.createdAtMs > STREAM_CACHE_AGE_MS) {
+            streamCache.remove(key, entry);
+            return null;
+        }
+        return new StreamResult(
+                source, copyStreams(entry.streams), "loaded", 0L);
+    }
+
+    private void putStreamCache(String key, StreamResult result, long createdAtMs) {
+        if (!"loaded".equals(result.state)) {
+            return;
+        }
+        if (streamCache.size() >= MAX_STREAM_CACHE_ENTRIES
+                && !streamCache.containsKey(key)) {
+            String oldestKey = null;
+            long oldestTimestamp = Long.MAX_VALUE;
+            for (Map.Entry<String, StreamCacheEntry> entry : streamCache.entrySet()) {
+                if (entry.getValue().createdAtMs < oldestTimestamp) {
+                    oldestTimestamp = entry.getValue().createdAtMs;
+                    oldestKey = entry.getKey();
+                }
+            }
+            if (oldestKey != null) {
+                streamCache.remove(oldestKey);
+            }
+        }
+        streamCache.put(key, new StreamCacheEntry(
+                copyStreams(result.streams), createdAtMs));
+    }
+
+    private static String streamCacheKey(
+            StremioStreamSourceStore.Source source,
+            String type,
+            String id) {
+        return source.id + '|'
+                + StremioManifestCache.fingerprint(source.manifestUrl)
+                + '|' + type + '|' + id;
+    }
+
+    private static List<JSONObject> copyStreams(List<JSONObject> streams) {
+        List<JSONObject> copied = new ArrayList<>();
+        for (JSONObject stream : streams) {
+            try {
+                copied.add(new JSONObject(stream.toString()));
+            } catch (JSONException ignored) {
+                // A parsed object can only fail here if it was concurrently corrupted.
+            }
+        }
+        return copied;
     }
 
     /** Applies the same manifest resource/type/id-prefix routing described by the Stremio SDK. */
@@ -343,10 +578,32 @@ final class StremioAddonClient {
     private static final class ManifestDocument {
         @Nullable final JSONObject manifest;
         @NonNull final String state;
+        @Nullable final String etag;
+        @Nullable final String lastModified;
 
         ManifestDocument(@Nullable JSONObject manifest, String state) {
+            this(manifest, state, null, null);
+        }
+
+        ManifestDocument(
+                @Nullable JSONObject manifest,
+                String state,
+                @Nullable String etag,
+                @Nullable String lastModified) {
             this.manifest = manifest;
             this.state = state;
+            this.etag = etag;
+            this.lastModified = lastModified;
+        }
+    }
+
+    private static final class StreamCacheEntry {
+        @NonNull final List<JSONObject> streams;
+        final long createdAtMs;
+
+        StreamCacheEntry(List<JSONObject> streams, long createdAtMs) {
+            this.streams = streams;
+            this.createdAtMs = createdAtMs;
         }
     }
 

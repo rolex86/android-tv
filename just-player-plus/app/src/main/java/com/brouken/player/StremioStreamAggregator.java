@@ -31,9 +31,10 @@ import okhttp3.OkHttpClient;
 final class StremioStreamAggregator {
     private static final String CACHE_SCHEMA = "upstream-relevance-v5";
     static final long TOTAL_DEADLINE_MS = 9_000L;
-    static final long FOREGROUND_RESULT_GRACE_MS = 1_500L;
+    static final long DEGRADED_PROBE_GRACE_MS = 250L;
     private static final long COMPLETION_POLL_SLICE_MS = 100L;
     private static final long REGULAR_CACHE_AGE_MS = 30_000L;
+    private static final long PARTIAL_CACHE_AGE_MS = 1_000L;
     private static final int MAX_CACHE_ENTRIES = 32;
 
     private final android.content.Context context;
@@ -42,6 +43,8 @@ final class StremioStreamAggregator {
     private final ExternalPlayerDiagnostics diagnostics;
     private final OkHttpClient httpClient;
     private final StremioAddonClient addonClient;
+    private final StremioSourceHealthTracker sourceHealthTracker =
+            new StremioSourceHealthTracker();
     private final ExecutorService aggregationExecutor;
     private final ExecutorService sourceExecutor;
     private final ConcurrentHashMap<String, CacheEntry> cache = new ConcurrentHashMap<>();
@@ -58,7 +61,7 @@ final class StremioStreamAggregator {
         protectedPrefetchCache = new StremioProtectedPrefetchCache(this.context);
         this.diagnostics = diagnostics;
         httpClient = StremioAddonClient.newHttpClient();
-        addonClient = new StremioAddonClient(httpClient);
+        addonClient = new StremioAddonClient(this.context, httpClient);
         aggregationExecutor = Executors.newCachedThreadPool(
                 namedThreadFactory("stremio-aggregation-"));
         sourceExecutor = Executors.newCachedThreadPool(
@@ -225,6 +228,8 @@ final class StremioStreamAggregator {
             protectedPrefetchKey = null;
         }
         cache.clear();
+        sourceHealthTracker.clear();
+        addonClient.shutdown();
         aggregationExecutor.shutdownNow();
         sourceExecutor.shutdownNow();
         httpClient.dispatcher().cancelAll();
@@ -320,41 +325,72 @@ final class StremioStreamAggregator {
         RequestSnapshot request = task.request;
         StremioRequestCancellation cancellation = task.cancellation;
         long startedAt = System.currentTimeMillis();
+        long startedAtNanos = System.nanoTime();
         CompletionService<StremioAddonClient.StreamResult> completion =
                 new ExecutorCompletionService<>(sourceExecutor);
-        List<Future<StremioAddonClient.StreamResult>> futures = new ArrayList<>();
-        Map<Future<StremioAddonClient.StreamResult>, StremioStreamSourceStore.Source>
-                futureSources = new HashMap<>();
-        Map<String, Integer> priorities = new HashMap<>();
+        List<SourceCall> sourceCalls = new ArrayList<>();
+        Map<Future<StremioAddonClient.StreamResult>, SourceCall> futureSources =
+                new HashMap<>();
+        int requiredRemaining = 0;
         for (int index = 0; index < request.sources.size(); index++) {
             StremioStreamSourceStore.Source source = request.sources.get(index);
-            priorities.put(source.id, index);
+            boolean degradedAtStart = sourceHealthTracker.isDegraded(
+                    source, System.currentTimeMillis());
+            SourceCall sourceCall = new SourceCall(source, index, degradedAtStart);
+            if (!degradedAtStart) {
+                requiredRemaining++;
+            }
             Callable<StremioAddonClient.StreamResult> sourceTask =
-                    () -> addonClient.loadStreams(
-                            source, request.type, request.id, cancellation);
+                    () -> {
+                        try {
+                            StremioAddonClient.StreamResult result = addonClient.loadStreams(
+                                    source, request.type, request.id, cancellation);
+                            sourceHealthTracker.recordState(
+                                    source, result.state, System.currentTimeMillis());
+                            return result;
+                        } catch (RuntimeException error) {
+                            sourceHealthTracker.recordState(
+                                    source, "exception", System.currentTimeMillis());
+                            throw error;
+                        }
+                    };
             Future<StremioAddonClient.StreamResult> future = completion.submit(sourceTask);
-            futures.add(future);
-            futureSources.put(future, source);
+            sourceCall.future = future;
+            sourceCalls.add(sourceCall);
+            futureSources.put(future, sourceCall);
         }
 
-        long deadlineNanos = System.nanoTime()
+        long deadlineNanos = startedAtNanos
                 + TimeUnit.MILLISECONDS.toNanos(TOTAL_DEADLINE_MS);
-        long firstUsableResultNanos = 0L;
+        long degradedProbeDeadlineNanos = startedAtNanos
+                + TimeUnit.MILLISECONDS.toNanos(DEGRADED_PROBE_GRACE_MS);
         List<StremioStreamPipeline.SourceStreams> loaded = new ArrayList<>();
-        int remaining = futures.size();
+        int remaining = sourceCalls.size();
+        int completedSources = 0;
         int failedSources = 0;
         String stopReason = "all_sources";
         try {
             while (remaining > 0 && !cancellation.isCancelled()) {
                 long nowNanos = System.nanoTime();
-                long effectiveDeadlineNanos = effectiveDeadlineNanos(
-                        deadlineNanos,
-                        firstUsableResultNanos,
-                        task.foregroundRequested);
+                if (task.foregroundRequested && requiredRemaining <= 0) {
+                    boolean allowShortProbe = completedSources == 0
+                            && nowNanos < degradedProbeDeadlineNanos;
+                    if (!allowShortProbe) {
+                        stopReason = "degraded_sources_background";
+                        break;
+                    }
+                }
+                long effectiveDeadlineNanos = deadlineNanos;
+                if (task.foregroundRequested
+                        && requiredRemaining <= 0
+                        && completedSources == 0) {
+                    effectiveDeadlineNanos = Math.min(
+                            deadlineNanos, degradedProbeDeadlineNanos);
+                }
                 long waitNanos = effectiveDeadlineNanos - nowNanos;
                 if (waitNanos <= 0L) {
                     stopReason = effectiveDeadlineNanos < deadlineNanos
-                            ? "foreground_grace" : "total_deadline";
+                            ? "degraded_sources_background" : "total_deadline";
                     break;
                 }
                 Future<StremioAddonClient.StreamResult> future =
@@ -367,7 +403,16 @@ final class StremioStreamAggregator {
                 if (future == null) {
                     continue;
                 }
+                SourceCall sourceCall = futureSources.get(future);
+                if (sourceCall == null || sourceCall.completed) {
+                    continue;
+                }
+                sourceCall.completed = true;
                 remaining--;
+                completedSources++;
+                if (!sourceCall.degradedAtStart) {
+                    requiredRemaining = Math.max(0, requiredRemaining - 1);
+                }
                 StremioAddonClient.StreamResult result;
                 try {
                     result = future.get();
@@ -375,20 +420,16 @@ final class StremioStreamAggregator {
                     if (!cancellation.isCancelled()) {
                         failedSources++;
                         recordSourceTaskFailure(
-                                futureSources.get(future), "cancelled", error);
+                                sourceCall.source, "cancelled", error);
                     }
                     continue;
                 } catch (ExecutionException error) {
                     failedSources++;
                     Throwable cause = error.getCause();
                     recordSourceTaskFailure(
-                            futureSources.get(future),
+                            sourceCall.source,
                             "exception",
                             cause == null ? error : cause);
-                    continue;
-                }
-                Integer priority = priorities.get(result.source.id);
-                if (priority == null) {
                     continue;
                 }
                 diagnostics.recordStremioConnector(
@@ -398,12 +439,7 @@ final class StremioStreamAggregator {
                                 + " durationMs=" + result.durationMs);
                 if ("loaded".equals(result.state)) {
                     loaded.add(new StremioStreamPipeline.SourceStreams(
-                            result.source, result.streams, priority));
-                    if (firstUsableResultNanos == 0L
-                            && startsForegroundGrace(
-                                    result.state, result.streams.size())) {
-                        firstUsableResultNanos = System.nanoTime();
-                    }
+                            result.source, result.streams, sourceCall.priority));
                 } else if (!isCompleteSourceState(result.state)) {
                     failedSources++;
                 }
@@ -426,22 +462,23 @@ final class StremioStreamAggregator {
                     "loadedSources=" + loaded.size()
                             + " remainingSources=" + remaining
                             + " error=" + error.getClass().getSimpleName());
-        } finally {
-            for (int index = 0; index < futures.size(); index++) {
-                Future<StremioAddonClient.StreamResult> future = futures.get(index);
-                if (!future.isDone()) {
-                    future.cancel(true);
-                    diagnostics.recordStremioConnector(
-                            "foreground_grace".equals(stopReason)
-                                    ? "aggregation_source_deferred"
-                                    : "aggregation_source_deadline",
-                            "sourceId=" + shortId(request.sources.get(index).id)
-                                    + " count=0 reason=" + stopReason
-                                    + " durationMs=" + Math.max(
-                                    0L, System.currentTimeMillis() - startedAt));
-                }
+        }
+
+        for (SourceCall sourceCall : sourceCalls) {
+            if (sourceCall.completed || sourceCall.future.isDone()) {
+                continue;
             }
-            cancellation.cancelCalls();
+            if ("total_deadline".equals(stopReason)
+                    && !sourceCall.degradedAtStart) {
+                sourceHealthTracker.recordState(
+                        sourceCall.source, "deadline", System.currentTimeMillis());
+            }
+            diagnostics.recordStremioConnector(
+                    "aggregation_source_background",
+                    "sourceId=" + shortId(sourceCall.source.id)
+                            + " count=0 reason=" + stopReason
+                            + " durationMs=" + Math.max(
+                            0L, System.currentTimeMillis() - startedAt));
         }
 
         StremioStreamPipeline.Result pipeline =
@@ -468,7 +505,7 @@ final class StremioStreamAggregator {
                         + " protectable=" + protectable + ' '
                         + pipeline.stats.summary() + " durationMs=" + durationMs);
         return new AggregationResult(
-                pipeline, cacheable, protectable, durationMs);
+                pipeline, cacheable, protectable, complete, durationMs);
     }
 
     static boolean isCompleteSourceState(String state) {
@@ -478,20 +515,8 @@ final class StremioStreamAggregator {
                 || "missing_stream_resource".equals(state);
     }
 
-    static long effectiveDeadlineNanos(
-            long totalDeadlineNanos,
-            long firstUsableResultNanos,
-            boolean foregroundRequested) {
-        if (!foregroundRequested || firstUsableResultNanos <= 0L) {
-            return totalDeadlineNanos;
-        }
-        long foregroundDeadlineNanos = firstUsableResultNanos
-                + TimeUnit.MILLISECONDS.toNanos(FOREGROUND_RESULT_GRACE_MS);
-        return Math.min(totalDeadlineNanos, foregroundDeadlineNanos);
-    }
-
-    static boolean startsForegroundGrace(String state, int streamCount) {
-        return "loaded".equals(state) && streamCount > 0;
+    static boolean shouldAwaitSource(boolean foregroundRequested, boolean degraded) {
+        return !foregroundRequested || !degraded;
     }
 
     private void recordSourceTaskFailure(
@@ -528,7 +553,9 @@ final class StremioStreamAggregator {
         boolean protectedEntry = allowProtected
                 && cached.protectedPrefetch
                 && key.equals(protectedPrefetchKey);
-        if (protectedEntry || nowMs - cached.createdAtMs <= REGULAR_CACHE_AGE_MS) {
+        long maxAgeMs = cached.result.complete
+                ? REGULAR_CACHE_AGE_MS : PARTIAL_CACHE_AGE_MS;
+        if (protectedEntry || nowMs - cached.createdAtMs <= maxAgeMs) {
             return cached;
         }
         cache.remove(key, cached);
@@ -712,17 +739,37 @@ final class StremioStreamAggregator {
         final StremioStreamPipeline.Result pipeline;
         final boolean cacheable;
         final boolean protectable;
+        final boolean complete;
         final long durationMs;
 
         AggregationResult(
                 StremioStreamPipeline.Result pipeline,
                 boolean cacheable,
                 boolean protectable,
+                boolean complete,
                 long durationMs) {
             this.pipeline = pipeline;
             this.cacheable = cacheable;
             this.protectable = protectable;
+            this.complete = complete;
             this.durationMs = durationMs;
+        }
+    }
+
+    private static final class SourceCall {
+        @NonNull final StremioStreamSourceStore.Source source;
+        final int priority;
+        final boolean degradedAtStart;
+        Future<StremioAddonClient.StreamResult> future;
+        boolean completed;
+
+        SourceCall(
+                StremioStreamSourceStore.Source source,
+                int priority,
+                boolean degradedAtStart) {
+            this.source = source;
+            this.priority = priority;
+            this.degradedAtStart = degradedAtStart;
         }
     }
 

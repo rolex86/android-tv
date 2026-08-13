@@ -6,6 +6,8 @@ import static org.junit.Assert.assertTrue;
 
 import android.content.Intent;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
 import org.junit.Test;
 
 import java.util.concurrent.CountDownLatch;
@@ -133,31 +135,96 @@ public class StremioConnectorServiceTest {
     }
 
     @Test
-    public void foregroundResultUsesShortGraceWithoutShorteningBackgroundPrefetch() {
-        long totalDeadlineNanos = TimeUnit.MILLISECONDS.toNanos(
-                StremioStreamAggregator.TOTAL_DEADLINE_MS);
-        long firstUsableResultNanos = TimeUnit.MILLISECONDS.toNanos(2_000L);
-        long graceDeadlineNanos = firstUsableResultNanos
-                + TimeUnit.MILLISECONDS.toNanos(
-                StremioStreamAggregator.FOREGROUND_RESULT_GRACE_MS);
-
-        assertEquals(totalDeadlineNanos, StremioStreamAggregator.effectiveDeadlineNanos(
-                totalDeadlineNanos, 0L, true));
-        assertEquals(totalDeadlineNanos, StremioStreamAggregator.effectiveDeadlineNanos(
-                totalDeadlineNanos, firstUsableResultNanos, false));
-        assertEquals(graceDeadlineNanos, StremioStreamAggregator.effectiveDeadlineNanos(
-                totalDeadlineNanos, firstUsableResultNanos, true));
-        assertTrue(StremioStreamAggregator.startsForegroundGrace("loaded", 1));
-        assertFalse(StremioStreamAggregator.startsForegroundGrace("loaded", 0));
-        assertFalse(StremioStreamAggregator.startsForegroundGrace("timeout", 1));
+    public void foregroundAwaitsEveryHealthySourceButBackgroundsDegradedSources() {
+        assertTrue(StremioStreamAggregator.shouldAwaitSource(true, false));
+        assertFalse(StremioStreamAggregator.shouldAwaitSource(true, true));
+        assertTrue(StremioStreamAggregator.shouldAwaitSource(false, false));
+        assertTrue(StremioStreamAggregator.shouldAwaitSource(false, true));
+        assertEquals(9_000L, StremioStreamAggregator.TOTAL_DEADLINE_MS);
+        assertEquals(250L, StremioStreamAggregator.DEGRADED_PROBE_GRACE_MS);
     }
 
     @Test
-    public void foregroundGraceNeverExtendsTheTotalAggregationDeadline() {
-        long totalDeadlineNanos = TimeUnit.MILLISECONDS.toNanos(9_000L);
-        long lateUsableResultNanos = TimeUnit.MILLISECONDS.toNanos(8_500L);
+    public void sourceHealthRecoversOnSuccessAndDoesNotFollowAnEditedUrl() {
+        long now = 10_000_000L;
+        StremioSourceHealthTracker tracker = new StremioSourceHealthTracker();
+        StremioStreamSourceStore.Source original = new StremioStreamSourceStore.Source(
+                "12345678-1234-1234-1234-123456789012",
+                "https://example.com/old/manifest.json",
+                "Example",
+                true);
+        StremioStreamSourceStore.Source edited = original.withValues(
+                "https://example.com/new/manifest.json", "Example", true);
 
-        assertEquals(totalDeadlineNanos, StremioStreamAggregator.effectiveDeadlineNanos(
-                totalDeadlineNanos, lateUsableResultNanos, true));
+        tracker.recordState(original, "timeout", now);
+        assertTrue(tracker.isDegraded(original, now));
+        assertTrue(tracker.isDegraded(
+                original, now + StremioSourceHealthTracker.DEGRADED_AGE_MS));
+        assertFalse(tracker.isDegraded(
+                original, now + StremioSourceHealthTracker.DEGRADED_AGE_MS + 1L));
+
+        tracker.recordState(original, "http_503", now);
+        assertFalse(tracker.isDegraded(edited, now));
+        tracker.recordState(original, "loaded", now + 1L);
+        assertFalse(tracker.isDegraded(original, now + 1L));
+        tracker.recordState(original, "cancelled", now + 2L);
+        assertFalse(tracker.isDegraded(original, now + 2L));
+    }
+
+    @Test
+    public void manifestCacheUsesOneHourFreshAnd24HourStaleWindows() {
+        long now = 100_000_000L;
+
+        assertTrue(StremioManifestCache.isFresh(
+                now - StremioManifestCache.FRESH_AGE_MS, now));
+        assertFalse(StremioManifestCache.isFresh(
+                now - StremioManifestCache.FRESH_AGE_MS - 1L, now));
+        assertTrue(StremioManifestCache.isUsableStale(
+                now - StremioManifestCache.MAX_STALE_AGE_MS, now));
+        assertFalse(StremioManifestCache.isUsableStale(
+                now - StremioManifestCache.MAX_STALE_AGE_MS - 1L, now));
+        assertFalse(StremioManifestCache.isUsableStale(now + 1L, now));
+    }
+
+    @Test
+    public void manifestCachePersistsRoutingButNoUrlsOrArbitraryFields() throws Exception {
+        JSONObject manifest = new JSONObject()
+                .put("name", "Private add-on")
+                .put("endpoint", "https://example.com/token-value")
+                .put("types", new JSONArray().put("movie").put("series"))
+                .put("idPrefixes", new JSONArray().put("tt"))
+                .put("resources", new JSONArray()
+                        .put("catalog")
+                        .put(new JSONObject()
+                                .put("name", "stream")
+                                .put("types", new JSONArray().put("series"))
+                                .put("idPrefixes", new JSONArray().put("tt"))
+                                .put("secret", "must-not-survive")));
+
+        JSONObject sanitized = StremioManifestCache.sanitizeManifest(manifest);
+
+        assertFalse(sanitized.has("name"));
+        assertFalse(sanitized.has("endpoint"));
+        assertFalse(sanitized.toString().contains("secret"));
+        assertFalse(sanitized.toString().contains("token-value"));
+        assertEquals("supported", StremioAddonClient.streamSupport(
+                sanitized, "series", "tt1234567:1:2"));
+        assertEquals("unsupported_type", StremioAddonClient.streamSupport(
+                sanitized, "movie", "tt1234567"));
+        assertFalse(StremioManifestCache.fingerprint(
+                "https://example.com/a/manifest.json").equals(
+                StremioManifestCache.fingerprint(
+                        "https://example.com/b/manifest.json")));
+    }
+
+    @Test
+    public void hardManifestFailuresInvalidateButTransientFailuresCanUseStaleData() {
+        assertTrue(StremioAddonClient.isHardManifestFailure("http_401"));
+        assertTrue(StremioAddonClient.isHardManifestFailure("http_403"));
+        assertTrue(StremioAddonClient.isHardManifestFailure("http_404"));
+        assertTrue(StremioAddonClient.isHardManifestFailure("http_410"));
+        assertFalse(StremioAddonClient.isHardManifestFailure("http_429"));
+        assertFalse(StremioAddonClient.isHardManifestFailure("http_503"));
+        assertFalse(StremioAddonClient.isHardManifestFailure("timeout"));
     }
 }

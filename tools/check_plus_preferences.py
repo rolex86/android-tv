@@ -41,6 +41,12 @@ STREMIO_CONNECTOR_TEST_PATH = TEST_PATH.with_name("StremioConnectorServiceTest.j
 STREMIO_AGGREGATOR_PATH = STREMIO_ACCOUNT_SYNC_COORDINATOR_PATH.with_name(
     "StremioStreamAggregator.java"
 )
+STREMIO_MANIFEST_CACHE_PATH = STREMIO_AGGREGATOR_PATH.with_name(
+    "StremioManifestCache.java"
+)
+STREMIO_ADDON_CLIENT_PATH = STREMIO_AGGREGATOR_PATH.with_name(
+    "StremioAddonClient.java"
+)
 EXTERNAL_RESULT_TEST_PATH = TEST_PATH.with_name("ExternalPlaybackResultPolicyTest.java")
 STREMIO_AGGREGATION_PREFS_PATH = APP / "java" / "com" / "brouken" / "player" / "StremioAggregationPreferences.java"
 AI_TEST_PATH = (
@@ -563,20 +569,50 @@ if not STREMIO_AGGREGATOR_PATH.exists():
 else:
     stream_aggregator = STREMIO_AGGREGATOR_PATH.read_text(encoding="utf-8")
     for isolation_hook in (
-        "FOREGROUND_RESULT_GRACE_MS = 1_500L",
+        "DEGRADED_PROBE_GRACE_MS = 250L",
+        "StremioSourceHealthTracker",
         "task.foregroundRequested",
-        '"aggregation_source_deferred"',
+        '"aggregation_source_background"',
     ):
         if isolation_hook not in stream_aggregator:
             errors.append(f"Missing stalled-source isolation hook: {isolation_hook}")
+
+if not STREMIO_MANIFEST_CACHE_PATH.exists():
+    errors.append("Stremio manifest routing cache is missing")
+else:
+    manifest_cache = STREMIO_MANIFEST_CACHE_PATH.read_text(encoding="utf-8")
+    for cache_hook in (
+        "FRESH_AGE_MS = 60L * 60L * 1_000L",
+        "MAX_STALE_AGE_MS = 24L * 60L * 60L * 1_000L",
+        "sanitizeManifest",
+        "manifestFingerprint",
+    ):
+        if cache_hook not in manifest_cache:
+            errors.append(f"Missing manifest cache safety hook: {cache_hook}")
+
+if not STREMIO_ADDON_CLIENT_PATH.exists():
+    errors.append("Stremio add-on client is missing")
+else:
+    addon_client = STREMIO_ADDON_CLIENT_PATH.read_text(encoding="utf-8")
+    for refresh_hook in (
+        'header("If-None-Match"',
+        'header("If-Modified-Since"',
+        "scheduleManifestRefresh",
+        "isHardManifestFailure",
+    ):
+        if refresh_hook not in addon_client:
+            errors.append(f"Missing manifest refresh hook: {refresh_hook}")
 
 if not STREMIO_CONNECTOR_TEST_PATH.exists():
     errors.append("Stremio Connector regression tests are missing")
 else:
     connector_tests = STREMIO_CONNECTOR_TEST_PATH.read_text(encoding="utf-8")
     for test_name in (
-        "foregroundResultUsesShortGraceWithoutShorteningBackgroundPrefetch",
-        "foregroundGraceNeverExtendsTheTotalAggregationDeadline",
+        "foregroundAwaitsEveryHealthySourceButBackgroundsDegradedSources",
+        "sourceHealthRecoversOnSuccessAndDoesNotFollowAnEditedUrl",
+        "manifestCacheUsesOneHourFreshAnd24HourStaleWindows",
+        "manifestCachePersistsRoutingButNoUrlsOrArbitraryFields",
+        "hardManifestFailuresInvalidateButTransientFailuresCanUseStaleData",
     ):
         if test_name not in connector_tests:
             errors.append(f"Missing stalled-source regression test: {test_name}")
