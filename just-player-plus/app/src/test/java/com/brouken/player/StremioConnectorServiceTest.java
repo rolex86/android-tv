@@ -4,6 +4,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import android.content.Intent;
+
 import org.junit.Test;
 
 import java.util.concurrent.CountDownLatch;
@@ -13,6 +15,17 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class StremioConnectorServiceTest {
+
+    @Test
+    public void connectorRestartsAfterRebootAndPackageReplacement() {
+        assertTrue(StremioConnectorBootReceiver.restoresConnectorForAction(
+                Intent.ACTION_BOOT_COMPLETED));
+        assertTrue(StremioConnectorBootReceiver.restoresConnectorForAction(
+                Intent.ACTION_MY_PACKAGE_REPLACED));
+        assertFalse(StremioConnectorBootReceiver.restoresConnectorForAction(null));
+        assertFalse(StremioConnectorBootReceiver.restoresConnectorForAction(
+                Intent.ACTION_TIME_CHANGED));
+    }
 
     @Test
     public void subtitlePreloadHasHardStartupDeadline() {

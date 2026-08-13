@@ -4,14 +4,22 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 
-/** Restores explicitly enabled Stremio background work after a Shield/TV reboot. */
+/** Restores explicitly enabled Stremio background work after reboot or an app update. */
 public final class StremioConnectorBootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
-        if (!Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) return;
+        String action = intent == null ? null : intent.getAction();
+        if (!restoresConnectorForAction(action)) return;
         if (new PlusPrefs(context).stremioConnectorEnabled) {
             StremioConnectorService.start(context);
         }
-        StremioAccountSyncCoordinator.flush(context);
+        if (Intent.ACTION_BOOT_COMPLETED.equals(action)) {
+            StremioAccountSyncCoordinator.flush(context);
+        }
+    }
+
+    static boolean restoresConnectorForAction(String action) {
+        return Intent.ACTION_BOOT_COMPLETED.equals(action)
+                || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action);
     }
 }

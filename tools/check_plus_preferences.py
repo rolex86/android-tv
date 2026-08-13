@@ -371,11 +371,15 @@ else:
         if anchor not in account_sync_worker:
             errors.append(f"Missing Stremio background worker hook: {anchor}")
 
-if not STREMIO_BOOT_RECEIVER_PATH.exists() or (
-    "StremioAccountSyncCoordinator.flush(context)"
-    not in STREMIO_BOOT_RECEIVER_PATH.read_text(encoding="utf-8")
-):
+stremio_boot_receiver = (
+    STREMIO_BOOT_RECEIVER_PATH.read_text(encoding="utf-8")
+    if STREMIO_BOOT_RECEIVER_PATH.exists()
+    else ""
+)
+if "StremioAccountSyncCoordinator.flush(context)" not in stremio_boot_receiver:
     errors.append("Shield reboot must restore pending Stremio account sync work")
+if "Intent.ACTION_MY_PACKAGE_REPLACED" not in stremio_boot_receiver:
+    errors.append("Application updates must restart the explicitly enabled Connector")
 
 app_build = APP_BUILD_PATH.read_text(encoding="utf-8")
 if "androidx.work:work-runtime:2.11.2" not in app_build:
@@ -399,6 +403,8 @@ else:
         errors.append("Latest application version is missing from PLUS_CHANGELOG.md")
 
 manifest = MANIFEST_PATH.read_text(encoding="utf-8")
+if 'android.intent.action.MY_PACKAGE_REPLACED' not in manifest:
+    errors.append("Connector package-replacement recovery is missing from AndroidManifest.xml")
 if 'android:name=".JustPlayerPlusApplication"' not in manifest:
     errors.append("WorkManager on-demand configuration Application is not registered")
 if (

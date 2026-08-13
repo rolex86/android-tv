@@ -1,5 +1,17 @@
 # JustPlayer Plus changelog
 
+## Step 30 — Restore the Connector after application updates
+
+- Registered the app-targeted `MY_PACKAGE_REPLACED` broadcast so Android restarts an explicitly
+  enabled local Connector immediately after installing a newer APK.
+- Reused the existing foreground-service startup path, which remains gated by the persisted
+  Connector preference; an explicitly disabled Connector stays disabled after an update.
+- Kept account queue recovery limited to device boot because WorkManager already preserves its
+  scheduled work across application updates.
+- Added regression and manifest audit coverage for both reboot and package-replacement recovery.
+- Raised the application version code to 272; the Connector remains at `1.14.0` because its local
+  addon protocol is unchanged.
+
 ## Step 29 — Keep account synchronization off media startup
 
 - Disabled WorkManager's automatic process-start initializer and switched it to supported
