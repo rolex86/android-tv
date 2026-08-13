@@ -366,7 +366,7 @@
             app:key="stremioAggregationSourceWaitSeconds"
             app:adjustable="true"
             app:defaultValue="9"
-            app:max="30"
+            android:max="30"
             app:min="3"
             app:seekBarIncrement="1"
             app:showSeekBarValue="true"

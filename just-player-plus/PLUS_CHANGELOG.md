@@ -1,5 +1,13 @@
 # JustPlayer Plus changelog
 
+## Step 34 — Fix the source-wait slider resource namespace
+
+- Use Android's framework `max` attribute for the aggregation `SeekBarPreference`, while keeping
+  the AndroidX-specific minimum, increment, value display and continuous persistence attributes.
+- Extend the preference audit to require the resource-linkable namespace combination.
+- Raised the application version code to 276; the Connector remains at `1.14.0` because behavior
+  and its local add-on protocol are unchanged from the configurable-wait implementation.
+
 ## Step 33 — Make the Connector source wait configurable on TV
 
 - Added a TV-friendly source-wait slider to the aggregation settings with a range of 3–30 seconds,

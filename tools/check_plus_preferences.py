@@ -541,7 +541,7 @@ else:
 
 for source_wait_hook in (
     'app:min="3"',
-    'app:max="30"',
+    'android:max="30"',
     'app:defaultValue="9"',
     'app:seekBarIncrement="1"',
     'app:updatesContinuously="true"',
