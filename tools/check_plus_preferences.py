@@ -37,6 +37,10 @@ MANIFEST_PATH = APP / "AndroidManifest.xml"
 APP_BUILD_PATH = ROOT / "just-player-plus" / "app" / "build.gradle"
 CHANGELOG_PATH = ROOT / "just-player-plus" / "PLUS_CHANGELOG.md"
 STREMIO_STREAM_TEST_PATH = TEST_PATH.with_name("StremioStreamPipelineTest.java")
+STREMIO_CONNECTOR_TEST_PATH = TEST_PATH.with_name("StremioConnectorServiceTest.java")
+STREMIO_AGGREGATOR_PATH = STREMIO_ACCOUNT_SYNC_COORDINATOR_PATH.with_name(
+    "StremioStreamAggregator.java"
+)
 EXTERNAL_RESULT_TEST_PATH = TEST_PATH.with_name("ExternalPlaybackResultPolicyTest.java")
 STREMIO_AGGREGATION_PREFS_PATH = APP / "java" / "com" / "brouken" / "player" / "StremioAggregationPreferences.java"
 AI_TEST_PATH = (
@@ -553,6 +557,29 @@ else:
     ):
         if test_name not in stream_tests:
             errors.append(f"Missing Stremio stream regression test: {test_name}")
+
+if not STREMIO_AGGREGATOR_PATH.exists():
+    errors.append("Stremio stream aggregator is missing")
+else:
+    stream_aggregator = STREMIO_AGGREGATOR_PATH.read_text(encoding="utf-8")
+    for isolation_hook in (
+        "FOREGROUND_RESULT_GRACE_MS = 1_500L",
+        "task.foregroundRequested",
+        '"aggregation_source_deferred"',
+    ):
+        if isolation_hook not in stream_aggregator:
+            errors.append(f"Missing stalled-source isolation hook: {isolation_hook}")
+
+if not STREMIO_CONNECTOR_TEST_PATH.exists():
+    errors.append("Stremio Connector regression tests are missing")
+else:
+    connector_tests = STREMIO_CONNECTOR_TEST_PATH.read_text(encoding="utf-8")
+    for test_name in (
+        "foregroundResultUsesShortGraceWithoutShorteningBackgroundPrefetch",
+        "foregroundGraceNeverExtendsTheTotalAggregationDeadline",
+    ):
+        if test_name not in connector_tests:
+            errors.append(f"Missing stalled-source regression test: {test_name}")
 
 # These binaries contain the protected Media3 renderer/audio path and extension decoders.
 # An intentional upstream refresh must review the playback regression matrix and update hashes.

@@ -131,4 +131,33 @@ public class StremioConnectorServiceTest {
         assertFalse(StremioStreamAggregator.isCompleteSourceState("manifest_timeout"));
         assertFalse(StremioStreamAggregator.isCompleteSourceState("http_503"));
     }
+
+    @Test
+    public void foregroundResultUsesShortGraceWithoutShorteningBackgroundPrefetch() {
+        long totalDeadlineNanos = TimeUnit.MILLISECONDS.toNanos(
+                StremioStreamAggregator.TOTAL_DEADLINE_MS);
+        long firstUsableResultNanos = TimeUnit.MILLISECONDS.toNanos(2_000L);
+        long graceDeadlineNanos = firstUsableResultNanos
+                + TimeUnit.MILLISECONDS.toNanos(
+                StremioStreamAggregator.FOREGROUND_RESULT_GRACE_MS);
+
+        assertEquals(totalDeadlineNanos, StremioStreamAggregator.effectiveDeadlineNanos(
+                totalDeadlineNanos, 0L, true));
+        assertEquals(totalDeadlineNanos, StremioStreamAggregator.effectiveDeadlineNanos(
+                totalDeadlineNanos, firstUsableResultNanos, false));
+        assertEquals(graceDeadlineNanos, StremioStreamAggregator.effectiveDeadlineNanos(
+                totalDeadlineNanos, firstUsableResultNanos, true));
+        assertTrue(StremioStreamAggregator.startsForegroundGrace("loaded", 1));
+        assertFalse(StremioStreamAggregator.startsForegroundGrace("loaded", 0));
+        assertFalse(StremioStreamAggregator.startsForegroundGrace("timeout", 1));
+    }
+
+    @Test
+    public void foregroundGraceNeverExtendsTheTotalAggregationDeadline() {
+        long totalDeadlineNanos = TimeUnit.MILLISECONDS.toNanos(9_000L);
+        long lateUsableResultNanos = TimeUnit.MILLISECONDS.toNanos(8_500L);
+
+        assertEquals(totalDeadlineNanos, StremioStreamAggregator.effectiveDeadlineNanos(
+                totalDeadlineNanos, lateUsableResultNanos, true));
+    }
 }

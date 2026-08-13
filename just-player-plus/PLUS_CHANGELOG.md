@@ -1,5 +1,21 @@
 # JustPlayer Plus changelog
 
+## Step 31 — Isolate stalled Connector sources
+
+- Kept all enabled stream add-ons concurrent, but once a foreground request has at least one
+  usable result it waits only a 1.5-second grace period for the remaining sources instead of being
+  held for the full nine-second aggregation deadline.
+- A valid empty response does not start the grace period, so the Connector can still wait for a
+  different source that actually has streams for the requested item.
+- A pending source is deferred only for the current foreground response and is tried again on a
+  later lookup; it is never automatically disabled or permanently classified as broken.
+- Background next-episode prefetch retains the full aggregation deadline and protected prefetch
+  still requires every compatible enabled source to finish cleanly.
+- Contained unexpected per-source task failures so one failed future cannot cancel collection of
+  results already arriving from other sources.
+- Raised the application version code to 273; the Connector remains at `1.14.0` because its local
+  addon protocol and response schema are unchanged.
+
 ## Step 30 — Restore the Connector after application updates
 
 - Registered the app-targeted `MY_PACKAGE_REPLACED` broadcast so Android restarts an explicitly
