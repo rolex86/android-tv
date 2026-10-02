@@ -1,0 +1,104 @@
+name: Bootstrap Nuvio RS Plus
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/bootstrap-nuvio-rs-plus.yml
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Import Nuvio Reshaped upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -d nuvio-rs-plus ]; then
+            echo "nuvio-rs-plus already exists; nothing to bootstrap."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git remote add nuvio-rs-upstream https://github.com/DavidVamaiotu/NuvioTV-Reshaped.git
+          git fetch --depth=1 nuvio-rs-upstream subtitle-autosync
+
+          git subtree add \
+            --prefix=nuvio-rs-plus \
+            nuvio-rs-upstream subtitle-autosync \
+            --squash
+
+      - name: Apply Nuvio RS Plus identity
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          root = Path("nuvio-rs-plus")
+          reshaped = root / "app" / "reshaped.gradle"
+          text = reshaped.read_text(encoding="utf-8")
+
+          old = 'defaults.applicationId = reshapedLegacyBridge ? "com.nuviodebug.com" : "com.nuvioreshaped.tv"'
+          new = 'defaults.applicationId = reshapedLegacyBridge ? "com.nuviodebug.com" : "com.rolex86.nuviorsplus"'
+          if old not in text and new not in text:
+              raise SystemExit("Could not locate Nuvio RS applicationId hook")
+          text = text.replace(old, new)
+
+          text = text.replace(
+              'resolveProperty("NUVIO_UPDATE_GITHUB_OWNER", "NuvioMedia")',
+              'resolveProperty("NUVIO_UPDATE_GITHUB_OWNER", "rolex86")'
+          )
+          text = text.replace(
+              'resolveProperty("NUVIO_UPDATE_GITHUB_REPO", "NuvioTV")',
+              'resolveProperty("NUVIO_UPDATE_GITHUB_REPO", "android-tv")'
+          )
+          reshaped.write_text(text, encoding="utf-8")
+
+          for strings in (root / "app" / "src" / "reshaped" / "res").glob("values*/reshaped_app_name.xml"):
+              value = strings.read_text(encoding="utf-8")
+              value = value.replace(">Nuvio RS<", ">Nuvio RS Plus<")
+              strings.write_text(value, encoding="utf-8")
+
+          upstream = root / "PLUS_UPSTREAM.md"
+          upstream.write_text(
+              """# Nuvio RS Plus upstream
+
+- Upstream repository: https://github.com/DavidVamaiotu/NuvioTV-Reshaped
+- Upstream branch: `subtitle-autosync`
+- Local application id: `com.rolex86.nuviorsplus`
+- Local app name: `Nuvio RS Plus`
+- Update repository: `rolex86/android-tv`
+
+The source was imported as a git subtree so upstream changes can be merged while
+keeping Plus-specific commits reviewable.
+""",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Commit bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add nuvio-rs-plus
+          if git diff --cached --quiet; then
+            echo "No bootstrap changes."
+            exit 0
+          fi
+          git commit -m "Bootstrap Nuvio RS Plus"
+          git push origin HEAD:main
