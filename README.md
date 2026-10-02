@@ -24,3 +24,23 @@ GitHub Actions builds the release APK after relevant changes. Locally:
 cd just-player-plus
 ./gradlew assembleLatestUniversalRelease
 ```
+
+## Nuvio RS Plus
+
+`nuvio-rs-plus/` is a separately installable customization of
+[NuvioTV Reshaped](https://github.com/DavidVamaiotu/NuvioTV-Reshaped), kept alongside
+JustPlayer Plus in this repository.
+
+The project is intended to preserve Nuvio Reshaped's player, AutoSync, buffering and
+tracking features while adding the small set of JustPlayer Plus behaviors that are
+still missing:
+
+- optional AI subtitle translation using the existing self-hosted translator backend
+- commentary and audio-description avoidance
+- original-audio / dubbed-audio preference
+- best-quality audio ranking within the preferred language
+- embedded / addon subtitle source preference
+
+Upstream synchronization is automated and stops instead of publishing when a merge or
+build cannot be completed safely. See `NUVIO_RS_PLUS_PLAN.md`.
+
