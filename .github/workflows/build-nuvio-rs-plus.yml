@@ -1,0 +1,261 @@
+name: Build Nuvio RS Plus
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'nuvio-rs-plus/**'
+      - '.github/workflows/build-nuvio-rs-plus.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nuvio-rs-plus-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: nuvio-rs-plus
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: nuvio-rs-plus/**/*.gradle*
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Configure public Nuvio services
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CONFIG="$(curl --fail --silent --show-error --retry 3 https://nuvio.tv/config.js)"
+          printf '%s' "$CONFIG" > /tmp/nuvio-config.js
+
+          python3 - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          raw = Path("/tmp/nuvio-config.js").read_text(encoding="utf-8")
+
+          match = re.search(r'window\.__NUVIO_CONFIG__\s*=\s*(\{.*?\})\s*;?\s*$', raw, re.S)
+          if not match:
+              raise SystemExit("Could not parse https://nuvio.tv/config.js")
+
+          cfg = json.loads(match.group(1))
+          url = (cfg.get("supabaseUrl") or "").strip()
+          anon = (cfg.get("supabaseAnonKey") or cfg.get("supabaseKey") or "").strip()
+          fallback = (cfg.get("supabaseFallbackUrl") or "").strip()
+
+          if not url or not anon:
+              raise SystemExit("Nuvio public config is missing Supabase URL/key")
+
+          lines = [
+              f"NUVIO_SUPABASE_URL={url}",
+              f"NUVIO_SUPABASE_ANON_KEY={anon}",
+              f"NUVIO_SUPABASE_FALLBACK_URL={fallback}",
+              "TV_LOGIN_WEB_BASE_URL=https://nuvio.tv/tv-login",
+              "DEVICE_LOGIN_WEB_BASE_URL=https://nuvio.tv/link",
+              f"AVATAR_PUBLIC_BASE_URL={url.rstrip('/')}/storage/v1/object/public/avatars",
+              "NUVIO_UPDATE_GITHUB_OWNER=rolex86",
+              "NUVIO_UPDATE_GITHUB_REPO=android-tv",
+              "AUTOSYNC_FORK=true",
+              "SIMKL_CLIENT_ID=dc20e0db975583b15096267cee79cd23b1f56d4bd301ce3c51e4a96a49c834a6",
+              "SIMKL_APP_NAME=nuvio",
+              "INTRODB_API_URL=https://api.introdb.app/",
+              "IMDB_RATINGS_API_BASE_URL=https://seriesgraph.com/",
+              "IMDB_TAPFRAME_API_BASE_URL=https://imdb.tapframe.space/",
+          ]
+          Path("local.properties").write_text("\n".join(lines) + "\n", encoding="utf-8")
+          Path("local.dev.properties").write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
+      - name: Add optional service credentials
+        shell: bash
+        env:
+          TRAKT_CLIENT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
+          TRAKT_CLIENT_SECRET: ${{ secrets.TRAKT_CLIENT_SECRET }}
+          MDBLIST_CLIENT_ID: ${{ secrets.MDBLIST_CLIENT_ID }}
+          SEEKR_API_KEY: ${{ secrets.SEEKR_API_KEY }}
+          RESHAPED_GOOGLE_TV_CLIENT_ID: ${{ secrets.RESHAPED_GOOGLE_TV_CLIENT_ID }}
+          RESHAPED_GOOGLE_TV_CLIENT_SECRET: ${{ secrets.RESHAPED_GOOGLE_TV_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          add_prop() {
+            local key="$1"
+            local value="$2"
+            if [[ -n "$value" ]]; then
+              printf '%s=%s\n' "$key" "$value" >> local.properties
+              printf '%s=%s\n' "$key" "$value" >> local.dev.properties
+            fi
+          }
+          add_prop TRAKT_CLIENT_ID "$TRAKT_CLIENT_ID"
+          add_prop TRAKT_CLIENT_SECRET "$TRAKT_CLIENT_SECRET"
+          add_prop MDBLIST_CLIENT_ID "$MDBLIST_CLIENT_ID"
+          add_prop SEEKR_API_KEY "$SEEKR_API_KEY"
+          add_prop RESHAPED_GOOGLE_TV_CLIENT_ID "$RESHAPED_GOOGLE_TV_CLIENT_ID"
+          add_prop RESHAPED_GOOGLE_TV_CLIENT_SECRET "$RESHAPED_GOOGLE_TV_CLIENT_SECRET"
+
+      - name: Restore persistent signing key
+        shell: bash
+        env:
+          STORE_BASE64: ${{ secrets.JPP_SIGNING_STORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.JPP_SIGNING_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.JPP_SIGNING_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.JPP_SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${STORE_BASE64:?Missing JPP_SIGNING_STORE_BASE64}"
+          : "${STORE_PASSWORD:?Missing JPP_SIGNING_STORE_PASSWORD}"
+          : "${KEY_ALIAS:?Missing JPP_SIGNING_KEY_ALIAS}"
+          : "${KEY_PASSWORD:?Missing JPP_SIGNING_KEY_PASSWORD}"
+
+          KEYSTORE="$RUNNER_TEMP/nuvio-rs-plus-release.p12"
+          printf '%s' "$STORE_BASE64" | base64 --decode > "$KEYSTORE"
+          keytool -list -keystore "$KEYSTORE" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
+
+          {
+            echo "NUVIO_RELEASE_STORE_FILE=$KEYSTORE"
+            echo "NUVIO_RELEASE_STORE_PASSWORD=$STORE_PASSWORD"
+            echo "NUVIO_RELEASE_KEY_ALIAS=$KEY_ALIAS"
+            echo "NUVIO_RELEASE_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
+      - name: Choose Plus release version
+        id: version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          BASE_VERSION="$(sed -nE 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' app/build.gradle.kts | head -n1)"
+          test -n "$BASE_VERSION"
+
+          MAX_REV=0
+          while IFS= read -r TAG; do
+            if [[ "$TAG" =~ ^${BASE_VERSION}-autosync\.([0-9]+)$ ]]; then
+              REV="${BASH_REMATCH[1]}"
+              if (( REV > MAX_REV )); then MAX_REV="$REV"; fi
+            fi
+          done < <(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[].tag_name')
+
+          UPSTREAM_REV=0
+          while IFS= read -r TAG; do
+            if [[ "$TAG" =~ ^${BASE_VERSION}-autosync\.([0-9]+)$ ]]; then
+              REV="${BASH_REMATCH[1]}"
+              if (( REV > UPSTREAM_REV )); then UPSTREAM_REV="$REV"; fi
+            fi
+          done < <(gh api --paginate "repos/DavidVamaiotu/NuvioTV-Reshaped/releases?per_page=100" --jq '.[].tag_name')
+
+          NEXT_REV=$(( (MAX_REV > UPSTREAM_REV ? MAX_REV : UPSTREAM_REV) + 1 ))
+          TAG="${BASE_VERSION}-autosync.${NEXT_REV}"
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version_code=$(( $(date +%s) + 120000000 ))" >> "$GITHUB_OUTPUT"
+          echo "Building $TAG"
+
+      - name: Stamp build version
+        shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION_CODE: ${{ steps.version.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          p = Path("app/build.gradle.kts")
+          s = p.read_text(encoding="utf-8")
+          s, n1 = re.subn(r'versionCode\s*=\s*\d+', f'versionCode = {os.environ["VERSION_CODE"]}', s, count=1)
+          s, n2 = re.subn(r'versionName\s*=\s*"[^"]+"', f'versionName = "{os.environ["TAG"]}"', s, count=1)
+          if n1 != 1 or n2 != 1:
+              raise SystemExit("Could not stamp version")
+          p.write_text(s, encoding="utf-8")
+          PY
+
+      - name: Run updater tests
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:testFullReleaseUnitTest --tests 'com.nuvio.tv.updater.*' --stacktrace --console=plain
+
+      - name: Build signed APKs
+        shell: bash
+        run: |
+          ./gradlew :app:assembleFullRelease --stacktrace --console=plain
+
+      - name: Collect Shield and universal APKs
+        shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p ../release-apks
+
+          ARM64="app/build/outputs/apk/full/release/app-full-arm64-v8a-release.apk"
+          ANY="app/build/outputs/apk/full/release/app-full-universal-release.apk"
+          test -f "$ARM64"
+          test -f "$ANY"
+
+          cp "$ARM64" "../release-apks/NuvioRS-TV-${TAG}-arm64.apk"
+          cp "$ANY" "../release-apks/NuvioRS-TV-${TAG}-any.apk"
+
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n1)"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n1)"
+
+          PKG="$("$AAPT" dump badging "$ARM64" | head -n1 | sed -n "s/^package: name='\([^']*\)'.*/\1/p")"
+          test "$PKG" = "com.rolex86.nuviorsplus"
+
+          "$APKSIGNER" verify --print-certs "$ARM64"
+          ls -lh ../release-apks
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuvio-rs-plus-${{ steps.version.outputs.tag }}
+          path: release-apks/*.apk
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          cat > ../release-notes.md <<EOF
+          ## Nuvio RS Plus
+
+          First separately installable Nuvio RS Plus baseline build.
+
+          - Based on the current NuvioTV Reshaped `subtitle-autosync` source imported into this repository
+          - Package: `com.rolex86.nuviorsplus`
+          - In-app updater points to `rolex86/android-tv`
+          - No Plus feature changes yet; this release is for baseline Shield testing
+          EOF
+
+          gh release create "$TAG" ../release-apks/*.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Nuvio RS Plus $TAG" \
+            --notes-file ../release-notes.md \
+            --prerelease
