@@ -312,13 +312,15 @@ internal fun PlayerRuntimeController.maybeRunAutomaticSubtitleSync(
                     context,
                     "REJECT V2 - original subtitle timing kept",
                 )
-                showAutoSyncToast(
-                    if (audioTakesOver) AutoSyncBubbleKind.Working else AutoSyncBubbleKind.Failure,
-                    if (audioTakesOver) {
+                showAutoSyncMessage(
+                    context = context,
+                    kind = if (audioTakesOver) AutoSyncBubbleKind.Working else AutoSyncBubbleKind.Failure,
+                    message = if (audioTakesOver) {
                         context.getString(R.string.autosync_toast_failed_audio_fallback)
                     } else {
                         context.buildAutoSyncFailureToast(analysisOutcome)
                     },
+                    forceWorkingPreview = audioTakesOver,
                 )
                 return@launch
             }
