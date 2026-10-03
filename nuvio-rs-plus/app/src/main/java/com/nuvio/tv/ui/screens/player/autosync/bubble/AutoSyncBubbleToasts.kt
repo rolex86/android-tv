@@ -24,8 +24,10 @@ internal data class AutoSyncBubbleMessage(
     val kind: AutoSyncBubbleKind,
     val headline: String,
     val detail: String?,
-    /** Absolute start of this run; working updates must never reset the UI timeout. */
+    /** Absolute start of this run; useful for diagnostics and terminal timing. */
     val startedAtUptimeMs: Long,
+    /** Changes only when a deliberately user-visible working stage should be shown again. */
+    val workingPreviewId: Long,
 )
 
 /**
@@ -72,7 +74,11 @@ internal object AutoSyncBubbleToasts {
     }
 
     /** Shows [text] (an "Auto Sync • headline • detail" toast string) in the bubble, if it can. */
-    fun post(kind: AutoSyncBubbleKind, text: String): Boolean {
+    fun post(
+        kind: AutoSyncBubbleKind,
+        text: String,
+        forceWorkingPreview: Boolean = false,
+    ): Boolean {
         if (!_enabled.value || hosts.get() <= 0) return false
         val (headline, detail) = split(kind, text)
         val id = nextId.incrementAndGet()
@@ -90,7 +96,20 @@ internal object AutoSyncBubbleToasts {
             } else {
                 android.os.SystemClock.uptimeMillis()
             }
-            AutoSyncBubbleMessage(id, session, kind, headline, detail, startedAt)
+            val workingPreviewId = when {
+                kind != AutoSyncBubbleKind.Working -> previous?.workingPreviewId ?: id
+                !continuesSession || forceWorkingPreview -> id
+                else -> previous!!.workingPreviewId
+            }
+            AutoSyncBubbleMessage(
+                id = id,
+                session = session,
+                kind = kind,
+                headline = headline,
+                detail = detail,
+                startedAtUptimeMs = startedAt,
+                workingPreviewId = workingPreviewId,
+            )
         }
         return true
     }
@@ -145,11 +164,12 @@ internal fun showAutoSyncMessage(
     kind: AutoSyncBubbleKind,
     message: String,
     duration: Int = Toast.LENGTH_SHORT,
+    forceWorkingPreview: Boolean = false,
 ) {
     val appContext = context.applicationContext
     AutoSyncBubbleToasts.ensureLoaded(appContext)
     autoSyncMessageHandler.post {
-        if (!AutoSyncBubbleToasts.post(kind, message)) {
+        if (!AutoSyncBubbleToasts.post(kind, message, forceWorkingPreview)) {
             Toast.makeText(appContext, message, duration).show()
         }
     }
