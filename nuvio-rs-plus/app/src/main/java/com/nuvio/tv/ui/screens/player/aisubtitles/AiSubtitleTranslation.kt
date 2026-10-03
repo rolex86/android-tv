@@ -4,6 +4,7 @@ import android.util.Log
 import com.nuvio.tv.BuildConfig
 import com.nuvio.tv.domain.model.Subtitle
 import com.nuvio.tv.ui.screens.player.PlayerRuntimeController
+import com.nuvio.tv.data.local.InternalPlayerEngine
 import com.nuvio.tv.ui.screens.player.autosync.AutoSyncSyncedSubtitle
 import com.nuvio.tv.ui.screens.player.commitPreparedSidecarSubtitle
 import com.nuvio.tv.ui.screens.player.currentSidecarGenerationFor
@@ -63,7 +64,7 @@ internal fun PlayerRuntimeController.startAiSubtitleTranslation() {
     AiSubtitlePreferences.ensureLoaded(context)
     if (!AiSubtitlePreferences.enabled.value) return
     if (AiSubtitleSessions.sessions[this]?.job?.isActive == true) return
-    if (isUsingMpvEngine()) {
+    if (_uiState.value.internalPlayerEngine == InternalPlayerEngine.MVP_PLAYER) {
         AiSubtitleTranslationStatus.set(
             AiSubtitleTranslationState(
                 phase = AiSubtitleTranslationPhase.FAILED,
