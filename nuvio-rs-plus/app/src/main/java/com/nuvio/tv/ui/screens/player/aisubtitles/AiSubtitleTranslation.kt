@@ -135,8 +135,9 @@ internal fun PlayerRuntimeController.startAiSubtitleTranslation() {
             )
 
             val aiSubtitle = AiSubtitleFileStore.store(context, result)
-            val parsed = parseSidecarTimedCuesRobust(result.subtitleText, aiSubtitle.url).cues
-            if (parsed.isEmpty()) throw IllegalStateException("Translated subtitle could not be parsed")
+            val translatedCues = parseSidecarTimedCuesRobust(result.subtitleText, aiSubtitle.url).cues
+            val parsed = mergeTranslatedTextOntoTiming(snapshot.cues, translatedCues)
+                ?: throw IllegalStateException("Translated subtitle cue structure changed")
 
             _uiState.update { state ->
                 state.copy(

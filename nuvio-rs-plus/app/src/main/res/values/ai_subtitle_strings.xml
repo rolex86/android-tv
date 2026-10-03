@@ -6,4 +6,14 @@
     <string name="ai_subtitle_token_title">AI translator token</string>
     <string name="ai_subtitle_token_optional">Optional Bearer token · not configured</string>
     <string name="ai_subtitle_token_configured">Bearer token configured</string>
+    <string name="ai_subtitle_translate_action">AI translate</string>
+    <string name="ai_subtitle_progress_short">AI %1$d%%</string>
+    <string name="ai_subtitle_dialog_title">AI subtitle translation</string>
+    <string name="ai_subtitle_waiting_for_sync">Waiting for AutoSync…</string>
+    <string name="ai_subtitle_progress">Translating… %1$d%%</string>
+    <string name="ai_subtitle_waiting_detail">The current subtitle will be translated only after AutoSync and its audio fallback finish adjusting the timeline.</string>
+    <string name="ai_subtitle_translating_detail">Playback can continue while the Czech subtitle is translated. Timing will stay exactly as synchronized.</string>
+    <string name="ai_subtitle_continue_background">Continue in background</string>
+    <string name="ai_subtitle_ready_selected">Czech AI subtitles are ready and selected.</string>
+    <string name="ai_subtitle_ready_preserved">Czech AI subtitles are ready. Your newer manual subtitle choice was preserved.</string>
 </resources>

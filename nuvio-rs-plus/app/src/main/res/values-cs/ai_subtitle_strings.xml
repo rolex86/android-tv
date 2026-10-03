@@ -6,4 +6,14 @@
     <string name="ai_subtitle_token_title">Token AI překladače</string>
     <string name="ai_subtitle_token_optional">Volitelný Bearer token · nenastaven</string>
     <string name="ai_subtitle_token_configured">Bearer token je nastaven</string>
+    <string name="ai_subtitle_translate_action">AI překlad</string>
+    <string name="ai_subtitle_progress_short">AI %1$d%%</string>
+    <string name="ai_subtitle_dialog_title">AI překlad titulků</string>
+    <string name="ai_subtitle_waiting_for_sync">Čekám na AutoSync…</string>
+    <string name="ai_subtitle_progress">Překládám… %1$d%%</string>
+    <string name="ai_subtitle_waiting_detail">Aktuální stopa se začne překládat až po dokončení AutoSyncu a případného audio fallbacku.</string>
+    <string name="ai_subtitle_translating_detail">Během překladu může přehrávání pokračovat. Česká stopa převezme přesně synchronizované časování.</string>
+    <string name="ai_subtitle_continue_background">Pokračovat na pozadí</string>
+    <string name="ai_subtitle_ready_selected">České AI titulky jsou připravené a vybrané.</string>
+    <string name="ai_subtitle_ready_preserved">České AI titulky jsou připravené. Novější ruční volba titulků zůstala zachovaná.</string>
 </resources>

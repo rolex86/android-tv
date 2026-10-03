@@ -178,6 +178,7 @@ fun PlayerScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val postPlayRecommendationState by viewModel.postPlayRecommendationUiState.collectAsState()
+    val aiSubtitleTranslationState by viewModel.aiSubtitleTranslationState.collectAsState()
     val effectiveAutoplayEnabled by viewModel.effectiveAutoplayEnabled.collectAsState(initial = false)
     val lifecycleOwner = LocalLifecycleOwner.current
     val context = LocalContext.current
@@ -1672,6 +1673,8 @@ fun PlayerScreen(
             isUsingMpv = uiState.internalPlayerEngine == InternalPlayerEngine.MVP_PLAYER,
             onInternalTrackSelected = { viewModel.onEvent(PlayerEvent.OnSelectSubtitleTrack(it)) },
             onAddonSubtitleSelected = { viewModel.onEvent(PlayerEvent.OnSelectAddonSubtitle(it)) },
+            aiTranslationState = aiSubtitleTranslationState,
+            onAiTranslate = { viewModel.startAiSubtitleTranslation() },
             onDisableSubtitles = { viewModel.onEvent(PlayerEvent.OnDisableSubtitles) },
             onEvent = { viewModel.onEvent(it) },
             onDismiss = { viewModel.onEvent(PlayerEvent.OnDismissTransientOverlay) },
@@ -1679,6 +1682,34 @@ fun PlayerScreen(
                 .fillMaxSize()
                 .zIndex(2.6f)
         )
+
+        com.nuvio.tv.ui.screens.player.aisubtitles.AiSubtitleTranslationDialog(
+            state = aiSubtitleTranslationState,
+            onBackground = { viewModel.continueAiSubtitleTranslationInBackground() },
+            onCancel = { viewModel.cancelAiSubtitleTranslation() },
+        )
+
+        androidx.compose.runtime.LaunchedEffect(
+            aiSubtitleTranslationState.phase,
+            aiSubtitleTranslationState.readySubtitle?.id,
+        ) {
+            when (aiSubtitleTranslationState.phase) {
+                com.nuvio.tv.ui.screens.player.aisubtitles.AiSubtitleTranslationPhase.READY -> {
+                    val message = if (aiSubtitleTranslationState.selectedAutomatically) {
+                        context.getString(R.string.ai_subtitle_ready_selected)
+                    } else {
+                        context.getString(R.string.ai_subtitle_ready_preserved)
+                    }
+                    android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+                }
+                com.nuvio.tv.ui.screens.player.aisubtitles.AiSubtitleTranslationPhase.FAILED -> {
+                    aiSubtitleTranslationState.message?.let { message ->
+                        android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+                else -> Unit
+            }
+        }
 
         PlayerOverlayScaffold(
             visible = uiState.showSubtitleTimingDialog &&
