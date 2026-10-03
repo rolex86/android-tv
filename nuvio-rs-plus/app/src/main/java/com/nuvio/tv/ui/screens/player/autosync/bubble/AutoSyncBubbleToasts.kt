@@ -24,6 +24,8 @@ internal data class AutoSyncBubbleMessage(
     val kind: AutoSyncBubbleKind,
     val headline: String,
     val detail: String?,
+    /** Absolute start of this run; working updates must never reset the UI timeout. */
+    val startedAtUptimeMs: Long,
 )
 
 /**
@@ -76,12 +78,19 @@ internal object AutoSyncBubbleToasts {
         val id = nextId.incrementAndGet()
         _current.update { previous ->
             // A run continues while the bubble is still working; anything else (a result, or a
-            // bubble already fading away) starts a new bubble.
-            val session = if (
-                previous != null && previous.kind == AutoSyncBubbleKind.Working &&
-                previous.session != leavingSession
-            ) previous.session else id
-            AutoSyncBubbleMessage(id, session, kind, headline, detail)
+            // bubble already fading away) starts a new bubble. Keep the original start timestamp
+            // so progress/status updates cannot extend the working bubble forever.
+            val continuesSession =
+                previous != null &&
+                    previous.kind == AutoSyncBubbleKind.Working &&
+                    previous.session != leavingSession
+            val session = if (continuesSession) previous!!.session else id
+            val startedAt = if (continuesSession) {
+                previous!!.startedAtUptimeMs
+            } else {
+                android.os.SystemClock.uptimeMillis()
+            }
+            AutoSyncBubbleMessage(id, session, kind, headline, detail, startedAt)
         }
         return true
     }
