@@ -253,6 +253,11 @@ jobs:
           PKG="$("$AAPT" dump badging "$ARM64" | head -n1 | sed -n "s/^package: name='\([^']*\)'.*/\1/p")"
           test "$PKG" = "com.rolex86.nuviorsplus"
 
+          if "$AAPT" dump permissions "$ARM64" | grep -Fq "com.nuvio.reshaped.tv.permission.MIGRATE"; then
+            echo "Legacy Nuvio RS migration permission leaked into Plus APK; side-by-side install would fail." >&2
+            exit 1
+          fi
+
           "$APKSIGNER" verify --print-certs "$ARM64"
           ls -lh ../release-apks
 
