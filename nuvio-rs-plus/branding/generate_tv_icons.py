@@ -1,4 +1,4 @@
-"""Builds the Nuvio RS TV icons (launcher, TV banner, splash mark) from nuvio-rs-logo.png.
+"""Builds the Nuvio RS Plus TV icons (launcher, TV banner, splash mark) from nuvio-rs-logo.png.
 
 Usage: python3 branding/generate_tv_icons.py branding/nuvio-rs-logo.png app/src/main/res preview.png
 """
@@ -47,13 +47,13 @@ glow = np.exp(-(((xx - 0.3) / 0.35) ** 2 + ((yy - 1.05) / 0.45) ** 2))[..., None
 grad = np.clip(base + glow, 0, 255)
 banner = Image.fromarray(grad.astype(np.uint8), "RGB").convert("RGBA")
 logo_size = 440
-font = ImageFont.truetype(sys.argv[4] if len(sys.argv) > 4 else os.path.join(res, "font", "dm_sans_variable.ttf"), 150)
+font = ImageFont.truetype(sys.argv[4] if len(sys.argv) > 4 else os.path.join(res, "font", "dm_sans_variable.ttf"), 115)
 try:
     font.set_variation_by_axes([14, 700])  # optical size, weight
 except Exception:
     pass
 draw = ImageDraw.Draw(banner)
-text = "Nuvio RS"
+text = "Nuvio RS Plus"
 bbox = draw.textbbox((0, 0), text, font=font)
 gap = -40  # the logo canvas has transparent margins around the mark
 group = logo_size + gap + (bbox[2] - bbox[0])
