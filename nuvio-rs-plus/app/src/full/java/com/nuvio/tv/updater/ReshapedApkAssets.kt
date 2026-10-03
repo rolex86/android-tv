@@ -1,12 +1,14 @@
 package com.nuvio.tv.updater
 
 /**
- * Release APK naming since the rename. Nuvio RS APKs are named `NuvioRS-[TV-]<tag>-<alias>.apk`, where
- * the alias deliberately avoids the ABI names and "universal"/"all" that pre-rename updaters look
- * for, so those updaters pick the legacy bridge APK published next to them instead.
+ * Nuvio RS Plus release APKs use the `NuvioRSPlus-` prefix.
+ *
+ * `NuvioRS-` remains accepted as a legacy fallback so an already installed baseline
+ * build can update into the renamed asset line without a manual reinstall.
  */
 internal object ReshapedApkAssets {
-    const val PREFIX = "NuvioRS-"
+    const val PREFIX = "NuvioRSPlus-"
+    private const val LEGACY_PREFIX = "NuvioRS-"
 
     private val abiAliases = mapOf(
         "arm64-v8a" to "arm64",
@@ -15,14 +17,23 @@ internal object ReshapedApkAssets {
         "x86" to "x32",
     )
 
-    /** Picks the Nuvio RS APK for [supportedAbis] (else the "-any" one), or null when the release has none. */
+    /** Picks the Plus APK for [supportedAbis] (else the "-any" one). */
     fun choose(apkNames: List<String>, supportedAbis: List<String>): String? {
-        val reshaped = apkNames.filter { it.startsWith(PREFIX, ignoreCase = true) }
-        if (reshaped.isEmpty()) return null
+        val plus = apkNames.filter { it.startsWith(PREFIX, ignoreCase = true) }
+        if (plus.isNotEmpty()) return chooseFrom(plus, supportedAbis)
+
+        val legacy = apkNames.filter { it.startsWith(LEGACY_PREFIX, ignoreCase = true) }
+        if (legacy.isNotEmpty()) return chooseFrom(legacy, supportedAbis)
+
+        return null
+    }
+
+    private fun chooseFrom(candidates: List<String>, supportedAbis: List<String>): String {
         for (abi in supportedAbis) {
             val alias = abiAliases[abi] ?: continue
-            reshaped.firstOrNull { it.lowercase().removeSuffix(".apk").endsWith("-$alias") }?.let { return it }
+            candidates.firstOrNull { it.lowercase().removeSuffix(".apk").endsWith("-$alias") }?.let { return it }
         }
-        return reshaped.firstOrNull { it.lowercase().removeSuffix(".apk").endsWith("-any") } ?: reshaped.first()
+        return candidates.firstOrNull { it.lowercase().removeSuffix(".apk").endsWith("-any") }
+            ?: candidates.first()
     }
 }
