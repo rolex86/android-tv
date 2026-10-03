@@ -211,13 +211,21 @@ private fun AutoSyncBubble(message: AutoSyncBubbleMessage, colors: BubbleColors,
             withFrameNanos { clock.floatValue = (it - start) / 1_000_000_000f * 0.6f }
         }
     }
-    LaunchedEffect(message.id) {
+    LaunchedEffect(message.session, kind) {
         if (kind != AutoSyncBubbleKind.Working) return@LaunchedEffect
-        labelVisible = true
-        delay(WORKING_LABEL_MS)
-        labelFoldedAtMs = SystemClock.uptimeMillis()
-        labelVisible = false
-        delay(WORKING_TIMEOUT_MS - WORKING_LABEL_MS)
+
+        val elapsed = (SystemClock.uptimeMillis() - message.startedAtUptimeMs).coerceAtLeast(0L)
+        val labelRemaining = (WORKING_LABEL_MS - elapsed).coerceAtLeast(0L)
+        val timeoutRemaining = (WORKING_TIMEOUT_MS - elapsed).coerceAtLeast(0L)
+
+        labelVisible = elapsed < WORKING_LABEL_MS
+        if (labelVisible && labelRemaining > 0L) {
+            delay(labelRemaining)
+            labelFoldedAtMs = SystemClock.uptimeMillis()
+            labelVisible = false
+        }
+        val afterLabel = (timeoutRemaining - labelRemaining).coerceAtLeast(0L)
+        if (afterLabel > 0L) delay(afterLabel)
         dismiss()
     }
     LaunchedEffect(kind) {
