@@ -99,10 +99,8 @@ private const val IDLE_TICK_MS = 250L
 /** The words' fold-away spring has settled by then; until it has, the bubble animates every frame. */
 private const val FOLD_SETTLE_MS = 800L
 
-/** How long the working bubble keeps its words before settling to just the droplet. */
-private const val WORKING_LABEL_MS = 7_000L
-/** A run that never reports back fades away after this. */
-private const val WORKING_TIMEOUT_MS = 240_000L
+/** Working stages are informational only: show briefly, then get fully out of the film. */
+private const val WORKING_PREVIEW_MS = 4_500L
 private const val SUCCESS_HOLD_MS = 1_800L
 /** A little longer than the phone: the explanation is read from across the room. */
 private const val FAILURE_HOLD_MS = 8_000L
@@ -211,21 +209,10 @@ private fun AutoSyncBubble(message: AutoSyncBubbleMessage, colors: BubbleColors,
             withFrameNanos { clock.floatValue = (it - start) / 1_000_000_000f * 0.6f }
         }
     }
-    LaunchedEffect(message.session, kind) {
+    LaunchedEffect(message.workingPreviewId, kind) {
         if (kind != AutoSyncBubbleKind.Working) return@LaunchedEffect
-
-        val elapsed = (SystemClock.uptimeMillis() - message.startedAtUptimeMs).coerceAtLeast(0L)
-        val labelRemaining = (WORKING_LABEL_MS - elapsed).coerceAtLeast(0L)
-        val timeoutRemaining = (WORKING_TIMEOUT_MS - elapsed).coerceAtLeast(0L)
-
-        labelVisible = elapsed < WORKING_LABEL_MS
-        if (labelVisible && labelRemaining > 0L) {
-            delay(labelRemaining)
-            labelFoldedAtMs = SystemClock.uptimeMillis()
-            labelVisible = false
-        }
-        val afterLabel = (timeoutRemaining - labelRemaining).coerceAtLeast(0L)
-        if (afterLabel > 0L) delay(afterLabel)
+        labelVisible = true
+        delay(WORKING_PREVIEW_MS)
         dismiss()
     }
     LaunchedEffect(kind) {
