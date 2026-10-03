@@ -13,6 +13,7 @@ import okhttp3.Request;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class OpenSubtitlesRestClientTest {
@@ -116,6 +117,90 @@ public class OpenSubtitlesRestClientTest {
         assertEquals(
                 "languages=en&query=the+matrix",
                 testRequest.url().encodedQuery());
+    }
+
+    @Test
+    public void paginationExpandsOnlyWhenInitialPagesHaveNoStrongMatch() {
+        assertTrue(OpenSubtitlesRestClient.shouldSearchNextPage(1, 20, true, 100));
+        assertTrue(OpenSubtitlesRestClient.shouldSearchNextPage(2, 20, true, 100));
+        assertFalse(OpenSubtitlesRestClient.shouldSearchNextPage(3, 20, true, 100));
+        assertFalse(OpenSubtitlesRestClient.shouldSearchNextPage(3, 20, false, 70));
+
+        assertTrue(OpenSubtitlesRestClient.shouldSearchNextPage(3, 20, false, 44));
+        assertTrue(OpenSubtitlesRestClient.shouldSearchNextPage(9, 20, false, 44));
+        assertFalse(OpenSubtitlesRestClient.shouldSearchNextPage(10, 20, false, 44));
+        assertFalse(OpenSubtitlesRestClient.shouldSearchNextPage(2, 2, false, 0));
+    }
+
+    @Test
+    public void mapsEverySuitableReleaseIndependentlyWhenIdsDiffer() {
+        OpenSubtitlesRestClient.Candidate first =
+                new OpenSubtitlesRestClient.Candidate(
+                        "220",
+                        new LinkedHashSet<>(Collections.singletonList("120")),
+                        "ces",
+                        "The.Matrix.1999.2160p.BluRay.REMUX.HEVC-GROUP",
+                        "The.Matrix.1999.2160p.BluRay.REMUX.HEVC-GROUP.cze.srt",
+                        0,
+                        false,
+                        false,
+                        true,
+                        1_000,
+                        90);
+        OpenSubtitlesRestClient.Candidate second =
+                new OpenSubtitlesRestClient.Candidate(
+                        "221",
+                        new LinkedHashSet<>(Collections.singletonList("121")),
+                        "ces",
+                        "The.Matrix.1999.2160p.BluRay.REMUX.HEVC-OTHER",
+                        "The.Matrix.1999.2160p.BluRay.REMUX.HEVC-OTHER.cze.srt",
+                        0,
+                        false,
+                        false,
+                        true,
+                        900,
+                        80);
+        List<OpenSubtitlesRestClient.Candidate> candidates =
+                Arrays.asList(first, second);
+
+        assertEquals(first, OpenSubtitlesRestClient.findLikelyMatch(
+                OpenSubtitlesV3Client.TRACK_ID_PREFIX + "unrelated-one",
+                "OpenSubtitles v3 · CES · "
+                        + "The.Matrix.1999.2160p.BluRay.REMUX.HEVC-GROUP.cze.srt",
+                "ces",
+                new LinkedHashSet<>(Collections.singletonList("999")),
+                candidates));
+        assertEquals(second, OpenSubtitlesRestClient.findLikelyMatch(
+                OpenSubtitlesV3Client.TRACK_ID_PREFIX + "unrelated-two",
+                "OpenSubtitles v3 · CES · "
+                        + "The.Matrix.1999.2160p.BluRay.REMUX.HEVC-OTHER.cze.srt",
+                "ces",
+                new LinkedHashSet<>(Collections.singletonList("998")),
+                candidates));
+    }
+
+    @Test
+    public void nameFallbackStillRejectsTitleAndYearOnly() {
+        OpenSubtitlesRestClient.Candidate candidate =
+                new OpenSubtitlesRestClient.Candidate(
+                        "220",
+                        new LinkedHashSet<>(Collections.singletonList("120")),
+                        "ces",
+                        "The.Matrix.1999.2160p.BluRay.REMUX.HEVC-GROUP",
+                        "The.Matrix.1999.2160p.BluRay.REMUX.HEVC-GROUP.cze.srt",
+                        0,
+                        false,
+                        false,
+                        true,
+                        1_000,
+                        90);
+
+        assertNull(OpenSubtitlesRestClient.findLikelyMatch(
+                OpenSubtitlesV3Client.TRACK_ID_PREFIX + "unrelated",
+                "OpenSubtitles v3 · CES · The.Matrix.1999.srt",
+                "ces",
+                new LinkedHashSet<>(Collections.singletonList("999")),
+                Collections.singletonList(candidate)));
     }
 
     @Test
