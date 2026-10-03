@@ -188,7 +188,7 @@ class PlayerViewModel @Inject constructor(
     val postPlayRecommendationUiState: StateFlow<PostPlayRecommendationUiState>
         get() = postPlayRecommendationController.uiState
 
-    val aiSubtitleTranslationState
+    internal val aiSubtitleTranslationState
         get() = com.nuvio.tv.ui.screens.player.aisubtitles.AiSubtitleTranslationStatus.state
 
     fun startAiSubtitleTranslation() {
