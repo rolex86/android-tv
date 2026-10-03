@@ -273,8 +273,12 @@ internal class AudioSyncFallback private constructor(
     }
 
     private fun toast(status: AudioSyncStatus) {
+        // Working/progress states stay quiet after the takeover preview. Only the terminal
+        // outcome comes back on screen, so the film is not covered by a spinner for minutes.
+        val kind = status.bubbleKind()
+        if (kind == AutoSyncBubbleKind.Working) return
         val message = status.message(appContext) ?: return
-        showAutoSyncMessage(appContext, status.bubbleKind(), message) // Nuvio RS hook: AutoSync bubble
+        showAutoSyncMessage(appContext, kind, message) // Nuvio RS hook: terminal AutoSync result
     }
 
     companion object {
