@@ -246,11 +246,6 @@ jobs:
           cp "$ARM64" "../release-apks/NuvioRSPlus-TV-${TAG}-arm64.apk"
           cp "$ANY" "../release-apks/NuvioRSPlus-TV-${TAG}-any.apk"
 
-          # One-release compatibility aliases: the first baseline build's updater only
-          # recognizes the old NuvioRS- prefix. Keeping these aliases lets that build
-          # update itself to this renamed line without a manual reinstall.
-          cp "$ARM64" "../release-apks/NuvioRS-TV-${TAG}-arm64.apk"
-          cp "$ANY" "../release-apks/NuvioRS-TV-${TAG}-any.apk"
 
           AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n1)"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n1)"
