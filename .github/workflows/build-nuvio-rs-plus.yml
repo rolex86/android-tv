@@ -209,6 +209,16 @@ jobs:
           p.write_text(s, encoding="utf-8")
           PY
 
+      - name: Generate Nuvio RS Plus TV branding
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check --quiet pillow numpy
+          python3 branding/generate_tv_icons.py \
+            branding/nuvio-rs-logo.png \
+            app/src/main/res \
+            "$RUNNER_TEMP/nuvio-rs-plus-branding-preview.png"
+
       - name: Run updater tests
         shell: bash
         run: |
