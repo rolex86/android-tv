@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ai_subtitle_setting_title">AI subtitle translation</string>
+    <string name="ai_subtitle_setting_description">Translate the selected synced SRT/VTT subtitle to Czech using the private Nuvio RS Plus backend.</string>
+    <string name="ai_subtitle_backend_title">AI translator backend</string>
+    <string name="ai_subtitle_token_title">AI translator token</string>
+    <string name="ai_subtitle_token_optional">Optional Bearer token · not configured</string>
+    <string name="ai_subtitle_token_configured">Bearer token configured</string>
+</resources>

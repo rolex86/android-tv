@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ai_subtitle_setting_title">AI překlad titulků</string>
+    <string name="ai_subtitle_setting_description">Přeloží vybranou synchronizovanou stopu SRT/VTT do češtiny přes soukromý backend Nuvio RS Plus.</string>
+    <string name="ai_subtitle_backend_title">Backend AI překladače</string>
+    <string name="ai_subtitle_token_title">Token AI překladače</string>
+    <string name="ai_subtitle_token_optional">Volitelný Bearer token · nenastaven</string>
+    <string name="ai_subtitle_token_configured">Bearer token je nastaven</string>
+</resources>
