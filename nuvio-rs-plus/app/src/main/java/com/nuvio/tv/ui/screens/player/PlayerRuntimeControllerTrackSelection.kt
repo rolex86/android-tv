@@ -6,6 +6,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import com.nuvio.tv.domain.model.Subtitle
+import com.nuvio.tv.ui.screens.player.aisubtitles.AiSubtitleFileStore
+import com.nuvio.tv.ui.screens.player.aisubtitles.isAiSubtitle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -510,6 +512,19 @@ internal fun PlayerRuntimeController.selectAddonSubtitle(subtitle: Subtitle) {
                 "id=${subtitle.id} inferredMime=$inferredMime " +
                 "url=${subtitle.url}"
         )
+
+        if (isAiSubtitle(subtitle)) {
+            val body = AiSubtitleFileStore.read(subtitle) ?: return@let
+            disableSubtitles()
+            pendingAddonSubtitleLanguage = null
+            pendingAddonSubtitleTrackId = null
+            pendingAudioSelectionAfterSubtitleRefresh = null
+            _uiState.update {
+                it.copy(selectedAddonSubtitle = subtitle, selectedSubtitleTrackIndex = -1)
+            }
+            startSidecarAddonSubtitle(subtitle, rawBodyLoader = { body })
+            return@let
+        }
 
         // Prefer sidecar hot-attach so progressive/VOD buffer is not wiped (fast-startup path)
         // and subtitles pass through SubtitleCharsetDetector, SubtitleMojibakeSanitizer, and RTL formatting.

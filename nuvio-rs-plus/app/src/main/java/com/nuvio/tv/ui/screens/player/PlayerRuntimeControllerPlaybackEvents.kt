@@ -21,6 +21,7 @@ import com.nuvio.tv.data.repository.PlaybackIssuePlaybackSettingsInput
 import com.nuvio.tv.data.repository.PlaybackIssueReportInput
 import com.nuvio.tv.data.repository.SkipInterval
 import com.nuvio.tv.domain.model.WatchProgress
+import com.nuvio.tv.ui.screens.player.aisubtitles.isAiSubtitle
 import com.nuvio.tv.ui.screens.player.seekpreview.seekPreviewCommitSeekParameters
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
@@ -1383,9 +1384,13 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
                 message = "addonId=${event.subtitle.id} addonLang=${event.subtitle.lang} addonName=${event.subtitle.addonName}"
             )
             autoSubtitleSelected = true
-            rememberAddonSubtitleSelection(event.subtitle)
-            selectAddonSubtitle(event.subtitle)
-            runSelectedAutomaticSubtitleSync(event.subtitle) // AutoSync hook
+            if (isAiSubtitle(event.subtitle)) {
+                selectAddonSubtitle(event.subtitle)
+            } else {
+                rememberAddonSubtitleSelection(event.subtitle)
+                selectAddonSubtitle(event.subtitle)
+                runSelectedAutomaticSubtitleSync(event.subtitle) // AutoSync hook
+            }
             _uiState.update {
                 it.copy(
                     showSubtitleOverlay = true,
