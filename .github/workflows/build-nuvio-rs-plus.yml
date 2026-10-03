@@ -14,7 +14,7 @@ permissions:
 
 concurrency:
   group: nuvio-rs-plus-release
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:

@@ -1,5 +1,6 @@
 package com.nuvio.tv.ui.components
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,12 +19,16 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.nuvio.tv.R
+import androidx.tv.material3.Text
 import com.nuvio.tv.ui.theme.NuvioTheme
 
 @Composable
@@ -100,10 +105,18 @@ fun StartupSplashScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            BrandWordmark(
-                modifier = Modifier.height(48.dp),
+            Image(
+                painter = painterResource(id = R.drawable.ic_launcher),
                 contentDescription = stringResource(R.string.cd_nuvio_logo),
-                drawableOverride = brandWordmarkRes
+                modifier = Modifier.size(148.dp),
+                contentScale = ContentScale.Fit
+            )
+            Spacer(modifier = Modifier.height(14.dp))
+            Text(
+                text = stringResource(R.string.app_name),
+                color = Color.White,
+                fontSize = 30.sp,
+                fontWeight = FontWeight.SemiBold
             )
             Spacer(modifier = Modifier.height(NuvioTheme.spacing.xxl))
             LoadingIndicator(modifier = Modifier.size(NuvioTheme.spacing.xxxl))
