@@ -40,6 +40,9 @@ import com.nuvio.tv.data.repository.TraktRelatedService
 import com.nuvio.tv.data.trailer.TrailerService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import com.nuvio.tv.ui.screens.player.aisubtitles.startAiSubtitleTranslation
+import com.nuvio.tv.ui.screens.player.aisubtitles.setAiSubtitleTranslationBackground
+import com.nuvio.tv.ui.screens.player.aisubtitles.cancelAiSubtitleTranslation
 import com.nuvio.tv.ui.screens.player.seekpreview.SeekPreviewState
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -184,6 +187,21 @@ class PlayerViewModel @Inject constructor(
 
     val postPlayRecommendationUiState: StateFlow<PostPlayRecommendationUiState>
         get() = postPlayRecommendationController.uiState
+
+    val aiSubtitleTranslationState
+        get() = com.nuvio.tv.ui.screens.player.aisubtitles.AiSubtitleTranslationStatus.state
+
+    fun startAiSubtitleTranslation() {
+        controller.startAiSubtitleTranslation()
+    }
+
+    fun continueAiSubtitleTranslationInBackground() {
+        controller.setAiSubtitleTranslationBackground(true)
+    }
+
+    fun cancelAiSubtitleTranslation() {
+        controller.cancelAiSubtitleTranslation()
+    }
 
     val effectiveAutoplayEnabled = playerSettingsDataStore.playerSettings
         .map(StreamAutoPlayPolicy::isEffectivelyEnabled)

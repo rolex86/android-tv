@@ -72,6 +72,9 @@ import com.nuvio.tv.domain.model.Subtitle
 import com.nuvio.tv.ui.components.LoadingIndicator
 import com.nuvio.tv.ui.screens.detail.requestFocusAfterFrames
 import com.nuvio.tv.ui.screens.player.autosync.AutoSyncedChip
+import com.nuvio.tv.ui.screens.player.aisubtitles.AiSubtitleTranslateButton
+import com.nuvio.tv.ui.screens.player.aisubtitles.AiSubtitleTranslationState
+import com.nuvio.tv.ui.screens.player.aisubtitles.isAiSubtitle
 
 private const val SubtitleOffLanguageKey = "__off__"
 private const val SubtitleUnknownLanguageKey = "__unknown__"
@@ -110,6 +113,8 @@ internal fun SubtitleSelectionOverlay(
     isUsingMpv: Boolean = false,
     onInternalTrackSelected: (Int) -> Unit,
     onAddonSubtitleSelected: (Subtitle) -> Unit,
+    aiTranslationState: AiSubtitleTranslationState = AiSubtitleTranslationState(),
+    onAiTranslate: (() -> Unit)? = null,
     onDisableSubtitles: () -> Unit,
     onEvent: (PlayerEvent) -> Unit,
     onDismiss: () -> Unit,
@@ -407,7 +412,20 @@ internal fun SubtitleSelectionOverlay(
         onDismiss = onDismiss,
         modifier = modifier,
         captureKeys = false,
-        contentPadding = PaddingValues(start = 52.dp, end = 52.dp, top = 36.dp, bottom = 76.dp)
+        contentPadding = PaddingValues(start = 52.dp, end = 52.dp, top = 36.dp, bottom = 76.dp),
+        topEndContent = {
+            val translatable = selectedAddonSubtitle != null &&
+                !isAiSubtitle(selectedAddonSubtitle) &&
+                onAiTranslate != null &&
+                !isUsingMpv
+            if (translatable) {
+                AiSubtitleTranslateButton(
+                    state = aiTranslationState,
+                    enabled = true,
+                    onClick = { onAiTranslate?.invoke() },
+                )
+            }
+        }
     ) {
         LaunchedEffect(visible) {
             if (!visible) return@LaunchedEffect

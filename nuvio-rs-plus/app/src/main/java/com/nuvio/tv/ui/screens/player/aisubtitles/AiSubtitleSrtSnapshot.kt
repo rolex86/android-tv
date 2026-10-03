@@ -4,6 +4,7 @@ import androidx.media3.common.C
 import androidx.media3.extractor.text.CuesWithTiming
 import com.nuvio.tv.domain.model.Subtitle
 import com.nuvio.tv.ui.screens.player.PlayerRuntimeController
+import com.nuvio.tv.ui.screens.player.currentSidecarGenerationFor
 import com.nuvio.tv.ui.screens.player.audiosync.SubtitleSyncDiagnostics
 import com.nuvio.tv.ui.screens.player.audiosync.SubtitleSyncStatus
 import kotlinx.coroutines.delay
@@ -14,6 +15,7 @@ internal data class AiSubtitleSnapshot(
     val sourceUrl: String,
     val sourceLanguage: String?,
     val srt: String,
+    val cues: List<CuesWithTiming>,
     val cueCount: Int,
     val generation: Long,
 )
@@ -63,9 +65,35 @@ internal suspend fun PlayerRuntimeController.captureAiSubtitleSnapshot(
         sourceUrl = sourceUrl,
         sourceLanguage = selected.lang.takeIf { it.isNotBlank() },
         srt = srt,
+        cues = cues,
         cueCount = cues.size,
         generation = expectedGeneration,
     )
+}
+
+internal fun mergeTranslatedTextOntoTiming(
+    timing: List<CuesWithTiming>,
+    translated: List<CuesWithTiming>,
+): List<CuesWithTiming>? {
+    if (timing.size != translated.size || timing.isEmpty()) return null
+
+    return timing.indices.map { index ->
+        val original = timing[index]
+        val translatedEntry = translated[index]
+        if (original.startTimeUs == C.TIME_UNSET) return null
+
+        val durationUs = when {
+            original.durationUs != C.TIME_UNSET -> original.durationUs
+            original.endTimeUs != C.TIME_UNSET -> original.endTimeUs - original.startTimeUs
+            else -> C.TIME_UNSET
+        }
+
+        CuesWithTiming(
+            translatedEntry.cues,
+            original.startTimeUs,
+            durationUs,
+        )
+    }
 }
 
 internal fun List<CuesWithTiming>.toSrt(): String {
