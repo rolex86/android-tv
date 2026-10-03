@@ -49,6 +49,7 @@ class PlusPrefs {
     static final String KEY_COMPLETION_RULE = "completionRule";
     static final String KEY_EXTERNAL_PLAYER_DIAGNOSTICS = "externalPlayerDiagnostics";
     static final String KEY_STREMIO_CONNECTOR_ENABLED = "stremioConnectorEnabled";
+    static final String KEY_STREMIO_ACCOUNT_SYNC_ENABLED = "stremioAccountSyncEnabled";
     static final String KEY_NEXT_EPISODE_NOTICE_SECONDS = "nextEpisodeNoticeSeconds";
     static final String KEY_NEXT_EPISODE_POPUP_SIZE = "nextEpisodePopupSize";
 
@@ -91,6 +92,7 @@ class PlusPrefs {
     String completionRule;
     boolean externalPlayerDiagnostics;
     boolean stremioConnectorEnabled;
+    boolean stremioAccountSyncEnabled;
     int nextEpisodeNoticeSeconds;
     String nextEpisodePopupSize;
 
@@ -149,6 +151,8 @@ class PlusPrefs {
                 KEY_EXTERNAL_PLAYER_DIAGNOSTICS, false);
         stremioConnectorEnabled = preferences.getBoolean(
                 KEY_STREMIO_CONNECTOR_ENABLED, false);
+        stremioAccountSyncEnabled = preferences.getBoolean(
+                KEY_STREMIO_ACCOUNT_SYNC_ENABLED, false);
         nextEpisodeNoticeSeconds = Math.max(5, Math.min(90,
                 parseInt(KEY_NEXT_EPISODE_NOTICE_SECONDS, 30)));
         nextEpisodePopupSize = NextEpisodePopupSize.fromPreference(preferences.getString(
