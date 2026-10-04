@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - fix/nuvio-rs-plus-parity
     paths:
       - 'nuvio-rs-plus/**'
       - '.github/workflows/build-nuvio-rs-plus.yml'
@@ -132,16 +133,20 @@ jobs:
           done
 
           if (( ${#missing[@]} > 0 )); then
-            printf 'Refusing to publish a feature-reduced Nuvio RS Plus build. Missing repository secrets:\n' >&2
+            printf 'Parity credentials missing; build/tests will run, but release publication will be blocked:\n' >&2
             printf ' - %s\n' "${missing[@]}" >&2
-            exit 1
+            printf 'MISSING_PARITY_CREDENTIALS=%s\n' "$(IFS=,; echo "${missing[*]}")" >> "$GITHUB_ENV"
+          else
+            echo 'MISSING_PARITY_CREDENTIALS=' >> "$GITHUB_ENV"
           fi
 
           add_prop() {
             local key="$1"
             local value="$2"
-            printf '%s=%s\n' "$key" "$value" >> local.properties
-            printf '%s=%s\n' "$key" "$value" >> local.dev.properties
+            if [[ -n "$value" ]]; then
+              printf '%s=%s\n' "$key" "$value" >> local.properties
+              printf '%s=%s\n' "$key" "$value" >> local.dev.properties
+            fi
           }
 
           add_prop TRAKT_CLIENT_ID "$TRAKT_CLIENT_ID"
@@ -252,6 +257,16 @@ jobs:
         shell: bash
         run: |
           ./gradlew :app:assembleFullRelease --stacktrace --console=plain
+
+      - name: Enforce full Nuvio RS service parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${MISSING_PARITY_CREDENTIALS:-}" ]]; then
+            echo "Refusing to publish a feature-reduced Nuvio RS Plus build." >&2
+            echo "Missing repository secrets: $MISSING_PARITY_CREDENTIALS" >&2
+            exit 1
+          fi
 
       - name: Collect Shield and universal APKs
         shell: bash
