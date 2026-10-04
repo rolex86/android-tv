@@ -1,8 +1,10 @@
 package com.nuvio.tv.ui.screens.player.aisubtitles
 
 import android.util.Log
+import androidx.media3.exoplayer.ExoPlayer
 import com.nuvio.tv.BuildConfig
 import com.nuvio.tv.domain.model.Subtitle
+import com.nuvio.tv.ui.screens.player.PlayerEvent
 import com.nuvio.tv.ui.screens.player.PlayerRuntimeController
 import com.nuvio.tv.data.local.InternalPlayerEngine
 import com.nuvio.tv.ui.screens.player.autosync.AutoSyncSyncedSubtitle
@@ -54,6 +56,8 @@ private data class TranslationSession(
     val client: AiSubtitleBackendClient,
     val backendUrl: String,
     val apiToken: String,
+    val pausedPlayer: ExoPlayer?,
+    val resumePlaybackAfterBackground: Boolean,
 )
 
 private object AiSubtitleSessions {
@@ -84,6 +88,12 @@ internal fun PlayerRuntimeController.startAiSubtitleTranslation() {
         return
     }
     if (isAiSubtitle(selected)) return
+
+    val player = _exoPlayer
+    val resumePlaybackAfterBackground = player?.playWhenReady == true
+    if (resumePlaybackAfterBackground) {
+        player.pause()
+    }
 
     val backendUrl = AiSubtitlePreferences.backendUrl.value
     val apiToken = AiSubtitlePreferences.apiToken.value
@@ -212,12 +222,34 @@ internal fun PlayerRuntimeController.startAiSubtitleTranslation() {
     }
 
     synchronized(AiSubtitleSessions.sessions) {
-        AiSubtitleSessions.sessions[this] = TranslationSession(job, client, backendUrl, apiToken)
+        AiSubtitleSessions.sessions[this] = TranslationSession(
+            job = job,
+            client = client,
+            backendUrl = backendUrl,
+            apiToken = apiToken,
+            pausedPlayer = player,
+            resumePlaybackAfterBackground = resumePlaybackAfterBackground,
+        )
     }
 }
 
 internal fun PlayerRuntimeController.setAiSubtitleTranslationBackground(background: Boolean) {
     AiSubtitleTranslationStatus.update { it.copy(background = background) }
+    if (!background) return
+
+    onEvent(PlayerEvent.OnDismissTransientOverlay)
+
+    val session = synchronized(AiSubtitleSessions.sessions) {
+        AiSubtitleSessions.sessions[this]
+    } ?: return
+    val player = session.pausedPlayer ?: return
+    if (
+        session.resumePlaybackAfterBackground &&
+        _exoPlayer === player &&
+        !player.playWhenReady
+    ) {
+        player.play()
+    }
 }
 
 internal fun PlayerRuntimeController.cancelAiSubtitleTranslation() {
