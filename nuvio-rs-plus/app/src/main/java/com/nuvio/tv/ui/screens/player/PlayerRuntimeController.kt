@@ -30,6 +30,7 @@ import com.nuvio.tv.data.local.NextEpisodeThresholdMode
 import com.nuvio.tv.data.local.AudioDelayRouteDataStore
 import com.nuvio.tv.data.local.PlayerSettings
 import com.nuvio.tv.data.local.PlayerSettingsDataStore
+import com.nuvio.tv.data.local.SmartAudioContentPreference
 import com.nuvio.tv.data.local.DeviceLocalPlayerPreferences
 import com.nuvio.tv.data.local.StreamLinkCacheDataStore
 import com.nuvio.tv.data.local.StreamBadgeSettingsDataStore
@@ -547,6 +548,11 @@ class PlayerRuntimeController(
     internal var mpvHi10pGnextSoftwareFallbackEnabledSetting: Boolean = false
     internal var mpvHardwareDecodeModeSetting: MpvHardwareDecodeMode = MpvHardwareDecodeMode.AUTO_SAFE
     internal var mpvPreferredAudioLanguages: List<String> = emptyList()
+    internal var smartAudioContentPreferenceSetting: SmartAudioContentPreference = SmartAudioContentPreference.LANGUAGE
+    internal var smartAudioPreferBestQualitySetting: Boolean = true
+    internal var smartAudioIgnoreCommentarySetting: Boolean = true
+    internal var smartAudioIgnoreAudioDescriptionSetting: Boolean = true
+    internal var smartAudioAllowMediaDefaultSetting: Boolean = false
     internal var currentStreamBingeGroup: String? = navigationArgs.bingeGroup
     internal var hasAppliedRememberedAudioSelection: Boolean = false
     internal var hasInitializedAudioAmplificationForSession: Boolean = false
