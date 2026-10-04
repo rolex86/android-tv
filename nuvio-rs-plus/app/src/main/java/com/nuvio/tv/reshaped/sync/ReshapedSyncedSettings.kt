@@ -6,6 +6,7 @@ import com.nuvio.tv.reshaped.livetv.LiveTvPreferences
 import com.nuvio.tv.ui.reshaped.pillnav.PillNavPreferences
 import com.nuvio.tv.ui.screens.player.autosync.AutoSyncPreferences
 import com.nuvio.tv.ui.screens.player.autosync.bubble.AutoSyncBubbleToasts
+import com.nuvio.tv.ui.screens.player.aisubtitles.AiSubtitlePreferences
 import com.nuvio.tv.ui.screens.player.seekpreview.SeekrKeyPreferences
 import com.nuvio.tv.ui.screens.player.seekpreview.local.LocalSeekPreviewSettings
 import kotlinx.serialization.json.JsonElement
@@ -22,6 +23,7 @@ import kotlinx.serialization.json.intOrNull
 internal object ReshapedSyncedSettings {
     const val SHARED = "settings/shared"
     const val TV = "settings/tv"
+    const val PLUS = "settings/plus"
 
     private class Setting(
         val section: String,
@@ -60,6 +62,17 @@ internal object ReshapedSyncedSettings {
             TV, "seekr_key",
             read = { SeekrKeyPreferences.ensureLoaded(it); JsonPrimitive(SeekrKeyPreferences.userKey.value) },
             write = { context, value -> value.contentOrNull?.let { SeekrKeyPreferences.setUserKey(context, it) } },
+        ),
+        bool(
+            PLUS,
+            "ai_subtitles_enabled",
+            read = { AiSubtitlePreferences.ensureLoaded(it); AiSubtitlePreferences.enabled.value },
+            write = AiSubtitlePreferences::setEnabled,
+        ),
+        Setting(
+            PLUS, "ai_subtitles_backend_url",
+            read = { AiSubtitlePreferences.ensureLoaded(it); JsonPrimitive(AiSubtitlePreferences.backendUrl.value) },
+            write = { context, value -> value.contentOrNull?.let { AiSubtitlePreferences.setBackendUrl(context, it) } },
         ),
     )
 
