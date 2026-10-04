@@ -1,0 +1,165 @@
+name: Sync Nuvio RS Plus upstream
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nuvio-rs-plus-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out Plus repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve current baseline and newest matching Nuvio RS release
+        id: upstream
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          BASELINE="$(sed -nE 's/^- Synced baseline: `([^`]+)`.*/\1/p' nuvio-rs-plus/PLUS_UPSTREAM.md | head -n1)"
+          if [[ -z "$BASELINE" ]]; then
+            echo "Could not read synced baseline from nuvio-rs-plus/PLUS_UPSTREAM.md" >&2
+            exit 1
+          fi
+
+          if [[ "$BASELINE" == *-beta* ]]; then
+            TAG_RE='^[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+-autosync\.[0-9]+$'
+          else
+            TAG_RE='^[0-9]+\.[0-9]+\.[0-9]+-autosync\.[0-9]+$'
+          fi
+
+          LATEST="$(
+            gh api --paginate repos/DavidVamaiotu/NuvioTV-Reshaped/releases?per_page=100               --jq '.[] | select(.draft == false) | [.published_at, .tag_name] | @tsv'             | awk -F '\t' -v re="$TAG_RE" '$2 ~ re { print }'             | sort -r             | head -n1             | cut -f2
+          )"
+
+          if [[ -z "$LATEST" ]]; then
+            echo "No matching upstream Nuvio RS release found" >&2
+            exit 1
+          fi
+
+          echo "baseline=$BASELINE" >> "$GITHUB_OUTPUT"
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+
+          if [[ "$LATEST" == "$BASELINE" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Already synced to $BASELINE"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "New upstream release: $BASELINE -> $LATEST"
+          fi
+
+      - name: Merge upstream release onto Plus changes
+        if: steps.upstream.outputs.changed == 'true'
+        shell: bash
+        env:
+          BASELINE: ${{ steps.upstream.outputs.baseline }}
+          LATEST: ${{ steps.upstream.outputs.latest }}
+        run: |
+          set -euo pipefail
+
+          git clone --filter=blob:none --no-checkout             https://github.com/DavidVamaiotu/NuvioTV-Reshaped.git /tmp/nuvio-upstream
+          git -C /tmp/nuvio-upstream fetch --tags --force
+
+          git -C /tmp/nuvio-upstream checkout --detach "$BASELINE"
+          git -C /tmp/nuvio-upstream switch -c plus-sync-work
+
+          # Reconstruct our Plus tree as a commit directly on top of the exact
+          # upstream release we last synced. This gives Git a real three-way
+          # merge base, so upstream changes and Plus-only changes are merged
+          # normally instead of one tree blindly overwriting the other.
+          rsync -a --delete --exclude='.git' nuvio-rs-plus/ /tmp/nuvio-upstream/
+
+          git -C /tmp/nuvio-upstream config user.name "github-actions[bot]"
+          git -C /tmp/nuvio-upstream config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C /tmp/nuvio-upstream add -A
+          git -C /tmp/nuvio-upstream commit -m "Nuvio RS Plus changes on $BASELINE"
+
+          set +e
+          git -C /tmp/nuvio-upstream merge --no-ff --no-commit "$LATEST"
+          MERGE_STATUS=$?
+          set -e
+
+          if (( MERGE_STATUS != 0 )); then
+            echo "::error::Automatic Nuvio RS Plus upstream merge has conflicts. No Plus release will be published."
+            echo "Conflicting files:"
+            git -C /tmp/nuvio-upstream diff --name-only --diff-filter=U
+            exit 1
+          fi
+
+          # These are invariants of our fork. If upstream ever changes in a way
+          # that loses one of them, fail closed instead of publishing a reduced
+          # or wrongly identified build.
+          grep -Fq 'com.rolex86.nuviorsplus' /tmp/nuvio-upstream/app/reshaped.gradle
+          ! grep -R -Fq 'com.nuvio.reshaped.tv.permission.MIGRATE' /tmp/nuvio-upstream/app/src/main || {
+            echo "::error::Legacy migration permission returned; side-by-side install would break."
+            exit 1
+          }
+          test -f /tmp/nuvio-upstream/app/src/main/java/com/nuvio/tv/ui/screens/player/aisubtitles/AiSubtitlePreferences.kt
+          test -f /tmp/nuvio-upstream/app/src/main/java/com/nuvio/tv/ui/screens/settings/AiSubtitleSettingsItems.kt
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p = Path("/tmp/nuvio-upstream/PLUS_UPSTREAM.md")
+          s = p.read_text(encoding="utf-8")
+          old = os.environ["BASELINE"]
+          new = os.environ["LATEST"]
+          needle = f"- Synced baseline: `{old}`"
+          replacement = f"- Synced baseline: `{new}`"
+          if needle not in s:
+              raise SystemExit(f"Baseline marker not found: {needle}")
+          p.write_text(s.replace(needle, replacement, 1), encoding="utf-8")
+          PY
+
+          rm -rf nuvio-rs-plus
+          mkdir -p nuvio-rs-plus
+          rsync -a --exclude='.git' /tmp/nuvio-upstream/ nuvio-rs-plus/
+
+      - name: Verify Plus identity after sync
+        if: steps.upstream.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'com.rolex86.nuviorsplus' nuvio-rs-plus/app/reshaped.gradle
+          grep -Fq -- '- App name: `Nuvio RS Plus`' nuvio-rs-plus/PLUS_UPSTREAM.md
+          grep -Fq -- '- Update repository: `rolex86/android-tv`' nuvio-rs-plus/PLUS_UPSTREAM.md
+          test -f nuvio-rs-plus/app/src/main/java/com/nuvio/tv/ui/screens/player/aisubtitles/AiSubtitlePreferences.kt
+          test -f nuvio-rs-plus/app/src/main/java/com/nuvio/tv/ui/screens/settings/AiSubtitleSettingsItems.kt
+
+      - name: Commit synced upstream release
+        if: steps.upstream.outputs.changed == 'true'
+        shell: bash
+        env:
+          BASELINE: ${{ steps.upstream.outputs.baseline }}
+          LATEST: ${{ steps.upstream.outputs.latest }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add nuvio-rs-plus
+          if git diff --cached --quiet; then
+            echo "Nothing changed after merge; refusing to advance baseline silently." >&2
+            exit 1
+          fi
+
+          git commit -m "Sync Nuvio RS Plus with upstream $LATEST"
+          git push origin HEAD:main
+
+          echo "Synced Nuvio RS Plus from $BASELINE to $LATEST."
+          echo "The push to nuvio-rs-plus/** automatically starts Build Nuvio RS Plus."
