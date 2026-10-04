@@ -7,7 +7,6 @@ on:
       - main
     paths:
       - 'nuvio-rs-plus/**'
-      - '.github/workflows/build-nuvio-rs-plus.yml'
 
 permissions:
   contents: write
@@ -311,12 +310,15 @@ jobs:
         run: |
           set -euo pipefail
 
+          UPSTREAM_BASELINE="$(sed -nE 's/^- Synced baseline: `([^`]+)`.*/\1/p' PLUS_UPSTREAM.md | head -n1)"
+          test -n "$UPSTREAM_BASELINE"
+
           cat > ../release-notes.md <<EOF
           ## Nuvio RS Plus
 
           Nuvio RS Plus: Nuvio Reshaped plus our Plus-only features.
 
-          - Synced with Nuvio Reshaped beta upstream through `1.1.0-beta.3-autosync.6`
+          - Synced with Nuvio Reshaped beta upstream through `$UPSTREAM_BASELINE`
           - Package: `com.rolex86.nuviorsplus`
           - In-app updater points to `rolex86/android-tv`
           - Keeps upstream Google sync, Trakt, MDBList, Seekr and TMDB integrations enabled
