@@ -6,6 +6,7 @@ import com.nuvio.tv.BuildConfig
 import com.nuvio.tv.domain.model.Subtitle
 import com.nuvio.tv.ui.screens.player.PlayerEvent
 import com.nuvio.tv.ui.screens.player.PlayerRuntimeController
+import com.nuvio.tv.ui.screens.player.onEvent
 import com.nuvio.tv.data.local.InternalPlayerEngine
 import com.nuvio.tv.ui.screens.player.autosync.AutoSyncSyncedSubtitle
 import com.nuvio.tv.ui.screens.player.commitPreparedSidecarSubtitle
