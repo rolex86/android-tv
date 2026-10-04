@@ -217,6 +217,12 @@ internal fun PlayerRuntimeController.initializePlayer(
                 contentOriginalLanguage = contentLanguage
             )
             mpvPreferredAudioLanguages = preferredAudioLanguages
+            smartAudioContentPreferenceSetting = playerSettings.smartAudioContentPreference
+            smartAudioPreferBestQualitySetting = playerSettings.smartAudioPreferBestQuality
+            smartAudioIgnoreCommentarySetting = playerSettings.smartAudioIgnoreCommentary
+            smartAudioIgnoreAudioDescriptionSetting = playerSettings.smartAudioIgnoreAudioDescription
+            smartAudioAllowMediaDefaultSetting =
+                playerSettings.preferredAudioLanguage.equals(AudioLanguageOption.DEFAULT, ignoreCase = true)
             mpvHi10pGnextSoftwareFallbackEnabledSetting =
                 playerSettings.mpvHi10pGnextSoftwareFallbackEnabled
             mpvHardwareDecodeModeSetting = playerSettings.mpvHardwareDecodeMode
@@ -2036,6 +2042,7 @@ internal fun PlayerRuntimeController.resetAddonSubtitleStateForNewStream() {
     pendingAddonSubtitleLanguage = null
     pendingAddonSubtitleTrackId = null
     pendingAudioSelectionAfterSubtitleRefresh = null
+    hasAppliedRememberedAudioSelection = false
     explicitSubtitleSelectionForEngineSwitch = null
     effectiveSubtitleSelectionForEngineSwitch = null
     attachedAddonSubtitleKeys = emptySet()
