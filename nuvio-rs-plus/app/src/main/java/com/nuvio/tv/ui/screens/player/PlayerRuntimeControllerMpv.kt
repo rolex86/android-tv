@@ -328,7 +328,8 @@ private fun PlayerRuntimeController.applyMpvTrackSnapshot(snapshot: MpvTrackSnap
                 trackId = track.id.toString(),
                 codec = track.codec,
                 channelCount = track.channelCount,
-                isSelected = track.isSelected
+                isSelected = track.isSelected,
+                rawLabel = track.name,
             )
         }
 
@@ -360,7 +361,8 @@ private fun PlayerRuntimeController.applyMpvTrackSnapshot(snapshot: MpvTrackSnap
     if (internalSubtitleTracks.isNotEmpty() || hasRenderedFirstFrame) {
         hasScannedTextTracksOnce = true
     }
-    maybeRestorePendingAudioSelectionAfterSubtitleRefresh(audioTracks)
+    val restoredAudioAfterSubtitleRefresh =
+        maybeRestorePendingAudioSelectionAfterSubtitleRefresh(audioTracks)
 
     _uiState.update { state ->
         val selectedAddonFromMpvTrack = selectedExternalSubtitleTrack?.let { track ->
@@ -399,10 +401,13 @@ private fun PlayerRuntimeController.applyMpvTrackSnapshot(snapshot: MpvTrackSnap
             )
         }
     }
-    applyPersistedTrackPreference(
+    val rememberedAudioHandled = applyPersistedTrackPreference(
         audioTracks = audioTracks,
         subtitleTracks = internalSubtitleTracks
     )
+    if (restoredAudioAfterSubtitleRefresh == null && !rememberedAudioHandled) {
+        tryApplySmartAudioSelection(audioTracks)
+    }
     logSwitchTrace(
         stage = "mpv-snapshot-after-restore",
         message = "uiAudioIndex=${_uiState.value.selectedAudioTrackIndex} " +
