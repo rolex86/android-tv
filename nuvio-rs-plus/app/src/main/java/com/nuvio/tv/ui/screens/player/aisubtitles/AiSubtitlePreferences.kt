@@ -12,7 +12,7 @@ internal object AiSubtitlePreferences {
     private const val KEY_API_TOKEN = "api_token"
 
     const val DEFAULT_BACKEND_URL = "http://192.168.0.109:8787"
-    const val TARGET_LANGUAGE = "cs"
+    const val TARGET_LANGUAGE = "ces"
 
     private var loaded = false
     private val _enabled = MutableStateFlow(true)
