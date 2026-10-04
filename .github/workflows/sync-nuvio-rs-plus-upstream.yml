@@ -4,6 +4,11 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '7,22,37,52 * * * *'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/sync-nuvio-rs-plus-upstream.yml'
 
 permissions:
   contents: write
