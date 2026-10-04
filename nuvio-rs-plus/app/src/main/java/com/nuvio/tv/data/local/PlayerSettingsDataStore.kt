@@ -185,6 +185,12 @@ object AudioLanguageOption {
     const val ORIGINAL = "original"  // Use content's original language (from TMDB)
 }
 
+enum class SmartAudioContentPreference {
+    LANGUAGE,
+    ORIGINAL,
+    DUBBED,
+}
+
 enum class AudioOutputChannels(
     val settingValue: String,
     val displayLabel: String,
@@ -236,6 +242,10 @@ data class PlayerSettings(
     val rememberAudioDelayPerDevice: Boolean = true,
     val preferredAudioLanguage: String = AudioLanguageOption.DEVICE,
     val secondaryPreferredAudioLanguage: String? = null,
+    val smartAudioContentPreference: SmartAudioContentPreference = SmartAudioContentPreference.LANGUAGE,
+    val smartAudioPreferBestQuality: Boolean = true,
+    val smartAudioIgnoreCommentary: Boolean = true,
+    val smartAudioIgnoreAudioDescription: Boolean = true,
     val loadingOverlayEnabled: Boolean = true,
     val showPlayerLoadingStatus: Boolean = true,
     val playbackIssueReportsEnabled: Boolean = false,
@@ -501,6 +511,10 @@ class PlayerSettingsDataStore @Inject constructor(
     private val rememberAudioDelayPerDeviceKey = booleanPreferencesKey("remember_audio_delay_per_device")
     private val preferredAudioLanguageKey = stringPreferencesKey("preferred_audio_language")
     private val secondaryPreferredAudioLanguageKey = stringPreferencesKey("secondary_preferred_audio_language")
+    private val smartAudioContentPreferenceKey = stringPreferencesKey("smart_audio_content_preference")
+    private val smartAudioPreferBestQualityKey = booleanPreferencesKey("smart_audio_prefer_best_quality")
+    private val smartAudioIgnoreCommentaryKey = booleanPreferencesKey("smart_audio_ignore_commentary")
+    private val smartAudioIgnoreAudioDescriptionKey = booleanPreferencesKey("smart_audio_ignore_audio_description")
     private val loadingOverlayEnabledKey = booleanPreferencesKey("loading_overlay_enabled")
     private val showPlayerLoadingStatusKey = booleanPreferencesKey("show_player_loading_status")
     private val playbackIssueReportsEnabledKey = booleanPreferencesKey("playback_issue_reports_enabled")
@@ -884,6 +898,15 @@ class PlayerSettingsDataStore @Inject constructor(
                 ),
                 secondaryPreferredAudioLanguage = prefs[secondaryPreferredAudioLanguageKey]
                     ?.let(::normalizeSecondaryAudioLanguageCode),
+                smartAudioContentPreference = prefs[smartAudioContentPreferenceKey]
+                    ?.let { stored ->
+                        runCatching { SmartAudioContentPreference.valueOf(stored) }
+                            .getOrDefault(SmartAudioContentPreference.LANGUAGE)
+                    }
+                    ?: SmartAudioContentPreference.LANGUAGE,
+                smartAudioPreferBestQuality = prefs[smartAudioPreferBestQualityKey] ?: true,
+                smartAudioIgnoreCommentary = prefs[smartAudioIgnoreCommentaryKey] ?: true,
+                smartAudioIgnoreAudioDescription = prefs[smartAudioIgnoreAudioDescriptionKey] ?: true,
                 loadingOverlayEnabled = prefs[loadingOverlayEnabledKey] ?: true,
                 showPlayerLoadingStatus = prefs[showPlayerLoadingStatusKey] ?: true,
                 playbackIssueReportsEnabled = prefs[playbackIssueReportsEnabledKey] ?: false,
@@ -1179,6 +1202,30 @@ class PlayerSettingsDataStore @Inject constructor(
             val normalizedLanguage = language?.takeIf { it.isNotBlank() }?.let(::normalizeSecondaryAudioLanguageCode)
             if (normalizedLanguage != null) prefs[secondaryPreferredAudioLanguageKey] = normalizedLanguage
             else prefs.remove(secondaryPreferredAudioLanguageKey)
+        }
+    }
+
+    suspend fun setSmartAudioContentPreference(preference: SmartAudioContentPreference) {
+        store().edit { prefs ->
+            prefs[smartAudioContentPreferenceKey] = preference.name
+        }
+    }
+
+    suspend fun setSmartAudioPreferBestQuality(enabled: Boolean) {
+        store().edit { prefs ->
+            prefs[smartAudioPreferBestQualityKey] = enabled
+        }
+    }
+
+    suspend fun setSmartAudioIgnoreCommentary(enabled: Boolean) {
+        store().edit { prefs ->
+            prefs[smartAudioIgnoreCommentaryKey] = enabled
+        }
+    }
+
+    suspend fun setSmartAudioIgnoreAudioDescription(enabled: Boolean) {
+        store().edit { prefs ->
+            prefs[smartAudioIgnoreAudioDescriptionKey] = enabled
         }
     }
 
