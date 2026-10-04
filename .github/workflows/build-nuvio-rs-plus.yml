@@ -103,29 +103,52 @@ jobs:
           Path("local.dev.properties").write_text("\n".join(lines) + "\n", encoding="utf-8")
           PY
 
-      - name: Add optional service credentials
+      - name: Configure Nuvio RS parity credentials
         shell: bash
         env:
           TRAKT_CLIENT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
           TRAKT_CLIENT_SECRET: ${{ secrets.TRAKT_CLIENT_SECRET }}
           MDBLIST_CLIENT_ID: ${{ secrets.MDBLIST_CLIENT_ID }}
           SEEKR_API_KEY: ${{ secrets.SEEKR_API_KEY }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
           RESHAPED_GOOGLE_TV_CLIENT_ID: ${{ secrets.RESHAPED_GOOGLE_TV_CLIENT_ID }}
           RESHAPED_GOOGLE_TV_CLIENT_SECRET: ${{ secrets.RESHAPED_GOOGLE_TV_CLIENT_SECRET }}
         run: |
           set -euo pipefail
+
+          missing=()
+          for key in \
+            TRAKT_CLIENT_ID \
+            TRAKT_CLIENT_SECRET \
+            MDBLIST_CLIENT_ID \
+            SEEKR_API_KEY \
+            TMDB_API_KEY \
+            RESHAPED_GOOGLE_TV_CLIENT_ID \
+            RESHAPED_GOOGLE_TV_CLIENT_SECRET
+          do
+            if [[ -z "${!key:-}" ]]; then
+              missing+=("$key")
+            fi
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Refusing to publish a feature-reduced Nuvio RS Plus build. Missing repository secrets:\n' >&2
+            printf ' - %s\n' "${missing[@]}" >&2
+            exit 1
+          fi
+
           add_prop() {
             local key="$1"
             local value="$2"
-            if [[ -n "$value" ]]; then
-              printf '%s=%s\n' "$key" "$value" >> local.properties
-              printf '%s=%s\n' "$key" "$value" >> local.dev.properties
-            fi
+            printf '%s=%s\n' "$key" "$value" >> local.properties
+            printf '%s=%s\n' "$key" "$value" >> local.dev.properties
           }
+
           add_prop TRAKT_CLIENT_ID "$TRAKT_CLIENT_ID"
           add_prop TRAKT_CLIENT_SECRET "$TRAKT_CLIENT_SECRET"
           add_prop MDBLIST_CLIENT_ID "$MDBLIST_CLIENT_ID"
           add_prop SEEKR_API_KEY "$SEEKR_API_KEY"
+          add_prop TMDB_API_KEY "$TMDB_API_KEY"
           add_prop RESHAPED_GOOGLE_TV_CLIENT_ID "$RESHAPED_GOOGLE_TV_CLIENT_ID"
           add_prop RESHAPED_GOOGLE_TV_CLIENT_SECRET "$RESHAPED_GOOGLE_TV_CLIENT_SECRET"
 
@@ -279,12 +302,13 @@ jobs:
           cat > ../release-notes.md <<EOF
           ## Nuvio RS Plus
 
-          First separately installable Nuvio RS Plus baseline build.
+          Nuvio RS Plus: Nuvio Reshaped plus our Plus-only features.
 
-          - Based on the current NuvioTV Reshaped `subtitle-autosync` source imported into this repository
+          - Synced with Nuvio Reshaped beta upstream through `1.1.0-beta.3-autosync.6`
           - Package: `com.rolex86.nuviorsplus`
           - In-app updater points to `rolex86/android-tv`
-          - No Plus feature changes yet; this release is for baseline Shield testing
+          - Keeps upstream Google sync, Trakt, MDBList, Seekr and TMDB integrations enabled
+          - Includes Plus AI subtitle and AutoSync UI changes
           EOF
 
           gh release create "$TAG" ../release-apks/*.apk \
