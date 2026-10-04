@@ -9,6 +9,7 @@ import com.nuvio.tv.data.local.AudioLanguageOption
 import com.nuvio.tv.data.local.AudioOutputChannels
 import com.nuvio.tv.data.local.PlayerPreference
 import com.nuvio.tv.data.local.PlayerSettings
+import com.nuvio.tv.data.local.SmartAudioContentPreference
 import com.nuvio.tv.data.local.displayName
 
 @Composable
@@ -35,6 +36,38 @@ internal fun PlaybackAudioSection(
         value = secondaryAudioLanguageLabel(settings.secondaryPreferredAudioLanguage),
         enabled = enabled,
         onClick = { onOpenDialog(PlaybackDialog.SECONDARY_AUDIO_LANGUAGE) }
+    )
+
+    SettingsSectionLabel(text = stringResource(R.string.audio_smart_filtering_section))
+    SettingsNote(text = stringResource(R.string.audio_smart_filtering_note))
+
+    SettingsActionRow(
+        title = stringResource(R.string.audio_smart_content_preference),
+        subtitle = stringResource(R.string.audio_smart_content_preference_sub),
+        value = smartAudioContentPreferenceLabel(settings.smartAudioContentPreference),
+        enabled = enabled,
+        onClick = { onOpenDialog(PlaybackDialog.SMART_AUDIO_CONTENT) }
+    )
+    SettingsToggleRow(
+        title = stringResource(R.string.audio_smart_best_quality),
+        subtitle = stringResource(R.string.audio_smart_best_quality_sub),
+        checked = settings.smartAudioPreferBestQuality,
+        onToggle = { onUpdate { setSmartAudioPreferBestQuality(!settings.smartAudioPreferBestQuality) } },
+        enabled = enabled
+    )
+    SettingsToggleRow(
+        title = stringResource(R.string.audio_smart_ignore_commentary),
+        subtitle = stringResource(R.string.audio_smart_ignore_commentary_sub),
+        checked = settings.smartAudioIgnoreCommentary,
+        onToggle = { onUpdate { setSmartAudioIgnoreCommentary(!settings.smartAudioIgnoreCommentary) } },
+        enabled = enabled
+    )
+    SettingsToggleRow(
+        title = stringResource(R.string.audio_smart_ignore_description),
+        subtitle = stringResource(R.string.audio_smart_ignore_description_sub),
+        checked = settings.smartAudioIgnoreAudioDescription,
+        onToggle = { onUpdate { setSmartAudioIgnoreAudioDescription(!settings.smartAudioIgnoreAudioDescription) } },
+        enabled = enabled
     )
 
     if (isExoEngine) {
@@ -122,6 +155,13 @@ private fun secondaryAudioLanguageLabel(code: String?): String = when {
 }
 
 @Composable
+private fun smartAudioContentPreferenceLabel(preference: SmartAudioContentPreference): String = when (preference) {
+    SmartAudioContentPreference.LANGUAGE -> stringResource(R.string.audio_smart_content_language)
+    SmartAudioContentPreference.ORIGINAL -> stringResource(R.string.audio_smart_content_original)
+    SmartAudioContentPreference.DUBBED -> stringResource(R.string.audio_smart_content_dubbed)
+}
+
+@Composable
 internal fun decoderPriorityLabel(priority: Int): String = when (priority) {
     0 -> stringResource(R.string.audio_decoder_device_only)
     2 -> stringResource(R.string.audio_decoder_prefer_app)
@@ -157,6 +197,14 @@ internal fun AudioSettingsDialogs(
             },
             onDismiss = onDismiss
         )
+        PlaybackDialog.SMART_AUDIO_CONTENT -> SmartAudioContentPreferenceDialog(
+            selectedPreference = settings.smartAudioContentPreference,
+            onPreferenceSelected = { preference ->
+                onUpdate { setSmartAudioContentPreference(preference) }
+                onDismiss()
+            },
+            onDismiss = onDismiss
+        )
         PlaybackDialog.AUDIO_OUTPUT_CHANNELS -> AudioOutputChannelsDialog(
             selectedChannels = settings.audioOutputChannels,
             onChannelsSelected = { channels ->
@@ -175,6 +223,37 @@ internal fun AudioSettingsDialogs(
         )
         else -> Unit
     }
+}
+
+@Composable
+private fun SmartAudioContentPreferenceDialog(
+    selectedPreference: SmartAudioContentPreference,
+    onPreferenceSelected: (SmartAudioContentPreference) -> Unit,
+    onDismiss: () -> Unit
+) {
+    SettingsSingleChoiceDialog(
+        title = stringResource(R.string.audio_smart_content_preference),
+        subtitle = stringResource(R.string.audio_smart_content_preference_sub),
+        options = listOf(
+            SettingsPickerOption(
+                SmartAudioContentPreference.LANGUAGE,
+                stringResource(R.string.audio_smart_content_language)
+            ),
+            SettingsPickerOption(
+                SmartAudioContentPreference.ORIGINAL,
+                stringResource(R.string.audio_smart_content_original)
+            ),
+            SettingsPickerOption(
+                SmartAudioContentPreference.DUBBED,
+                stringResource(R.string.audio_smart_content_dubbed)
+            )
+        ),
+        selectedValue = selectedPreference,
+        onOptionSelected = onPreferenceSelected,
+        onDismiss = onDismiss,
+        width = 520.dp,
+        maxHeight = 360.dp
+    )
 }
 
 @Composable
