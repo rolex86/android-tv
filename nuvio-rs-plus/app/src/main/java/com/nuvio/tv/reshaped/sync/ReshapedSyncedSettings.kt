@@ -74,6 +74,11 @@ internal object ReshapedSyncedSettings {
             read = { AiSubtitlePreferences.ensureLoaded(it); JsonPrimitive(AiSubtitlePreferences.backendUrl.value) },
             write = { context, value -> value.contentOrNull?.let { AiSubtitlePreferences.setBackendUrl(context, it) } },
         ),
+        Setting(
+            PLUS, "ai_subtitles_api_token",
+            read = { AiSubtitlePreferences.ensureLoaded(it); JsonPrimitive(AiSubtitlePreferences.apiToken.value) },
+            write = { context, value -> value.contentOrNull?.let { AiSubtitlePreferences.setApiToken(context, it) } },
+        ),
     )
 
     /** This device's values, by section. */
