@@ -129,7 +129,13 @@ internal fun PlayerRuntimeController.updateAvailableTracks(tracks: Tracks) {
                             codec = codecName,
                             channelCount = format.channelCount.takeIf { it > 0 },
                             isSelected = isSelected,
-                            sampleRate = format.sampleRate.takeIf { it > 0 }
+                            sampleRate = format.sampleRate.takeIf { it > 0 },
+                            rawLabel = format.label,
+                            sampleMimeType = format.sampleMimeType,
+                            bitrate = format.bitrate.takeIf { it > 0 },
+                            roleFlags = format.roleFlags,
+                            selectionFlags = format.selectionFlags,
+                            isSupported = trackGroup.isTrackSupported(i),
                         )
                     )
                 }
@@ -286,7 +292,9 @@ internal fun PlayerRuntimeController.updateAvailableTracks(tracks: Tracks) {
         pendingAddonSubtitleLanguage = null
     }
 
-    maybeRestorePendingAudioSelectionAfterSubtitleRefresh(audioTracks)?.let { restoredIndex ->
+    val restoredAudioAfterSubtitleRefresh =
+        maybeRestorePendingAudioSelectionAfterSubtitleRefresh(audioTracks)
+    restoredAudioAfterSubtitleRefresh?.let { restoredIndex ->
         selectedAudioIndex = restoredIndex
     }
 
@@ -313,10 +321,13 @@ internal fun PlayerRuntimeController.updateAvailableTracks(tracks: Tracks) {
         subtitleTracks = subtitleTracks,
         selectedSubtitleIndex = selectedSubtitleIndex
     )
-    applyPersistedTrackPreference(
+    val rememberedAudioHandled = applyPersistedTrackPreference(
         audioTracks = audioTracks,
         subtitleTracks = subtitleTracks
     )
+    if (restoredAudioAfterSubtitleRefresh == null && !rememberedAudioHandled) {
+        tryApplySmartAudioSelection(audioTracks)
+    }
     if (currentStreamHasVideoTrack) {
         maybeScheduleFirstFrameWatchdog()
     } else {
@@ -898,7 +909,7 @@ private fun PlayerRuntimeController.hasSparseMpvSubtitleMetadataForEngineSwitch(
 internal fun PlayerRuntimeController.applyPersistedTrackPreference(
     audioTracks: List<TrackInfo>,
     subtitleTracks: List<TrackInfo>
-) {
+): Boolean {
     val switchPending = pendingEngineSwitchTrackPreference
         ?.takeIf { it.streamUrl == currentStreamUrl }
     if (pendingEngineSwitchTrackPreference != null && switchPending == null) {
@@ -923,15 +934,17 @@ internal fun PlayerRuntimeController.applyPersistedTrackPreference(
             stage = "restore-skip",
             message = "reason=no-pending-preference"
         )
-        return
+        return false
     }
     val switchSourceEngine = switchPending?.sourceEngine
     var updatedPending = pending
+    var audioPreferenceHandled = false
     var updatedSubtitleIndex: Int? = null
     var updatedAddonSubtitle: com.nuvio.tv.domain.model.Subtitle? = null
 
     pending.audio?.let { audioSelection ->
         if (audioTracks.isEmpty()) {
+            audioPreferenceHandled = true
             logSwitchTrace(
                 stage = "restore-audio",
                 message = "result=defer reason=no-audio-tracks"
@@ -940,6 +953,8 @@ internal fun PlayerRuntimeController.applyPersistedTrackPreference(
         } else {
             val index = findMatchingTrackIndex(audioTracks, audioSelection)
             if (index >= 0) {
+                audioPreferenceHandled = true
+                hasAppliedRememberedAudioSelection = true
                 val alreadySelected = audioTracks.getOrNull(index)?.isSelected == true
                 logSwitchTrace(
                     stage = "restore-audio",
@@ -1188,6 +1203,7 @@ internal fun PlayerRuntimeController.applyPersistedTrackPreference(
         )
         persistedTrackPreference = normalizedPending
     }
+    return audioPreferenceHandled
 }
 
 internal fun PlayerRuntimeController.subtitleLanguageTargets(): List<String> {
