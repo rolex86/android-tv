@@ -10,6 +10,7 @@ import com.nuvio.tv.data.local.Dv7HandlingMode
 import com.nuvio.tv.data.local.PlayerSettings
 import com.nuvio.tv.data.local.PlayerSettingsDataStore
 import com.nuvio.tv.data.local.PlayerPreference
+import com.nuvio.tv.data.local.SmartAudioContentPreference
 import com.nuvio.tv.core.player.LastPlaybackDiagnostics
 import com.nuvio.tv.data.local.FrameRateMatchingMode
 import com.nuvio.tv.data.local.NextEpisodeThresholdMode
@@ -156,6 +157,22 @@ class PlaybackSettingsViewModel @Inject constructor(
 
     suspend fun setSecondaryPreferredAudioLanguage(language: String?) {
         playerSettingsDataStore.setSecondaryPreferredAudioLanguage(language)
+    }
+
+    suspend fun setSmartAudioContentPreference(preference: SmartAudioContentPreference) {
+        playerSettingsDataStore.setSmartAudioContentPreference(preference)
+    }
+
+    suspend fun setSmartAudioPreferBestQuality(enabled: Boolean) {
+        playerSettingsDataStore.setSmartAudioPreferBestQuality(enabled)
+    }
+
+    suspend fun setSmartAudioIgnoreCommentary(enabled: Boolean) {
+        playerSettingsDataStore.setSmartAudioIgnoreCommentary(enabled)
+    }
+
+    suspend fun setSmartAudioIgnoreAudioDescription(enabled: Boolean) {
+        playerSettingsDataStore.setSmartAudioIgnoreAudioDescription(enabled)
     }
 
     suspend fun setLoadingOverlayEnabled(enabled: Boolean) {
