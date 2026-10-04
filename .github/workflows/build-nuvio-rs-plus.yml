@@ -119,9 +119,7 @@ jobs:
           missing=()
           for key in \
             TRAKT_CLIENT_ID \
-            TRAKT_CLIENT_SECRET \
             MDBLIST_CLIENT_ID \
-            SEEKR_API_KEY \
             TMDB_API_KEY \
             RESHAPED_GOOGLE_TV_CLIENT_ID \
             RESHAPED_GOOGLE_TV_CLIENT_SECRET
