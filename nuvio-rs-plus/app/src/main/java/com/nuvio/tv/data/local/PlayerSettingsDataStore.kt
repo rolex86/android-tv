@@ -224,6 +224,7 @@ data class PlayerSettings(
     val playerPreference: PlayerPreference = PlayerPreference.INTERNAL,
     val internalPlayerEngine: InternalPlayerEngine = InternalPlayerEngine.EXOPLAYER,
     val autoSwitchInternalPlayerOnError: Boolean = false,
+    val plusResumeRewindSeconds: Int = 0,
     val useLibass: Boolean = true,
     val libassRenderType: LibassRenderType = LibassRenderType.OVERLAY_OPEN_GL,
     val subtitleStyle: SubtitleStyleSettings = SubtitleStyleSettings(),
@@ -493,6 +494,7 @@ class PlayerSettingsDataStore @Inject constructor(
     private val playerPreferenceKey = stringPreferencesKey("player_preference")
     private val internalPlayerEngineKey = stringPreferencesKey("internal_player_engine")
     private val autoSwitchInternalPlayerOnErrorKey = booleanPreferencesKey("auto_switch_internal_player_on_error")
+    private val plusResumeRewindSecondsKey = intPreferencesKey("plus_resume_rewind_seconds")
     private val useLibassKey = booleanPreferencesKey("use_libass")
     private val libassRenderTypeKey = stringPreferencesKey("libass_render_type")
     private val decoderPriorityKey = intPreferencesKey("decoder_priority")
@@ -862,6 +864,7 @@ class PlayerSettingsDataStore @Inject constructor(
                     runCatching { InternalPlayerEngine.valueOf(it) }.getOrDefault(InternalPlayerEngine.EXOPLAYER)
                 } ?: InternalPlayerEngine.EXOPLAYER,
                 autoSwitchInternalPlayerOnError = prefs[autoSwitchInternalPlayerOnErrorKey] ?: false,
+                plusResumeRewindSeconds = (prefs[plusResumeRewindSecondsKey] ?: 0).coerceIn(0, 30),
                 useLibass = prefs[useLibassKey] ?: false,
                 libassRenderType = prefs[libassRenderTypeKey]?.let {
                     try { LibassRenderType.valueOf(it) } catch (e: Exception) { LibassRenderType.OVERLAY_OPEN_GL }
@@ -1098,6 +1101,12 @@ class PlayerSettingsDataStore @Inject constructor(
     suspend fun setAutoSwitchInternalPlayerOnError(enabled: Boolean) {
         store().edit { prefs ->
             prefs[autoSwitchInternalPlayerOnErrorKey] = enabled
+        }
+    }
+
+    suspend fun setPlusResumeRewindSeconds(seconds: Int) {
+        store().edit { prefs ->
+            prefs[plusResumeRewindSecondsKey] = seconds.coerceIn(0, 30)
         }
     }
 
