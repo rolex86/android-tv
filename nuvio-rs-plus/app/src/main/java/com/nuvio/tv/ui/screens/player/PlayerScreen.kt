@@ -2219,6 +2219,7 @@ private fun PlayerControlsOverlay(
     val customSourcePainter = rememberRawSvgPainter(R.raw.ic_player_source)
     val customAspectPainter = rememberRawSvgPainter(R.raw.ic_player_aspect_ratio)
     val customEpisodesPainter = rememberRawSvgPainter(R.raw.ic_player_episodes)
+    val customWhatDidTheySayPainter = rememberRawSvgPainter(R.raw.ic_player_what_did_they_say)
     val playbackTimeline by viewModel.playbackTimeline.collectAsState()
     val isLivePlayback = playbackTimeline.isLive
     val progressUpTarget = if (isLivePlayback) {
@@ -2406,6 +2407,16 @@ private fun PlayerControlsOverlay(
                         )
                     }
 
+                    ControlButton(
+                        icon = Icons.Default.ClosedCaption,
+                        iconPainter = customWhatDidTheySayPainter,
+                        contentDescription = stringResource(R.string.cd_plus_what_did_they_say),
+                        onClick = onWhatDidTheySay,
+                        upFocusRequester = progressUpTarget,
+                        onDownKey = onHideControls,
+                        onFocused = onResetHideTimer
+                    )
+
                     if (hasSubtitleControl) {
                         ControlButton(
                             icon = Icons.Default.ClosedCaption,
@@ -2482,14 +2493,6 @@ private fun PlayerControlsOverlay(
                                 onClick = {
                                     onShowSpeedDialog()
                                 },
-                                upFocusRequester = progressUpTarget,
-                                onDownKey = onHideControls,
-                                onFocused = onResetHideTimer
-                            )
-                            ControlButton(
-                                icon = Icons.Default.ClosedCaption,
-                                contentDescription = stringResource(R.string.cd_plus_what_did_they_say),
-                                onClick = onWhatDidTheySay,
                                 upFocusRequester = progressUpTarget,
                                 onDownKey = onHideControls,
                                 onFocused = onResetHideTimer
