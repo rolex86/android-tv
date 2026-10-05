@@ -681,11 +681,14 @@ internal fun PlayerRuntimeController.tryApplyPendingResumeProgress(player: Playe
         return
     }
     val duration = player.duration
-    val target = when {
-        duration > 0L -> saved.resolveResumePosition(duration)
-        saved.position > 0L -> saved.position
-        else -> 0L
-    }
+    val target = PlusResumeRewind.apply(
+        positionMs = when {
+            duration > 0L -> saved.resolveResumePosition(duration)
+            saved.position > 0L -> saved.position
+            else -> 0L
+        },
+        rewindSeconds = plusResumeRewindSecondsSetting
+    )
 
     if (target > 0L) {
         player.seekTo(target)
@@ -696,11 +699,14 @@ internal fun PlayerRuntimeController.tryApplyPendingResumeProgress(player: Playe
 
 internal fun PlayerRuntimeController.resolvePendingInitialResumePosition(): Long {
     val saved = pendingResumeProgress ?: return 0L
-    val target = when {
-        saved.duration > 0L -> saved.resolveResumePosition(saved.duration)
-        saved.position > 0L -> saved.position
-        else -> 0L
-    }
+    val target = PlusResumeRewind.apply(
+        positionMs = when {
+            saved.duration > 0L -> saved.resolveResumePosition(saved.duration)
+            saved.position > 0L -> saved.position
+            else -> 0L
+        },
+        rewindSeconds = plusResumeRewindSecondsSetting
+    )
     if (target <= 0L && saved.progressPercent == null) {
         clearPendingInitialResumePosition()
     }
