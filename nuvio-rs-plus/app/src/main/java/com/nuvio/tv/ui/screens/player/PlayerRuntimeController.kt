@@ -30,6 +30,7 @@ import com.nuvio.tv.data.local.NextEpisodeThresholdMode
 import com.nuvio.tv.data.local.AudioDelayRouteDataStore
 import com.nuvio.tv.data.local.PlayerSettings
 import com.nuvio.tv.data.local.PlayerSettingsDataStore
+import com.nuvio.tv.data.local.PlusSubtitleSourcePreference
 import com.nuvio.tv.data.local.SmartAudioContentPreference
 import com.nuvio.tv.data.local.DeviceLocalPlayerPreferences
 import com.nuvio.tv.data.local.StreamLinkCacheDataStore
@@ -554,6 +555,7 @@ class PlayerRuntimeController(
     internal var smartAudioIgnoreAudioDescriptionSetting: Boolean = true
     internal var smartAudioAllowMediaDefaultSetting: Boolean = false
     internal var plusResumeRewindSecondsSetting: Int = 0
+    internal var plusSubtitleSourcePreferenceSetting: PlusSubtitleSourcePreference = PlusSubtitleSourcePreference.AUTO
     internal var currentStreamBingeGroup: String? = navigationArgs.bingeGroup
     internal var hasAppliedRememberedAudioSelection: Boolean = false
     internal var hasInitializedAudioAmplificationForSession: Boolean = false
