@@ -1637,22 +1637,27 @@ internal fun PlayerRuntimeController.tryAutoSelectPreferredSubtitleFromAvailable
     }
     val selectedAudioTrack = selectedAudioTrackForSubtitleMatching(state)
     val useForcedSubtitles = state.subtitleStyle.useForcedSubtitles
-    val forcedTarget = when {
-        !useForcedSubtitles -> null
-        primaryTarget != null && selectedAudioTrack != null && audioMatchesSubtitleTargetForForced(selectedAudioTrack, primaryTarget) ->
-            primaryTarget
-        primaryTarget == null &&
-            selectedAudioTrack != null &&
-            selectedAudioMatchesResolvedPreferredAudio(selectedAudioTrack) ->
-            selectedAudioLanguageTarget(selectedAudioTrack)
-        else -> null
-    }
-    val forcedOnly = forcedTarget != null
-    val targets = when {
-        forcedTarget != null -> listOf(forcedTarget)
-        primaryTarget != null -> preferredTargets
-        else -> emptyList()
-    }
+    val audioAwareDecision = PlusAudioAwareSubtitleRules.resolve(
+        useForcedSubtitles = useForcedSubtitles,
+        preferredTargets = preferredTargets,
+        selectedAudioMatchesPrimaryTarget =
+            primaryTarget != null &&
+                selectedAudioTrack != null &&
+                audioMatchesSubtitleTargetForForced(selectedAudioTrack, primaryTarget),
+        fallbackForcedTarget =
+            if (
+                primaryTarget == null &&
+                selectedAudioTrack != null &&
+                selectedAudioMatchesResolvedPreferredAudio(selectedAudioTrack)
+            ) {
+                selectedAudioLanguageTarget(selectedAudioTrack)
+            } else {
+                null
+            },
+    )
+    val forcedTarget = audioAwareDecision.forcedTarget
+    val forcedOnly = audioAwareDecision.forcedOnly
+    val targets = audioAwareDecision.targets
     Log.d(
         PlayerRuntimeController.TAG,
         "AUTO_SUB eval: targets=$targets, forcedOnly=$forcedOnly, selectedAudio=${selectedAudioTrack?.language}/${selectedAudioTrack?.name}, scannedText=$hasScannedTextTracksOnce, " +
