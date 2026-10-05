@@ -3354,4 +3354,9 @@
     <string name="plus_resume_rewind_subtitle">Start a little before the saved position when resuming playback.</string>
     <string name="plus_resume_rewind_seconds">%1$d s</string>
     <string name="cd_plus_what_did_they_say">What did they say? Rewind with temporary subtitles</string>
+    <string name="plus_subtitle_source_title">Subtitle source preference</string>
+    <string name="plus_subtitle_source_subtitle">Choose which source wins when the same preferred language is available from multiple sources.</string>
+    <string name="plus_subtitle_source_auto">Automatic</string>
+    <string name="plus_subtitle_source_embedded">Prefer embedded</string>
+    <string name="plus_subtitle_source_addon">Prefer addon</string>
 </resources>

@@ -191,6 +191,12 @@ enum class SmartAudioContentPreference {
     DUBBED,
 }
 
+enum class PlusSubtitleSourcePreference {
+    AUTO,
+    EMBEDDED,
+    ADDON,
+}
+
 enum class AudioOutputChannels(
     val settingValue: String,
     val displayLabel: String,
@@ -247,6 +253,7 @@ data class PlayerSettings(
     val smartAudioPreferBestQuality: Boolean = true,
     val smartAudioIgnoreCommentary: Boolean = true,
     val smartAudioIgnoreAudioDescription: Boolean = true,
+    val plusSubtitleSourcePreference: PlusSubtitleSourcePreference = PlusSubtitleSourcePreference.AUTO,
     val loadingOverlayEnabled: Boolean = true,
     val showPlayerLoadingStatus: Boolean = true,
     val playbackIssueReportsEnabled: Boolean = false,
@@ -517,6 +524,7 @@ class PlayerSettingsDataStore @Inject constructor(
     private val smartAudioPreferBestQualityKey = booleanPreferencesKey("smart_audio_prefer_best_quality")
     private val smartAudioIgnoreCommentaryKey = booleanPreferencesKey("smart_audio_ignore_commentary")
     private val smartAudioIgnoreAudioDescriptionKey = booleanPreferencesKey("smart_audio_ignore_audio_description")
+    private val plusSubtitleSourcePreferenceKey = stringPreferencesKey("plus_subtitle_source_preference")
     private val loadingOverlayEnabledKey = booleanPreferencesKey("loading_overlay_enabled")
     private val showPlayerLoadingStatusKey = booleanPreferencesKey("show_player_loading_status")
     private val playbackIssueReportsEnabledKey = booleanPreferencesKey("playback_issue_reports_enabled")
@@ -910,6 +918,12 @@ class PlayerSettingsDataStore @Inject constructor(
                 smartAudioPreferBestQuality = prefs[smartAudioPreferBestQualityKey] ?: true,
                 smartAudioIgnoreCommentary = prefs[smartAudioIgnoreCommentaryKey] ?: true,
                 smartAudioIgnoreAudioDescription = prefs[smartAudioIgnoreAudioDescriptionKey] ?: true,
+                plusSubtitleSourcePreference = prefs[plusSubtitleSourcePreferenceKey]
+                    ?.let { stored ->
+                        runCatching { PlusSubtitleSourcePreference.valueOf(stored) }
+                            .getOrDefault(PlusSubtitleSourcePreference.AUTO)
+                    }
+                    ?: PlusSubtitleSourcePreference.AUTO,
                 loadingOverlayEnabled = prefs[loadingOverlayEnabledKey] ?: true,
                 showPlayerLoadingStatus = prefs[showPlayerLoadingStatusKey] ?: true,
                 playbackIssueReportsEnabled = prefs[playbackIssueReportsEnabledKey] ?: false,
@@ -1235,6 +1249,12 @@ class PlayerSettingsDataStore @Inject constructor(
     suspend fun setSmartAudioIgnoreAudioDescription(enabled: Boolean) {
         store().edit { prefs ->
             prefs[smartAudioIgnoreAudioDescriptionKey] = enabled
+        }
+    }
+
+    suspend fun setPlusSubtitleSourcePreference(preference: PlusSubtitleSourcePreference) {
+        store().edit { prefs ->
+            prefs[plusSubtitleSourcePreferenceKey] = preference.name
         }
     }
 

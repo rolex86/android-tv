@@ -224,6 +224,7 @@ internal fun PlayerRuntimeController.initializePlayer(
             smartAudioAllowMediaDefaultSetting =
                 playerSettings.preferredAudioLanguage.equals(AudioLanguageOption.DEFAULT, ignoreCase = true)
             plusResumeRewindSecondsSetting = playerSettings.plusResumeRewindSeconds
+            plusSubtitleSourcePreferenceSetting = playerSettings.plusSubtitleSourcePreference
             mpvHi10pGnextSoftwareFallbackEnabledSetting =
                 playerSettings.mpvHi10pGnextSoftwareFallbackEnabled
             mpvHardwareDecodeModeSetting = playerSettings.mpvHardwareDecodeMode

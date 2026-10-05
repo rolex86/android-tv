@@ -10,6 +10,7 @@ import com.nuvio.tv.data.local.Dv7HandlingMode
 import com.nuvio.tv.data.local.PlayerSettings
 import com.nuvio.tv.data.local.PlayerSettingsDataStore
 import com.nuvio.tv.data.local.PlayerPreference
+import com.nuvio.tv.data.local.PlusSubtitleSourcePreference
 import com.nuvio.tv.data.local.SmartAudioContentPreference
 import com.nuvio.tv.core.player.LastPlaybackDiagnostics
 import com.nuvio.tv.data.local.FrameRateMatchingMode
@@ -277,6 +278,10 @@ class PlaybackSettingsViewModel @Inject constructor(
 
     suspend fun setUseForcedSubtitles(enabled: Boolean) {
         playerSettingsDataStore.setUseForcedSubtitles(enabled)
+    }
+
+    suspend fun setPlusSubtitleSourcePreference(preference: PlusSubtitleSourcePreference) {
+        playerSettingsDataStore.setPlusSubtitleSourcePreference(preference)
     }
 
     suspend fun setSubtitleShowOnlyPreferredLanguages(enabled: Boolean) {

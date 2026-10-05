@@ -10,6 +10,7 @@ import com.nuvio.tv.data.local.AVAILABLE_SUBTITLE_LANGUAGES
 import com.nuvio.tv.data.local.LibassRenderType
 import com.nuvio.tv.data.local.PlayerPreference
 import com.nuvio.tv.data.local.PlayerSettings
+import com.nuvio.tv.data.local.PlusSubtitleSourcePreference
 import com.nuvio.tv.data.local.SubtitleLanguageOption
 import com.nuvio.tv.data.local.SubtitleStyleSettings
 import com.nuvio.tv.data.local.displayName
@@ -67,6 +68,13 @@ internal fun PlaybackSubtitlesSection(
             ?: stringResource(R.string.sub_not_set),
         enabled = languageSelectionEnabled,
         onClick = { onOpenDialog(PlaybackDialog.SECONDARY_SUBTITLE_LANGUAGE) }
+    )
+    SettingsActionRow(
+        title = stringResource(R.string.plus_subtitle_source_title),
+        subtitle = stringResource(R.string.plus_subtitle_source_subtitle),
+        value = plusSubtitleSourceLabel(settings.plusSubtitleSourcePreference),
+        enabled = languageSelectionEnabled,
+        onClick = { onOpenDialog(PlaybackDialog.PLUS_SUBTITLE_SOURCE) }
     )
 
     SettingsToggleRow(
@@ -167,11 +175,40 @@ internal fun PlaybackSubtitlesSection(
 }
 
 @Composable
+private fun plusSubtitleSourceLabel(preference: PlusSubtitleSourcePreference): String = when (preference) {
+    PlusSubtitleSourcePreference.AUTO -> stringResource(R.string.plus_subtitle_source_auto)
+    PlusSubtitleSourcePreference.EMBEDDED -> stringResource(R.string.plus_subtitle_source_embedded)
+    PlusSubtitleSourcePreference.ADDON -> stringResource(R.string.plus_subtitle_source_addon)
+}
+
+@Composable
 internal fun subtitleLanguageLabel(style: SubtitleStyleSettings): String = when {
     style.preferredLanguage == "none" -> stringResource(R.string.action_none)
     style.isPreferredLanguageSystemDefault -> stringResource(R.string.appearance_language_system)
     else -> AVAILABLE_SUBTITLE_LANGUAGES.find { it.code == style.preferredLanguage }?.displayName
         ?: stringResource(R.string.appearance_language_system)
+}
+
+@Composable
+private fun PlusSubtitleSourceDialog(
+    selectedPreference: PlusSubtitleSourcePreference,
+    onPreferenceSelected: (PlusSubtitleSourcePreference) -> Unit,
+    onDismiss: () -> Unit
+) {
+    SettingsSingleChoiceDialog(
+        title = stringResource(R.string.plus_subtitle_source_title),
+        subtitle = stringResource(R.string.plus_subtitle_source_subtitle),
+        options = listOf(
+            SettingsPickerOption(PlusSubtitleSourcePreference.AUTO, stringResource(R.string.plus_subtitle_source_auto)),
+            SettingsPickerOption(PlusSubtitleSourcePreference.EMBEDDED, stringResource(R.string.plus_subtitle_source_embedded)),
+            SettingsPickerOption(PlusSubtitleSourcePreference.ADDON, stringResource(R.string.plus_subtitle_source_addon))
+        ),
+        selectedValue = selectedPreference,
+        onOptionSelected = onPreferenceSelected,
+        onDismiss = onDismiss,
+        width = 520.dp,
+        maxHeight = 360.dp
+    )
 }
 
 @Composable
@@ -233,6 +270,14 @@ internal fun SubtitleSettingsDialogs(
             showNoneOption = true,
             onLanguageSelected = { language ->
                 onUpdate { setSubtitleSecondaryLanguage(language) }
+                onDismiss()
+            },
+            onDismiss = onDismiss
+        )
+        PlaybackDialog.PLUS_SUBTITLE_SOURCE -> PlusSubtitleSourceDialog(
+            selectedPreference = settings.plusSubtitleSourcePreference,
+            onPreferenceSelected = { preference ->
+                onUpdate { setPlusSubtitleSourcePreference(preference) }
                 onDismiss()
             },
             onDismiss = onDismiss
