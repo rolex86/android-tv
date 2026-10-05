@@ -180,7 +180,7 @@ internal fun PlaybackPlayerInterfaceSection(
 
 @Composable
 private fun plusResumeRewindLabel(seconds: Int): String =
-    if (seconds <= 0) stringResource(R.string.action_off)
+    if (seconds <= 0) stringResource(R.string.plus_resume_rewind_off)
     else stringResource(R.string.plus_resume_rewind_seconds, seconds)
 
 @Composable
@@ -192,7 +192,7 @@ internal fun PlusResumeRewindDialog(
     val options = listOf(0, 5, 10, 15, 30).map { seconds ->
         SettingsPickerOption(
             seconds,
-            if (seconds == 0) stringResource(R.string.action_off)
+            if (seconds == 0) stringResource(R.string.plus_resume_rewind_off)
             else stringResource(R.string.plus_resume_rewind_seconds, seconds)
         )
     }
