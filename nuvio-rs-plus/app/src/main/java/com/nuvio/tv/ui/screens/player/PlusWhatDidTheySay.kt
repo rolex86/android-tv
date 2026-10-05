@@ -7,8 +7,16 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.update
 
-private const val PLUS_WHAT_DID_THEY_SAY_REWIND_MS = 10_000L
-private const val PLUS_WHAT_DID_THEY_SAY_EXTRA_SUBTITLE_MS = 5_000L
+internal object PlusWhatDidTheySayPolicy {
+    const val REWIND_MS = 10_000L
+    const val EXTRA_SUBTITLE_MS = 5_000L
+
+    fun rewindTarget(currentPositionMs: Long): Long =
+        (currentPositionMs.coerceAtLeast(0L) - REWIND_MS).coerceAtLeast(0L)
+
+    fun restoreAtPosition(originalPositionMs: Long): Long =
+        originalPositionMs.coerceAtLeast(0L) + EXTRA_SUBTITLE_MS
+}
 
 private sealed interface PlusSubtitleSnapshot {
     data object Disabled : PlusSubtitleSnapshot
@@ -39,7 +47,7 @@ internal fun PlayerRuntimeController.runPlusWhatDidTheySay() {
     if (_playbackTimeline.value.isLive) return
 
     val originalPositionMs = currentPlaybackPositionMs()?.coerceAtLeast(0L) ?: return
-    val rewindTargetMs = (originalPositionMs - PLUS_WHAT_DID_THEY_SAY_REWIND_MS).coerceAtLeast(0L)
+    val rewindTargetMs = PlusWhatDidTheySayPolicy.rewindTarget(originalPositionMs)
     val streamUrl = currentStreamUrl
     val previousSelection = snapshotPlusSubtitleSelection()
 
@@ -52,7 +60,7 @@ internal fun PlayerRuntimeController.runPlusWhatDidTheySay() {
     showSeekOverlayTemporarily()
 
     val temporarySignature = selectPlusTemporaryPreferredSubtitle() ?: return
-    val restoreAtPositionMs = originalPositionMs + PLUS_WHAT_DID_THEY_SAY_EXTRA_SUBTITLE_MS
+    val restoreAtPositionMs = PlusWhatDidTheySayPolicy.restoreAtPosition(originalPositionMs)
 
     plusWhatDidTheySayJob = scope.launch {
         while (isActive && currentStreamUrl == streamUrl && !_uiState.value.playbackEnded) {
@@ -129,7 +137,9 @@ private fun PlayerRuntimeController.restorePlusSubtitleSelection(snapshot: PlusS
                 when {
                     !snapshot.trackId.isNullOrBlank() && track.trackId == snapshot.trackId -> true
                     else -> track.name == snapshot.name &&
-                        PlayerSubtitleUtils.matchesLanguageCode(track.language, snapshot.language)
+                        snapshot.language?.let { language ->
+                            PlayerSubtitleUtils.matchesLanguageCode(track.language, language)
+                        } == true
                 }
             }
             if (index >= 0) {
