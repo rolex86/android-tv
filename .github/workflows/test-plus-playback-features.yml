@@ -1,0 +1,66 @@
+name: Test Plus playback features
+
+on:
+  push:
+    branches:
+      - plus-playback-features-work
+    paths:
+      - 'nuvio-rs-plus/**'
+      - '.github/workflows/test-plus-playback-features.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: nuvio-rs-plus
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: nuvio-rs-plus/**/*.gradle*
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$SDKMANAGER" ]]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -perm -111 2>/dev/null | sort -V | tail -n1)"
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - name: Configure compile-time properties
+        shell: bash
+        run: |
+          cat > local.properties <<'EOF'
+          NUVIO_SUPABASE_URL=https://example.invalid
+          NUVIO_SUPABASE_ANON_KEY=test
+          NUVIO_SUPABASE_FALLBACK_URL=https://example.invalid
+          TV_LOGIN_WEB_BASE_URL=https://example.invalid
+          DEVICE_LOGIN_WEB_BASE_URL=https://example.invalid
+          AVATAR_PUBLIC_BASE_URL=https://example.invalid
+          NUVIO_UPDATE_GITHUB_OWNER=rolex86
+          NUVIO_UPDATE_GITHUB_REPO=android-tv
+          AUTOSYNC_FORK=true
+          TRAKT_CLIENT_ID=test
+          TRAKT_CLIENT_SECRET=test
+          MDBLIST_CLIENT_ID=test
+          SEEKR_API_KEY=test
+          TMDB_API_KEY=test
+          RESHAPED_GOOGLE_TV_CLIENT_ID=test
+          RESHAPED_GOOGLE_TV_CLIENT_SECRET=test
+          EOF
+          cp local.properties local.dev.properties
+      - name: Compile and run Plus tests
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:testFullDebugUnitTest --tests 'com.nuvio.tv.ui.screens.player.Plus*' --stacktrace --console=plain
