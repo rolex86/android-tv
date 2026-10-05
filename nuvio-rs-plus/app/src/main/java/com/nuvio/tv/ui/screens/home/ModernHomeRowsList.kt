@@ -327,6 +327,7 @@ internal fun ModernHomeRowsList(
                         lastIdx >= 0 && lastVisible != null &&
                             lastVisible.offset + lastVisible.size <= info.viewportEndOffset
                     },
+                    throttleHorizontalRepeats = false,
                     resolveVerticalLanding = { sign ->
                         val layoutInfo = verticalRowListState.layoutInfo
                         val visibleItems = layoutInfo.visibleItemsInfo
@@ -368,7 +369,7 @@ internal fun ModernHomeRowsList(
         ) {
             itemsIndexed(
                 items = carouselRows.list,
-                key = { index, row -> "${row.key}_$index" },
+                key = { _, row -> row.key },
                 contentType = { _, row -> row.apiType ?: "modern_home_row" }
             ) { _, row ->
                 val stableOnContinueWatchingOptions = remember(onContinueWatchingOptions) {
