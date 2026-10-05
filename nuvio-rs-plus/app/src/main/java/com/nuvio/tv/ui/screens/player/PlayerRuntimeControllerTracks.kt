@@ -1679,6 +1679,67 @@ internal fun PlayerRuntimeController.tryAutoSelectPreferredSubtitleFromAvailable
         normalOnly = !forcedOnly,
         selectedAudioTrack = selectedAudioTrack
     )
+    val internalTargetPosition = internalIndex.takeIf { it >= 0 }?.let { index ->
+        val matchedTrack = state.subtitleTracks[index]
+        val trackVariant = PlayerSubtitleUtils.detectTrackLanguageVariant(
+            language = matchedTrack.language,
+            name = matchedTrack.name,
+            trackId = matchedTrack.trackId
+        )
+        targets.indexOfFirst { target ->
+            val normalizedTarget = PlayerSubtitleUtils.normalizeLanguageCode(target)
+            trackVariant == normalizedTarget ||
+                PlayerSubtitleUtils.matchesLanguageCode(trackVariant, target)
+        }.takeIf { it >= 0 }
+    }
+
+    val plusAddonCandidate = targets.withIndex().firstNotNullOfOrNull { (targetPosition, target) ->
+        val candidate = state.addonSubtitles.firstOrNull { subtitle ->
+            if (forcedOnly) {
+                addonSubtitleIsForced(subtitle) &&
+                    addonSubtitleMatchesLanguage(subtitle, target) &&
+                    selectedAudioTrack != null &&
+                    addonSubtitleMatchesSelectedAudioLanguage(subtitle, selectedAudioTrack)
+            } else {
+                !addonSubtitleIsForced(subtitle) &&
+                    PlayerSubtitleUtils.matchesLanguageCode(subtitle.lang, target)
+            }
+        }
+        candidate?.let { targetPosition to it }
+    }
+
+    if (
+        PlusSubtitleSourcePolicy.shouldPreferAddon(
+            preference = plusSubtitleSourcePreferenceSetting,
+            internalLanguageRank = internalTargetPosition,
+            addonLanguageRank = plusAddonCandidate?.first,
+        )
+    ) {
+        val addon = plusAddonCandidate?.second
+        if (addon != null) {
+            autoSubtitleSelected = true
+            Log.d(
+                PlayerRuntimeController.TAG,
+                "AUTO_SUB Plus source preference: addon wins lang=${addon.lang} id=${addon.id}"
+            )
+            selectAddonSubtitle(addon)
+            if (!forcedOnly) {
+                maybeRunAutomaticSubtitleSync(addon)
+            }
+            return
+        }
+    }
+    if (
+        PlusSubtitleSourcePolicy.shouldWaitForAddon(
+            preference = plusSubtitleSourcePreferenceSetting,
+            addonLoading = state.isLoadingAddonSubtitles,
+            addonLanguageRank = plusAddonCandidate?.first,
+        )
+    ) {
+        Log.d(PlayerRuntimeController.TAG, "AUTO_SUB Plus source preference: waiting for addon candidates")
+        return
+    }
+
     if (internalIndex >= 0 && hasScannedTextTracksOnce) {
         // Determine which target position this internal match satisfies,
         // taking regional variant into account so that e.g. a PT-BR track
@@ -1689,7 +1750,7 @@ internal fun PlayerRuntimeController.tryAutoSelectPreferredSubtitleFromAvailable
             name = matchedTrack.name,
             trackId = matchedTrack.trackId
         )
-        val matchedTargetPosition = targets.indexOfFirst { target ->
+        val matchedTargetPosition = internalTargetPosition ?: targets.indexOfFirst { target ->
             val normalizedTarget = PlayerSubtitleUtils.normalizeLanguageCode(target)
             trackVariant == normalizedTarget ||
                     PlayerSubtitleUtils.matchesLanguageCode(trackVariant, target)
