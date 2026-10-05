@@ -37,6 +37,13 @@ internal fun PlaybackPlayerSection(
         onToggle = { onUpdate { setAutoSwitchInternalPlayerOnError(!settings.autoSwitchInternalPlayerOnError) } },
         enabled = !usesExternalPlayer
     )
+    SettingsActionRow(
+        title = stringResource(R.string.plus_resume_rewind_title),
+        subtitle = stringResource(R.string.plus_resume_rewind_subtitle),
+        value = plusResumeRewindLabel(settings.plusResumeRewindSeconds),
+        enabled = !usesExternalPlayer,
+        onClick = { onOpenDialog(PlaybackDialog.PLUS_RESUME_REWIND) }
+    )
 
     if (settings.playerPreference != PlayerPreference.INTERNAL) {
         SettingsSectionLabel(text = stringResource(R.string.playback_external_player_label))
@@ -168,6 +175,36 @@ internal fun PlaybackPlayerInterfaceSection(
         checked = settings.parentalGuideEnabled,
         onToggle = { onUpdate { setParentalGuideEnabled(!settings.parentalGuideEnabled) } },
         enabled = internalPlayer
+    )
+}
+
+@Composable
+private fun plusResumeRewindLabel(seconds: Int): String =
+    if (seconds <= 0) stringResource(R.string.plus_resume_rewind_off)
+    else stringResource(R.string.plus_resume_rewind_seconds, seconds)
+
+@Composable
+internal fun PlusResumeRewindDialog(
+    currentSeconds: Int,
+    onSecondsSelected: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val options = listOf(0, 5, 10, 15, 30).map { seconds ->
+        SettingsPickerOption(
+            seconds,
+            if (seconds == 0) stringResource(R.string.plus_resume_rewind_off)
+            else stringResource(R.string.plus_resume_rewind_seconds, seconds)
+        )
+    }
+    SettingsSingleChoiceDialog(
+        title = stringResource(R.string.plus_resume_rewind_title),
+        subtitle = stringResource(R.string.plus_resume_rewind_subtitle),
+        options = options,
+        selectedValue = currentSeconds,
+        onOptionSelected = onSecondsSelected,
+        onDismiss = onDismiss,
+        width = 440.dp,
+        maxHeight = 420.dp
     )
 }
 

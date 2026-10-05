@@ -101,6 +101,10 @@ class PlaybackSettingsViewModel @Inject constructor(
         playerSettingsDataStore.setAutoSwitchInternalPlayerOnError(enabled)
     }
 
+    suspend fun setPlusResumeRewindSeconds(seconds: Int) {
+        playerSettingsDataStore.setPlusResumeRewindSeconds(seconds)
+    }
+
     suspend fun setExternalPlayerForwardSubtitles(enabled: Boolean) {
         playerSettingsDataStore.setExternalPlayerForwardSubtitles(enabled)
     }

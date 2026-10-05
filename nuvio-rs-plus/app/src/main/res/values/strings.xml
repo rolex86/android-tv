@@ -3349,4 +3349,8 @@
     <string name="audio_smart_ignore_description">Ignore audio description tracks</string>
     <string name="audio_smart_ignore_description_sub">Skip descriptive audio tracks during automatic selection.</string>
 
+    <string name="plus_resume_rewind_title">Resume rewind</string>
+    <string name="plus_resume_rewind_off">Off</string>
+    <string name="plus_resume_rewind_subtitle">Start a little before the saved position when resuming playback.</string>
+    <string name="plus_resume_rewind_seconds">%1$d s</string>
 </resources>
