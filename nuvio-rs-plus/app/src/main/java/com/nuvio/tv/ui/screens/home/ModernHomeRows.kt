@@ -45,6 +45,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -485,6 +486,7 @@ internal fun ModernRowSection(
     @Suppress("NAME_SHADOWING") val loadMoreRequestedTotals = loadMoreRequestedTotals.value
     @Suppress("NAME_SHADOWING") val itemFocusRequesters = itemFocusRequesters.value
     val rowKey = row.key
+    val plusRowFocusScope = rememberCoroutineScope()
 
     // Per-row derived state: only invalidates when THIS row's focused index
     // changes, not when any other row's index changes in the shared map.
@@ -900,6 +902,48 @@ internal fun ModernRowSection(
                 modifier = Modifier
                     .recompositionHighlighter()
                     .focusRequester(rowFocusRequester)
+                    .onPreviewKeyEvent { event ->
+                        val native = event.nativeKeyEvent
+                        if (native.action != AndroidKeyEvent.ACTION_DOWN) {
+                            return@onPreviewKeyEvent false
+                        }
+
+                        val direction = when (native.keyCode) {
+                            AndroidKeyEvent.KEYCODE_DPAD_LEFT -> PlusHomeRowFocusGuard.Direction.LEFT
+                            AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> PlusHomeRowFocusGuard.Direction.RIGHT
+                            else -> return@onPreviewKeyEvent false
+                        }
+                        val decision = PlusHomeRowFocusGuard.resolveRepeat(
+                            currentIndex = rowFocusedIndex.value,
+                            itemCount = row.items.list.size,
+                            direction = direction,
+                            isRtl = isRtl,
+                        )
+                        when (decision) {
+                            PlusHomeRowFocusGuard.Decision.PassThrough -> false
+                            PlusHomeRowFocusGuard.Decision.Block -> true
+                            is PlusHomeRowFocusGuard.Decision.Move -> {
+                                val targetIndex = decision.targetIndex
+                                val requestNow = itemFocusRequesters[targetIndex]
+                                if (requestNow != null) {
+                                    runCatching { requestNow.requestFocus() }
+                                } else {
+                                    plusRowFocusScope.launch {
+                                        runCatching { rowListState.scrollToItem(targetIndex) }
+                                        repeat(8) {
+                                            val requester = itemFocusRequesters[targetIndex]
+                                            if (requester != null) {
+                                                runCatching { requester.requestFocus() }
+                                                return@launch
+                                            }
+                                            delay(16L)
+                                        }
+                                    }
+                                }
+                                true
+                            }
+                        }
+                    }
                     .focusRestorer {
                         val savedIdx = rowFocusedIndex.value
                         itemFocusRequesters[savedIdx]
