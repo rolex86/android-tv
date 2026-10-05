@@ -1340,6 +1340,7 @@ fun PlayerScreen(
                 onPlayNextEpisode = { viewModel.onEvent(PlayerEvent.OnPlayNextEpisode) },
                 onSeekForward = { viewModel.onEvent(PlayerEvent.OnSeekForward) },
                 onSeekBackward = { viewModel.onEvent(PlayerEvent.OnSeekBackward) },
+                onWhatDidTheySay = { viewModel.onEvent(PlayerEvent.OnPlusWhatDidTheySay) },
                 onSeekTo = { viewModel.onEvent(PlayerEvent.OnSeekTo(it)) },
                 onShowEpisodesPanel = { viewModel.onEvent(PlayerEvent.OnShowEpisodesPanel) },
                 onShowSourcesPanel = { viewModel.onEvent(PlayerEvent.OnShowSourcesPanel) },
@@ -2192,6 +2193,7 @@ private fun PlayerControlsOverlay(
     onPlayNextEpisode: () -> Unit,
     onSeekForward: () -> Unit,
     onSeekBackward: () -> Unit,
+    onWhatDidTheySay: () -> Unit,
     onSeekTo: (Long) -> Unit,
     onShowEpisodesPanel: () -> Unit,
     onShowSourcesPanel: () -> Unit,
@@ -2480,6 +2482,14 @@ private fun PlayerControlsOverlay(
                                 onClick = {
                                     onShowSpeedDialog()
                                 },
+                                upFocusRequester = progressUpTarget,
+                                onDownKey = onHideControls,
+                                onFocused = onResetHideTimer
+                            )
+                            ControlButton(
+                                icon = Icons.Default.ClosedCaption,
+                                contentDescription = stringResource(R.string.cd_plus_what_did_they_say),
+                                onClick = onWhatDidTheySay,
                                 upFocusRequester = progressUpTarget,
                                 onDownKey = onHideControls,
                                 onFocused = onResetHideTimer

@@ -282,6 +282,7 @@ sealed class PlayerEvent {
     data object OnPlayPause : PlayerEvent()
     data object OnSeekForward : PlayerEvent()
     data object OnSeekBackward : PlayerEvent()
+    data object OnPlusWhatDidTheySay : PlayerEvent()
     data class OnSeekBy(val deltaMs: Long) : PlayerEvent()
     data class OnPreviewSeekBy(val deltaMs: Long) : PlayerEvent()
     data object OnCommitPreviewSeek : PlayerEvent()
