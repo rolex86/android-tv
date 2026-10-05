@@ -1217,6 +1217,9 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
             if (_playbackTimeline.value.isLive) return
             onEvent(PlayerEvent.OnSeekBy(deltaMs = -PlayerScrubRates.STEP_SHORT_MS))
         }
+        PlayerEvent.OnPlusWhatDidTheySay -> {
+            runPlusWhatDidTheySay()
+        }
         is PlayerEvent.OnSeekBy -> {
             if (_playbackTimeline.value.isLive) return
             pendingPreviewSeekPosition = null
