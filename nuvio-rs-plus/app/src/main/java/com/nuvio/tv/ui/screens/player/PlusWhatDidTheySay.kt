@@ -119,7 +119,7 @@ private fun PlayerRuntimeController.selectPlusTemporaryPreferredSubtitle(): Stri
 
     val addon = targets.firstNotNullOfOrNull { target ->
         state.addonSubtitles.firstOrNull { subtitle ->
-            !addonSubtitleIsForced(subtitle) &&
+            !plusAddonSubtitleIsForced(subtitle) &&
                 PlayerSubtitleUtils.matchesLanguageCode(subtitle.lang, target)
         }
     } ?: return null
@@ -183,3 +183,9 @@ private fun plusInternalSubtitleSignature(track: TrackInfo): String =
 
 private fun plusAddonSubtitleSignature(subtitle: Subtitle): String =
     "addon:${subtitle.id}:${subtitle.url}:${subtitle.addonName}"
+
+
+private fun plusAddonSubtitleIsForced(subtitle: Subtitle): Boolean =
+    listOf(subtitle.id, subtitle.url, subtitle.addonName).any {
+        it.contains("forced", ignoreCase = true)
+    }
