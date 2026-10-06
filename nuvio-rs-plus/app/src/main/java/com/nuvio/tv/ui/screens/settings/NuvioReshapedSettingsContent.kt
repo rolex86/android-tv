@@ -52,6 +52,11 @@ internal fun NuvioReshapedSettingsContent(
         connectionSpeedSettingsItems()
         pillNavSettingsItems()
         liveTvSettingsItems()
+
+        item(key = "plus_home_focus_diagnostics") {
+            PlusHomeFocusDiagnosticsSettingsSection()
+        }
+
         reshapedSyncSettingsItems()
     }
 }
