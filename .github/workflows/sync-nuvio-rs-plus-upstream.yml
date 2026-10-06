@@ -76,7 +76,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          git clone --filter=blob:none --no-checkout             https://github.com/DavidVamaiotu/NuvioTV-Reshaped.git /tmp/nuvio-upstream
+          # Use a full clone here. The sync performs a real three-way merge across
+          # release tags, so a promisor/partial clone can fail when an older object
+          # referenced by the new release is no longer obtainable lazily.
+          git clone --no-checkout \
+            https://github.com/DavidVamaiotu/NuvioTV-Reshaped.git /tmp/nuvio-upstream
           git -C /tmp/nuvio-upstream fetch --tags --force
 
           git -C /tmp/nuvio-upstream checkout --detach "$BASELINE"
