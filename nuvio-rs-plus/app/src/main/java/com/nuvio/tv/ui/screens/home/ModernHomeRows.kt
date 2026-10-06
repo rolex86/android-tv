@@ -716,13 +716,18 @@ internal fun ModernRowSection(
                     val layoutInfo = rowListState.layoutInfo
                     val total = layoutInfo.totalItemsCount
                     val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-                    lastVisible to total
+                    Triple(lastVisible, total, isActiveRow())
                 }
                     .distinctUntilChanged()
-                    .collect { (lastVisible, total) ->
+                    .collect { (lastVisible, total, activeRow) ->
                         if (total <= 0) return@collect
                         val rowState = currentRowState.value
-                        val isNearEnd = lastVisible >= total - 4
+                        val prefetchDistance = PlusHomePaginationPrefetch.distance(activeRow)
+                        val isNearEnd = PlusHomePaginationPrefetch.isNearEnd(
+                            lastVisible = lastVisible,
+                            total = total,
+                            activeRow = activeRow
+                        )
                         if (!isNearEnd) {
                             loadMoreRequestedTotals.remove(rowState.key)
                             return@collect
@@ -744,6 +749,7 @@ internal fun ModernRowSection(
                                 "row" to rowState.key,
                                 "lastVisible" to lastVisible,
                                 "total" to total,
+                                "prefetchDistance" to prefetchDistance,
                                 "focusedIndex" to rowFocusedIndex.value,
                                 "active" to activeAtRequest,
                                 "focusGuardArmed" to activeAtRequest
