@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="debug_home_focus_section">Modern Home focus diagnostics</string>
+    <string name="debug_home_focus_logging_title">Record Modern Home focus</string>
+    <string name="debug_home_focus_logging_subtitle">Record D-pad input, focus changes, row loading, focus restore and pagination to an internal rotating log. Disabled by default.</string>
+    <string name="debug_home_focus_view_title">View focus log</string>
+    <string name="debug_home_focus_view_subtitle">Open the latest recorded focus events directly on this TV.</string>
+    <string name="debug_home_focus_share_title">Share focus log</string>
+    <string name="debug_home_focus_share_subtitle">Share the full diagnostic log as a text file.</string>
+    <string name="debug_home_focus_clear_title">Clear focus log</string>
+    <string name="debug_home_focus_clear_subtitle">Delete all recorded Modern Home focus events.</string>
+    <string name="debug_home_focus_dialog_title">Modern Home focus log</string>
+    <string name="debug_home_focus_dialog_subtitle">Newest events are shown first. Use D-pad up/down to scroll; Back closes the log.</string>
+    <string name="debug_home_focus_log_empty">No focus events have been recorded yet.</string>
+    <string name="debug_home_focus_share_chooser">Share Modern Home focus log</string>
+</resources>

@@ -156,6 +156,8 @@ internal val LocalFastScrollActive = compositionLocalOf<State<Boolean>> { mutabl
 private fun ModernContinueWatchingRowItem(
     payload: ModernPayload.ContinueWatching,
     requester: FocusRequester,
+    diagnosticRowKey: String,
+    diagnosticItemIndex: Int,
     isTargetItem: Boolean = false,
     cardWidth: Dp,
     imageHeight: Dp,
@@ -169,6 +171,7 @@ private fun ModernContinueWatchingRowItem(
     modifier: Modifier = Modifier
 ) {
     val item = payload.item
+    val diagnosticsContext = LocalContext.current
     val onClick = remember(item) { { onContinueWatchingClick(item) } }
     val onLongPress = remember(item) { { onShowOptions(item) } }
     var focusEventId by remember { mutableIntStateOf(0) }
@@ -189,6 +192,13 @@ private fun ModernContinueWatchingRowItem(
 
     LaunchedEffect(isTargetItem) {
         if (isTargetItem && !isCardFocused) {
+            PlusHomeFocusDiagnostics.log(
+                diagnosticsContext,
+                "REQUEST_FOCUS",
+                "reason" to "continue_isTargetItem",
+                "row" to diagnosticRowKey,
+                "index" to diagnosticItemIndex
+            )
             runCatching { requester.requestFocus() }
         }
     }
@@ -207,7 +217,18 @@ private fun ModernContinueWatchingRowItem(
         modifier = modifier
             .focusRequester(requester)
             .onFocusChanged {
+                val wasFocused = isCardFocused
                 isCardFocused = it.isFocused
+                if (wasFocused != it.isFocused) {
+                    PlusHomeFocusDiagnostics.log(
+                        diagnosticsContext,
+                        if (it.isFocused) "FOCUS_GAIN" else "FOCUS_LOSS",
+                        "row" to diagnosticRowKey,
+                        "index" to diagnosticItemIndex,
+                        "kind" to "continue",
+                        "target" to isTargetItem
+                    )
+                }
                 if (it.isFocused) {
                     focusEventId += 1
                 }
@@ -221,6 +242,8 @@ private fun ModernCatalogRowItem(
     item: ModernCarouselItem,
     payload: ModernPayload,
     requester: FocusRequester,
+    diagnosticRowKey: String,
+    diagnosticItemIndex: Int,
     isTargetItem: Boolean = false,
     useLandscapePosters: Boolean,
     alwaysShowLandscapeClearlogo: Boolean = false,
@@ -257,6 +280,7 @@ private fun ModernCatalogRowItem(
         is ModernPayload.CollectionFolder -> payload.focusKey
         is ModernPayload.ContinueWatching -> error("Unsupported payload for ModernCatalogRowItem")
     }
+    val diagnosticsContext = LocalContext.current
 
     val metaPreview = item.metaPreview
     val isWatched = metaPreview?.let { isCatalogItemWatched(it) } ?: false
@@ -323,6 +347,14 @@ private fun ModernCatalogRowItem(
 
     LaunchedEffect(isTargetItem) {
         if (isTargetItem && !isCardFocused) {
+            PlusHomeFocusDiagnostics.log(
+                diagnosticsContext,
+                "REQUEST_FOCUS",
+                "reason" to "catalog_isTargetItem",
+                "row" to diagnosticRowKey,
+                "index" to diagnosticItemIndex,
+                "item" to focusKey
+            )
             runCatching { requester.requestFocus() }
         }
     }
@@ -394,7 +426,19 @@ private fun ModernCatalogRowItem(
             focusEventId += 1
         },
         onFocusStateChanged = { focused ->
+            val wasFocused = isCardFocused
             isCardFocused = focused
+            if (wasFocused != focused) {
+                PlusHomeFocusDiagnostics.log(
+                    diagnosticsContext,
+                    if (focused) "FOCUS_GAIN" else "FOCUS_LOSS",
+                    "row" to diagnosticRowKey,
+                    "index" to diagnosticItemIndex,
+                    "kind" to "catalog",
+                    "item" to focusKey,
+                    "target" to isTargetItem
+                )
+            }
         },
         onClick = {
             latestOnFocused()
@@ -480,6 +524,7 @@ internal fun ModernRowSection(
     sharedPlaceholderShimmerOffsetState: State<Float>?,
     itemFocusRequesters: StableRef<MutableMap<Int, FocusRequester>> = StableRef(mutableMapOf())
 ) {
+    val diagnosticsContext = LocalContext.current
     // Unwrap StableRef wrappers
     @Suppress("NAME_SHADOWING") val focusedItemByRow = focusedItemByRow.value
     @Suppress("NAME_SHADOWING") val rowListStates = rowListStates.value
@@ -567,9 +612,26 @@ internal fun ModernRowSection(
         LaunchedEffect(row.isLoading, firstItemImageUrl, isActiveRow) {
             val wasPlaceholder = wasPlaceholderRef.value
             val isNowReal = !row.isLoading || !firstItemImageUrl.isPlaceholder()
+            if (wasPlaceholder && isNowReal) {
+                PlusHomeFocusDiagnostics.log(
+                    diagnosticsContext,
+                    "PLACEHOLDER_TO_REAL",
+                    "row" to rowKey,
+                    "active" to isActiveRow(),
+                    "focusedIndex" to rowFocusedIndex.value,
+                    "items" to row.items.list.size
+                )
+            }
             if (wasPlaceholder && isNowReal && isActiveRow()) {
                 needsFocusRestore.value = true
                 blockingFocusExit.value = true
+                PlusHomeFocusDiagnostics.log(
+                    diagnosticsContext,
+                    "FOCUS_EXIT_BLOCK",
+                    "row" to rowKey,
+                    "reason" to "placeholder_to_real",
+                    "focusedIndex" to rowFocusedIndex.value
+                )
             }
             wasPlaceholderRef.value = row.isLoading && firstItemImageUrl.isPlaceholder()
         }
@@ -577,6 +639,12 @@ internal fun ModernRowSection(
         // Restore focus after placeholder→data transition.
         LaunchedEffect(needsFocusRestore.value, row.key) {
             if (!needsFocusRestore.value) return@LaunchedEffect
+            PlusHomeFocusDiagnostics.log(
+                diagnosticsContext,
+                "FOCUS_EXIT_UNBLOCK",
+                "row" to rowKey,
+                "focusedIndex" to rowFocusedIndex.value
+            )
             needsFocusRestore.value = false
             blockingFocusExit.value = false
         }
@@ -598,6 +666,14 @@ internal fun ModernRowSection(
             if (pendingRowFocusKey.value != row.key) return@LaunchedEffect
             val targetIndex = (pendingRowFocusIndex.value ?: 0)
                 .coerceIn(0, (row.items.list.size - 1).coerceAtLeast(0))
+            PlusHomeFocusDiagnostics.log(
+                diagnosticsContext,
+                "PENDING_ROW_FOCUS",
+                "row" to rowKey,
+                "index" to targetIndex,
+                "scrolling" to rowListState.isScrollInProgress,
+                "nonce" to pendingRowFocusNonce.value
+            )
             if (!rowListState.isScrollInProgress) {
                 runCatching { rowListState.scrollToItem(targetIndex) }
             }
@@ -629,6 +705,15 @@ internal fun ModernRowSection(
                             !rowState.isLoading &&
                             lastRequestedTotal != total
                         ) {
+                            PlusHomeFocusDiagnostics.log(
+                                diagnosticsContext,
+                                "LOAD_MORE",
+                                "row" to rowState.key,
+                                "lastVisible" to lastVisible,
+                                "total" to total,
+                                "focusedIndex" to rowFocusedIndex.value,
+                                "active" to isActiveRow()
+                            )
                             loadMoreRequestedTotals[rowState.key] = total
                             onLoadMoreCatalog(
                                 loadMoreCatalogId,
@@ -646,6 +731,18 @@ internal fun ModernRowSection(
         val imageLoader = context.imageLoader
 
         val rowItemCount = row.items.list.size
+        LaunchedEffect(row.key, rowItemCount, row.isLoading, row.hasMore) {
+            PlusHomeFocusDiagnostics.log(
+                diagnosticsContext,
+                "ROW_STATE",
+                "row" to rowKey,
+                "items" to rowItemCount,
+                "loading" to row.isLoading,
+                "hasMore" to row.hasMore,
+                "active" to isActiveRow(),
+                "focusedIndex" to rowFocusedIndex.value
+            )
+        }
         LaunchedEffect(
             row.key,
             isActiveRow,
@@ -902,6 +999,14 @@ internal fun ModernRowSection(
                     .focusRequester(rowFocusRequester)
                     .focusRestorer {
                         val savedIdx = rowFocusedIndex.value
+                        PlusHomeFocusDiagnostics.log(
+                            diagnosticsContext,
+                            "ROW_FOCUS_RESTORER",
+                            "row" to rowKey,
+                            "savedIndex" to savedIdx,
+                            "hasSavedRequester" to itemFocusRequesters.containsKey(savedIdx),
+                            "requesterCount" to itemFocusRequesters.size
+                        )
                         itemFocusRequesters[savedIdx]
                             ?: itemFocusRequesters[0]
                             ?: FocusRequester.Default
@@ -947,6 +1052,12 @@ internal fun ModernRowSection(
                         {
                             onRowItemFocused(row.key, index, isContinueWatchingRow)
                             if (pendingRowFocusKey.value == row.key && (pendingRowFocusIndex.value ?: 0) == index) {
+                                PlusHomeFocusDiagnostics.log(
+                                    diagnosticsContext,
+                                    "PENDING_ROW_FOCUS_CLEARED",
+                                    "row" to row.key,
+                                    "index" to index
+                                )
                                 onPendingRowFocusCleared()
                             }
                         }
@@ -969,6 +1080,8 @@ internal fun ModernRowSection(
                             ModernContinueWatchingRowItem(
                                 payload = payload,
                                 requester = requester,
+                                diagnosticRowKey = row.key,
+                                diagnosticItemIndex = index,
                                 isTargetItem = isTargetItem,
                                 cardWidth = continueWatchingCardWidth,
                                 imageHeight = continueWatchingCardHeight,
@@ -1023,6 +1136,8 @@ internal fun ModernRowSection(
                                 item = item,
                                 payload = payload,
                                 requester = requester,
+                                diagnosticRowKey = row.key,
+                                diagnosticItemIndex = index,
                                 isTargetItem = isTargetItem,
                                 modifier = rowEndFocusModifier,
                                 useLandscapePosters = useLandscapePosters,

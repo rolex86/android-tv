@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="debug_home_focus_section">Diagnostika focusu Modern Home</string>
+    <string name="debug_home_focus_logging_title">Zaznamenávat focus Modern Home</string>
+    <string name="debug_home_focus_logging_subtitle">Zapisuje D-pad, změny focusu, načítání řádků, obnovu focusu a stránkování do interního rotačního logu. Ve výchozím stavu je vypnuto.</string>
+    <string name="debug_home_focus_view_title">Zobrazit focus log</string>
+    <string name="debug_home_focus_view_subtitle">Zobrazí poslední zaznamenané události přímo na TV.</string>
+    <string name="debug_home_focus_share_title">Sdílet focus log</string>
+    <string name="debug_home_focus_share_subtitle">Nasdílí kompletní diagnostický log jako textový soubor.</string>
+    <string name="debug_home_focus_clear_title">Vymazat focus log</string>
+    <string name="debug_home_focus_clear_subtitle">Smaže všechny zaznamenané události focusu Modern Home.</string>
+    <string name="debug_home_focus_dialog_title">Focus log Modern Home</string>
+    <string name="debug_home_focus_dialog_subtitle">Nejnovější události jsou nahoře. D-padem nahoru/dolů roluješ, tlačítkem Zpět log zavřeš.</string>
+    <string name="debug_home_focus_log_empty">Zatím nejsou zaznamenané žádné události focusu.</string>
+    <string name="debug_home_focus_share_chooser">Sdílet focus log Modern Home</string>
+</resources>

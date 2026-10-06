@@ -2,7 +2,12 @@
 
 package com.nuvio.tv.ui.screens.settings
 
+import android.content.Intent
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import com.nuvio.tv.ui.theme.NuvioTheme
+import com.nuvio.tv.ui.screens.home.PlusHomeFocusDiagnostics
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,11 +28,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -45,13 +60,22 @@ import androidx.tv.material3.Text
 import com.nuvio.tv.ui.components.LoadingIndicator
 import com.nuvio.tv.ui.components.NuvioDialog
 import com.nuvio.tv.ui.screens.account.InputField
+import kotlinx.coroutines.launch
 
 @Composable
 fun DebugSettingsContent(
     viewModel: DebugSettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val diagnosticsScope = rememberCoroutineScope()
+    val shareChooserTitle = stringResource(R.string.debug_home_focus_share_chooser)
     var showErrorDialog by remember { mutableStateOf(false) }
+    var showHomeFocusLogDialog by remember { mutableStateOf(false) }
+    var homeFocusLogText by remember { mutableStateOf("") }
+    var homeFocusDiagnosticsEnabled by remember(context) {
+        mutableStateOf(PlusHomeFocusDiagnostics.isEnabled(context))
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Text(
@@ -164,6 +188,76 @@ fun DebugSettingsContent(
                 )
             }
 
+            // ── Nuvio RS Plus Modern Home Focus Diagnostics ──
+            item(key = "debug_home_focus_header") {
+                Spacer(modifier = Modifier.height(NuvioTheme.spacing.sm))
+                Text(
+                    text = stringResource(R.string.debug_home_focus_section),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = NuvioTheme.colors.TextTertiary,
+                    modifier = Modifier.padding(bottom = NuvioTheme.spacing.xs)
+                )
+            }
+
+            item(key = "debug_home_focus_toggle") {
+                DebugToggleCard(
+                    title = stringResource(R.string.debug_home_focus_logging_title),
+                    subtitle = stringResource(R.string.debug_home_focus_logging_subtitle),
+                    checked = homeFocusDiagnosticsEnabled,
+                    onToggle = { enabled ->
+                        PlusHomeFocusDiagnostics.setEnabled(context, enabled)
+                        homeFocusDiagnosticsEnabled = enabled
+                    }
+                )
+            }
+
+            item(key = "debug_home_focus_view") {
+                DebugActionCard(
+                    title = stringResource(R.string.debug_home_focus_view_title),
+                    subtitle = stringResource(R.string.debug_home_focus_view_subtitle),
+                    onClick = {
+                        diagnosticsScope.launch {
+                            homeFocusLogText = PlusHomeFocusDiagnostics.readLog(
+                                context = context,
+                                maxLines = 500,
+                                newestFirst = true
+                            )
+                            showHomeFocusLogDialog = true
+                        }
+                    }
+                )
+            }
+
+            item(key = "debug_home_focus_share") {
+                DebugActionCard(
+                    title = stringResource(R.string.debug_home_focus_share_title),
+                    subtitle = stringResource(R.string.debug_home_focus_share_subtitle),
+                    onClick = {
+                        diagnosticsScope.launch {
+                            runCatching {
+                                val sendIntent = PlusHomeFocusDiagnostics.createShareIntent(context)
+                                val chooser = Intent.createChooser(sendIntent, shareChooserTitle)
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                context.startActivity(chooser)
+                            }
+                        }
+                    }
+                )
+            }
+
+            item(key = "debug_home_focus_clear") {
+                DebugActionCard(
+                    title = stringResource(R.string.debug_home_focus_clear_title),
+                    subtitle = stringResource(R.string.debug_home_focus_clear_subtitle),
+                    onClick = {
+                        diagnosticsScope.launch {
+                            PlusHomeFocusDiagnostics.clear(context)
+                            homeFocusLogText = ""
+                        }
+                    }
+                )
+            }
+
             // ── Library Testing ──
             item(key = "debug_library_header") {
                 Spacer(modifier = Modifier.height(NuvioTheme.spacing.sm))
@@ -221,6 +315,73 @@ fun DebugSettingsContent(
                 onClick = { showErrorDialog = false }
             )
         }
+    }
+
+    if (showHomeFocusLogDialog) {
+        HomeFocusLogDialog(
+            logText = homeFocusLogText,
+            onDismiss = { showHomeFocusLogDialog = false }
+        )
+    }
+}
+
+@Composable
+private fun HomeFocusLogDialog(
+    logText: String,
+    onDismiss: () -> Unit
+) {
+    val scrollState = rememberScrollState()
+    val focusRequester = remember { FocusRequester() }
+    val scope = rememberCoroutineScope()
+
+    androidx.compose.runtime.LaunchedEffect(logText) {
+        focusRequester.requestFocus()
+    }
+
+    NuvioDialog(
+        onDismiss = onDismiss,
+        title = stringResource(R.string.debug_home_focus_dialog_title),
+        subtitle = stringResource(R.string.debug_home_focus_dialog_subtitle),
+        width = 920.dp,
+        usePlatformDefaultWidth = false
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(440.dp)
+                .focusRequester(focusRequester)
+                .focusable()
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) {
+                        return@onPreviewKeyEvent false
+                    }
+                    val delta = when (event.key) {
+                        Key.DirectionDown -> 320
+                        Key.DirectionUp -> -320
+                        else -> return@onPreviewKeyEvent false
+                    }
+                    val target = (scrollState.value + delta).coerceIn(0, scrollState.maxValue)
+                    if (target == scrollState.value) {
+                        false
+                    } else {
+                        scope.launch { scrollState.animateScrollTo(target) }
+                        true
+                    }
+                }
+                .verticalScroll(scrollState)
+                .padding(horizontal = NuvioTheme.spacing.sm)
+        ) {
+            Text(
+                text = logText.ifBlank { stringResource(R.string.debug_home_focus_log_empty) },
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                color = NuvioTheme.colors.TextSecondary
+            )
+        }
+
+        DebugDialogButton(
+            text = stringResource(R.string.debug_dismiss),
+            onClick = onDismiss
+        )
     }
 }
 

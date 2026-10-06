@@ -240,15 +240,31 @@ internal fun ModernHomeRowsList(
                         row.apiType ?: continue,
                         row.catalogId ?: continue
                     )
+                    PlusHomeFocusDiagnostics.log(
+                        context,
+                        "LAZY_ROW_LOAD_REQUEST",
+                        "row" to row.key,
+                        "rowIndex" to idx,
+                        "firstVisibleRow" to firstVisible,
+                        "lastVisibleRow" to lastVisible
+                    )
                     latestOnRequestLazyCatalogLoad.value(legacyKey)
                 }
             }
         }
     }
 
-    val focusRestorerRequester = remember(activeRowKey) {
+    val focusRestorerRequester = remember(activeRowKey, context) {
         {
-            activeRowKey.value?.let { rowFocusRequesters[it] } ?: FocusRequester.Default
+            val rowKey = activeRowKey.value
+            PlusHomeFocusDiagnostics.log(
+                context,
+                "COLUMN_FOCUS_RESTORER",
+                "activeRow" to rowKey,
+                "activeIndex" to activeItemIndex.value,
+                "hasRowRequester" to (rowKey != null && rowFocusRequesters.containsKey(rowKey))
+            )
+            rowKey?.let { rowFocusRequesters[it] } ?: FocusRequester.Default
         }
     }
 
@@ -292,6 +308,27 @@ internal fun ModernHomeRowsList(
                 .focusRequester(contentFocusRequester)
                 .focusRestorer { focusRestorerRequester() }
                 .onPreviewKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown) {
+                        val keyName = when (event.key) {
+                            Key.DirectionLeft -> "LEFT"
+                            Key.DirectionRight -> "RIGHT"
+                            Key.DirectionUp -> "UP"
+                            Key.DirectionDown -> "DOWN"
+                            else -> null
+                        }
+                        if (keyName != null) {
+                            PlusHomeFocusDiagnostics.log(
+                                context,
+                                "DPAD",
+                                "key" to keyName,
+                                "row" to activeRowKey.value,
+                                "index" to activeItemIndex.value,
+                                "columnFirstVisible" to verticalRowListState.firstVisibleItemIndex,
+                                "columnOffset" to verticalRowListState.firstVisibleItemScrollOffset,
+                                "fastScroll" to isFastScrolling.value
+                            )
+                        }
+                    }
                     val firstRowKey = carouselRows.list.firstOrNull()?.key
                     val lastRowKey = carouselRows.list.lastOrNull()?.key
                     if (event.type == KeyEventType.KeyDown &&
@@ -380,6 +417,26 @@ internal fun ModernHomeRowsList(
                         val rowBecameActive = activeRowKey.value != rowKey
                         val itemChanged = activeItemIndex.value != index
                         
+                        if (rowBecameActive) {
+                            PlusHomeFocusDiagnostics.log(
+                                context,
+                                "ACTIVE_ROW_CHANGE",
+                                "from" to activeRowKey.value,
+                                "to" to rowKey,
+                                "index" to index,
+                                "columnFirstVisible" to verticalRowListState.firstVisibleItemIndex,
+                                "columnOffset" to verticalRowListState.firstVisibleItemScrollOffset
+                            )
+                        } else if (itemChanged) {
+                            PlusHomeFocusDiagnostics.log(
+                                context,
+                                "ACTIVE_ITEM_CHANGE",
+                                "row" to rowKey,
+                                "from" to activeItemIndex.value,
+                                "to" to index
+                            )
+                        }
+
                         if (rowBecameActive || itemChanged) {
                             val now = System.currentTimeMillis()
                             val timeSinceLastHeroNav = now - lastHeroNavigationAtMs.value
