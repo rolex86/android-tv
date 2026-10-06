@@ -531,28 +531,28 @@ internal fun HomeViewModel.loadMoreCatalogItemsPipeline(catalogId: String, addon
     _loadingCatalogs.update { it + key }
 
     viewModelScope.launch {
-        val addon = addonsCache.find { it.id == addonId }
-        if (addon == null) {
-            return@launch
-        }
-
         val nextSkip = currentRow.nextCatalogSkip()
+
+        // Plus fix: paginate the exact row instance that is already on screen.
+        // Looking up an addon by ID alone is ambiguous when multiple installs share
+        // the same addon ID but use different base URLs; using a different base URL
+        // changes the Modern Home stable row key and destroys focus.
         catalogRepository.getCatalog(
-            addonBaseUrl = addon.baseUrl,
-            addonId = addon.id,
-            addonName = addon.displayName,
-            catalogId = catalogId,
+            addonBaseUrl = currentRow.addonBaseUrl,
+            addonId = currentRow.addonId,
+            addonName = currentRow.addonName,
+            catalogId = currentRow.catalogId,
             catalogName = currentRow.catalogName,
             type = currentRow.apiType,
             skip = nextSkip,
             skipStep = currentRow.skipStep,
+            extraArgs = currentRow.extraArgs,
             supportsSkip = currentRow.supportsSkip
         ).collect { result ->
             when (result) {
                 is NetworkResult.Success -> {
                     updateCatalogRow(key) { latestRow ->
-                        val mergedRow = latestRow.mergeCatalogPage(result.data)
-                        mergedRow
+                        latestRow.mergeCatalogPagePreservingIdentity(result.data)
                     }
                     _loadingCatalogs.update { it - key }
                     scheduleUpdateCatalogRows()
