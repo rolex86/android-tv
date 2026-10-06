@@ -537,8 +537,16 @@ internal fun ModernRowSection(
         derivedStateOf { focusedItemByRow[rowKey] ?: 0 }
     }
 
-    // Blocks vertical focus exit during placeholder→data transition.
+    // Blocks vertical focus exit while a focused card is being replaced/recomposed by
+    // placeholder resolution or a pagination append.
     val blockingFocusExit = remember { mutableStateOf(false) }
+
+    // Plus-only pagination guard. The first page append can temporarily detach the
+    // focused card from the LazyRow, which lets the parent LazyColumn restore focus
+    // into the previous row. Remember the focused index while LOAD_MORE is in flight
+    // and restore that already-visible card after the appended page is composed.
+    val loadMoreFocusRestoreIndex = remember(rowKey) { mutableStateOf<Int?>(null) }
+    val loadMoreItemCountAtRequest = remember(rowKey) { mutableIntStateOf(-1) }
 
     // Item keys carry item identity, which the placeholder the ring sits on loses when real data
     // arrives: its key changes and Compose tears the focused node down. Lend that one card a
@@ -564,14 +572,33 @@ internal fun ModernRowSection(
         pinSpent.value = true
     }
     Column(
-        modifier = Modifier.then(
-            if (blockingFocusExit.value) {
-                Modifier.focusProperties {
-                    up = FocusRequester.Cancel
-                    down = FocusRequester.Cancel
+        modifier = Modifier
+            .onPreviewKeyEvent { event ->
+                if (loadMoreFocusRestoreIndex.value != null &&
+                    event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.DirectionUp || event.key == Key.DirectionDown)
+                ) {
+                    PlusHomeFocusDiagnostics.log(
+                        diagnosticsContext,
+                        "LOAD_MORE_FOCUS_GUARD_CANCEL",
+                        "row" to rowKey,
+                        "reason" to "vertical_input",
+                        "index" to loadMoreFocusRestoreIndex.value
+                    )
+                    loadMoreFocusRestoreIndex.value = null
+                    loadMoreItemCountAtRequest.intValue = -1
+                    blockingFocusExit.value = false
                 }
-            } else Modifier
-        )
+                false
+            }
+            .then(
+                if (blockingFocusExit.value) {
+                    Modifier.focusProperties {
+                        up = FocusRequester.Cancel
+                        down = FocusRequester.Cancel
+                    }
+                } else Modifier
+            )
     ) {
         val titleMediumStyle = MaterialTheme.typography.titleMedium
         val rowTitleStyle = remember(titleMediumStyle) {
@@ -705,6 +732,12 @@ internal fun ModernRowSection(
                             !rowState.isLoading &&
                             lastRequestedTotal != total
                         ) {
+                            val activeAtRequest = isActiveRow()
+                            if (activeAtRequest) {
+                                loadMoreFocusRestoreIndex.value = rowFocusedIndex.value
+                                loadMoreItemCountAtRequest.intValue = total
+                                blockingFocusExit.value = true
+                            }
                             PlusHomeFocusDiagnostics.log(
                                 diagnosticsContext,
                                 "LOAD_MORE",
@@ -712,7 +745,8 @@ internal fun ModernRowSection(
                                 "lastVisible" to lastVisible,
                                 "total" to total,
                                 "focusedIndex" to rowFocusedIndex.value,
-                                "active" to isActiveRow()
+                                "active" to activeAtRequest,
+                                "focusGuardArmed" to activeAtRequest
                             )
                             loadMoreRequestedTotals[rowState.key] = total
                             onLoadMoreCatalog(
@@ -742,6 +776,59 @@ internal fun ModernRowSection(
                 "active" to isActiveRow(),
                 "focusedIndex" to rowFocusedIndex.value
             )
+
+            val restoreIndex = loadMoreFocusRestoreIndex.value
+            val countAtRequest = loadMoreItemCountAtRequest.intValue
+            if (restoreIndex != null &&
+                countAtRequest >= 0 &&
+                rowItemCount > countAtRequest
+            ) {
+                val targetIndex = restoreIndex.coerceIn(0, (rowItemCount - 1).coerceAtLeast(0))
+                var restored = false
+
+                // Let the newly appended LazyRow content settle, then retry the already
+                // existing focused item requester for a few frames. No scrolling is
+                // performed here, so the active card cannot be de-composed by the fix.
+                repeat(6) { attempt ->
+                    if (!restored) {
+                        delay(if (attempt == 0) 16L else 12L)
+                        val requester = itemFocusRequesters[targetIndex]
+                        restored = requester != null &&
+                            runCatching { requester.requestFocus() }.getOrDefault(false)
+                    }
+                }
+
+                PlusHomeFocusDiagnostics.log(
+                    diagnosticsContext,
+                    "LOAD_MORE_FOCUS_RESTORE",
+                    "row" to rowKey,
+                    "index" to targetIndex,
+                    "oldCount" to countAtRequest,
+                    "newCount" to rowItemCount,
+                    "restored" to restored
+                )
+
+                loadMoreFocusRestoreIndex.value = null
+                loadMoreItemCountAtRequest.intValue = -1
+                blockingFocusExit.value = false
+            }
+        }
+
+        LaunchedEffect(row.key, loadMoreFocusRestoreIndex.value) {
+            val armedIndex = loadMoreFocusRestoreIndex.value ?: return@LaunchedEffect
+            delay(3000L)
+            if (loadMoreFocusRestoreIndex.value == armedIndex) {
+                PlusHomeFocusDiagnostics.log(
+                    diagnosticsContext,
+                    "LOAD_MORE_FOCUS_GUARD_TIMEOUT",
+                    "row" to rowKey,
+                    "index" to armedIndex,
+                    "items" to row.items.list.size
+                )
+                loadMoreFocusRestoreIndex.value = null
+                loadMoreItemCountAtRequest.intValue = -1
+                blockingFocusExit.value = false
+            }
         }
         LaunchedEffect(
             row.key,
