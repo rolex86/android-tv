@@ -5,6 +5,10 @@
     <string name="debug_home_focus_logging_subtitle">Record D-pad input, focus changes, row loading, focus restore and pagination to an internal rotating log. Disabled by default.</string>
     <string name="debug_home_focus_view_title">View focus log</string>
     <string name="debug_home_focus_view_subtitle">Open the latest recorded focus events directly on this TV.</string>
+    <string name="debug_home_focus_export_title">Export focus log to Downloads</string>
+    <string name="debug_home_focus_export_subtitle">Save a real text file to Download/NuvioRSPlus so it can be opened with a file manager.</string>
+    <string name="debug_home_focus_export_success">Saved to %1$s</string>
+    <string name="debug_home_focus_export_failed">Could not export the focus log.</string>
     <string name="debug_home_focus_share_title">Share focus log</string>
     <string name="debug_home_focus_share_subtitle">Share the full diagnostic log as a text file.</string>
     <string name="debug_home_focus_clear_title">Clear focus log</string>

@@ -5,6 +5,10 @@
     <string name="debug_home_focus_logging_subtitle">Zapisuje D-pad, změny focusu, načítání řádků, obnovu focusu a stránkování do interního rotačního logu. Ve výchozím stavu je vypnuto.</string>
     <string name="debug_home_focus_view_title">Zobrazit focus log</string>
     <string name="debug_home_focus_view_subtitle">Zobrazí poslední zaznamenané události přímo na TV.</string>
+    <string name="debug_home_focus_export_title">Exportovat focus log do Stažených</string>
+    <string name="debug_home_focus_export_subtitle">Uloží skutečný textový soubor do Download/NuvioRSPlus, odkud ho otevřeš přes správce souborů.</string>
+    <string name="debug_home_focus_export_success">Uloženo do %1$s</string>
+    <string name="debug_home_focus_export_failed">Focus log se nepodařilo exportovat.</string>
     <string name="debug_home_focus_share_title">Sdílet focus log</string>
     <string name="debug_home_focus_share_subtitle">Nasdílí kompletní diagnostický log jako textový soubor.</string>
     <string name="debug_home_focus_clear_title">Vymazat focus log</string>

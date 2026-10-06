@@ -3,6 +3,7 @@
 package com.nuvio.tv.ui.screens.settings
 
 import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -76,6 +77,30 @@ internal fun PlusHomeFocusDiagnosticsSettingsSection() {
                         newestFirst = true
                     )
                     showLogDialog = true
+                }
+            }
+        )
+
+        SettingsActionRow(
+            title = stringResource(R.string.debug_home_focus_export_title),
+            subtitle = stringResource(R.string.debug_home_focus_export_subtitle),
+            onClick = {
+                scope.launch {
+                    runCatching {
+                        PlusHomeFocusDiagnostics.exportToDownloads(context)
+                    }.onSuccess { path ->
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.debug_home_focus_export_success, path),
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }.onFailure {
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.debug_home_focus_export_failed),
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
                 }
             }
         )

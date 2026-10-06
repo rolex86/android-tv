@@ -1,10 +1,13 @@
 package com.nuvio.tv.ui.screens.home
 
 import android.content.ClipData
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Environment
 import android.os.SystemClock
+import android.provider.MediaStore
 import android.util.Log
 import androidx.core.content.FileProvider
 import com.nuvio.tv.BuildConfig
@@ -106,6 +109,56 @@ internal object PlusHomeFocusDiagnostics {
                 if (file.exists()) file.delete()
             }.get(5, TimeUnit.SECONDS)
         }
+    }
+
+    suspend fun exportToDownloads(context: Context): String = withContext(Dispatchers.IO) {
+        val appContext = context.applicationContext
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            throw UnsupportedOperationException("Public Downloads export requires Android 10 or newer")
+        }
+
+        executor.submit<String> {
+            val source = logFile(appContext)
+            val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+            val displayName = "NuvioRSPlus-ModernHome-Focus-$timestamp.txt"
+            val relativePath = Environment.DIRECTORY_DOWNLOADS + "/NuvioRSPlus"
+
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, displayName)
+                put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+                put(MediaStore.Downloads.RELATIVE_PATH, relativePath)
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+            val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            val resolver = appContext.contentResolver
+            val uri = resolver.insert(collection, values)
+                ?: error("Could not create Downloads entry")
+
+            try {
+                resolver.openOutputStream(uri, "w")?.use { output ->
+                    if (source.exists() && source.length() > 0L) {
+                        source.inputStream().use { input -> input.copyTo(output) }
+                    } else {
+                        output.write(
+                            "Nuvio RS Plus Modern Home focus diagnostics\nNo events recorded.\n"
+                                .toByteArray(Charsets.UTF_8)
+                        )
+                    }
+                } ?: error("Could not open exported log for writing")
+
+                resolver.update(
+                    uri,
+                    ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
+                    null,
+                    null
+                )
+            } catch (error: Throwable) {
+                resolver.delete(uri, null, null)
+                throw error
+            }
+
+            "$relativePath/$displayName"
+        }.get(10, TimeUnit.SECONDS)
     }
 
     suspend fun createShareIntent(context: Context): Intent = withContext(Dispatchers.IO) {
