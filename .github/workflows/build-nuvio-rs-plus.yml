@@ -312,18 +312,29 @@ jobs:
 
           UPSTREAM_BASELINE="$(sed -nE 's/^- Synced baseline: `([^`]+)`.*/\1/p' PLUS_UPSTREAM.md | head -n1)"
           test -n "$UPSTREAM_BASELINE"
+          export UPSTREAM_BASELINE
 
-          cat > ../release-notes.md <<EOF
-          ## Nuvio RS Plus
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
 
-          Nuvio RS Plus: Nuvio Reshaped plus our Plus-only features.
+          baseline = os.environ["UPSTREAM_BASELINE"]
+          notes = f"""## Nuvio RS Plus
 
-          - Synced with Nuvio Reshaped beta upstream through `$UPSTREAM_BASELINE`
-          - Package: `com.rolex86.nuviorsplus`
-          - In-app updater points to `rolex86/android-tv`
-          - Keeps upstream Google sync, Trakt, MDBList, Seekr and TMDB integrations enabled
-          - Includes Plus AI subtitle and AutoSync UI changes
-          EOF
+Nuvio RS Plus: Nuvio Reshaped plus our Plus-only features.
+
+- Synced with Nuvio Reshaped beta upstream through `{baseline}`
+- Package: `com.rolex86.nuviorsplus`
+- In-app updater points to `rolex86/android-tv`
+- Keeps upstream Google sync, Trakt, MDBList, Seekr and TMDB integrations enabled
+- Includes Plus AI subtitle and AutoSync UI changes
+"""
+          Path("../release-notes.md").write_text(notes, encoding="utf-8")
+          PY
+
+          grep -Fq -- "- Synced with Nuvio Reshaped beta upstream through `$UPSTREAM_BASELINE`" ../release-notes.md
+          grep -Fq -- '- Package: `com.rolex86.nuviorsplus`' ../release-notes.md
+          grep -Fq -- '- In-app updater points to `rolex86/android-tv`' ../release-notes.md
 
           gh release create "$TAG" ../release-apks/*.apk \
             --repo "$GITHUB_REPOSITORY" \

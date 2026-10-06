@@ -1,0 +1,57 @@
+name: Repair current Nuvio RS Plus release notes
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/repair-current-nuvio-rs-plus-release-notes.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Repair published release notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          TAG="1.1.0-beta.4-autosync.2"
+          UPSTREAM_BASELINE="$(sed -nE 's/^- Synced baseline: `([^`]+)`.*/\1/p' nuvio-rs-plus/PLUS_UPSTREAM.md | head -n1)"
+          test "$UPSTREAM_BASELINE" = "1.1.0-beta.4-autosync.1"
+          export UPSTREAM_BASELINE
+
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          baseline = os.environ["UPSTREAM_BASELINE"]
+          notes = f"""## Nuvio RS Plus
+
+Nuvio RS Plus: Nuvio Reshaped plus our Plus-only features.
+
+- Synced with Nuvio Reshaped beta upstream through `{baseline}`
+- Package: `com.rolex86.nuviorsplus`
+- In-app updater points to `rolex86/android-tv`
+- Keeps upstream Google sync, Trakt, MDBList, Seekr and TMDB integrations enabled
+- Includes Plus AI subtitle and AutoSync UI changes
+"""
+          Path("/tmp/nuvio-rs-plus-release-notes.md").write_text(notes, encoding="utf-8")
+          PY
+
+          gh release edit "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --notes-file /tmp/nuvio-rs-plus-release-notes.md
+
+          BODY="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
+          grep -Fq -- "- Synced with Nuvio Reshaped beta upstream through `$UPSTREAM_BASELINE`" <<<"$BODY"
+          grep -Fq -- '- Package: `com.rolex86.nuviorsplus`' <<<"$BODY"
+          grep -Fq -- '- In-app updater points to `rolex86/android-tv`' <<<"$BODY"
