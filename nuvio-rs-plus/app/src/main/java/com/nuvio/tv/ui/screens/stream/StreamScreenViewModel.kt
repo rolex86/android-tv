@@ -366,9 +366,12 @@ class StreamScreenViewModel @Inject constructor(
                     playerPreference = playerSettings.playerPreference,
                     streamAutoPlayMode = playerSettings.streamAutoPlayMode
                 )
-                // In MANUAL mode, still enable direct auto-play if a persisted
-                // binge group exists - same behavior as playNextEpisode in the player.
+                // Plus policy: a remembered binge group may bypass the picker only for
+                // episodic playback. Movies must keep MANUAL semantics on every launch,
+                // otherwise reopening a partially watched movie can silently replay the
+                // previously chosen source even when "Reuse last link" is disabled.
                 if (!directAutoPlayFlowEnabledForSession &&
+                    PlusBingeGroupReusePolicy.allowForInitialSelection(season, episode) &&
                     playerSettings.streamAutoPlayPreferBingeGroupForNextEpisode &&
                     playerSettings.streamAutoPlayReuseBingeGroup
                 ) {
@@ -470,8 +473,11 @@ class StreamScreenViewModel @Inject constructor(
             val installedAddonOrder = installedAddons.map { it.displayName }
             val directDebridSourceNames = emptyList<String>()
             val directDebridAvailable = false
-            val persistedBingeGroup = if (playerSettings.streamAutoPlayPreferBingeGroupForNextEpisode &&
-                playerSettings.streamAutoPlayReuseBingeGroup) {
+            val persistedBingeGroup = if (
+                PlusBingeGroupReusePolicy.allowForInitialSelection(season, episode) &&
+                playerSettings.streamAutoPlayPreferBingeGroupForNextEpisode &&
+                playerSettings.streamAutoPlayReuseBingeGroup
+            ) {
                 contentId?.let { bingeGroupCacheDataStore.get(it) }
             } else null
 
