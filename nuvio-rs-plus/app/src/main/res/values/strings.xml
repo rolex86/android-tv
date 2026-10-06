@@ -3335,28 +3335,4 @@
     <string name="shuffle_save_failed">Could not update shuffle. Try again.</string>
     <string name="shuffle_change_selection">Choose episodes</string>
     <string name="shuffle_badge">Episode shuffle enabled</string>
-    <string name="audio_smart_filtering_section">Smart audio filtering</string>
-    <string name="audio_smart_filtering_note">Used for automatic audio selection. A manually remembered audio track always has priority.</string>
-    <string name="audio_smart_content_preference">Original audio or dubbing</string>
-    <string name="audio_smart_content_preference_sub">Prefer tracks explicitly marked as original or dubbed, independently of the language order above.</string>
-    <string name="audio_smart_content_language">Follow language order</string>
-    <string name="audio_smart_content_original">Prefer explicitly marked original audio</string>
-    <string name="audio_smart_content_dubbed">Prefer explicitly marked dubbed audio</string>
-    <string name="audio_smart_best_quality">Prefer best audio quality</string>
-    <string name="audio_smart_best_quality_sub">Within the same content and language priority, prefer the best codec, channel count and bitrate.</string>
-    <string name="audio_smart_ignore_commentary">Ignore commentary tracks</string>
-    <string name="audio_smart_ignore_commentary_sub">Skip director, cast and other commentary audio during automatic selection.</string>
-    <string name="audio_smart_ignore_description">Ignore audio description tracks</string>
-    <string name="audio_smart_ignore_description_sub">Skip descriptive audio tracks during automatic selection.</string>
-
-    <string name="plus_resume_rewind_title">Resume rewind</string>
-    <string name="plus_resume_rewind_off">Off</string>
-    <string name="plus_resume_rewind_subtitle">Start a little before the saved position when resuming playback.</string>
-    <string name="plus_resume_rewind_seconds">%1$d s</string>
-    <string name="cd_plus_what_did_they_say">What did they say? Rewind with temporary subtitles</string>
-    <string name="plus_subtitle_source_title">Subtitle source preference</string>
-    <string name="plus_subtitle_source_subtitle">Choose which source wins when the same preferred language is available from multiple sources.</string>
-    <string name="plus_subtitle_source_auto">Automatic</string>
-    <string name="plus_subtitle_source_embedded">Prefer embedded</string>
-    <string name="plus_subtitle_source_addon">Prefer addon</string>
 </resources>

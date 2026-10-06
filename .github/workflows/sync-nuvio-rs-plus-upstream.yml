@@ -103,10 +103,29 @@ jobs:
           set -e
 
           if (( MERGE_STATUS != 0 )); then
-            echo "::error::Automatic Nuvio RS Plus upstream merge has conflicts. No Plus release will be published."
-            echo "Conflicting files:"
-            git -C /tmp/nuvio-upstream diff --name-only --diff-filter=U
-            exit 1
+            mapfile -t CONFLICTS < <(git -C /tmp/nuvio-upstream diff --name-only --diff-filter=U)
+            printf 'Upstream merge conflicts: %s\n' "${CONFLICTS[*]}"
+
+            # These files belong to the nested upstream checkout and are not part
+            # of the Plus-specific product surface. Always follow the new upstream
+            # copy so release-note/workflow churn cannot block the app sync.
+            for FILE in "${CONFLICTS[@]}"; do
+              case "$FILE" in
+                .github/autosync-release-notes.md|.github/workflows/mirror-nuviotv-release.yml)
+                  git -C /tmp/nuvio-upstream checkout --theirs -- "$FILE"
+                  git -C /tmp/nuvio-upstream add "$FILE"
+                  ;;
+                *)
+                  echo "::error::Unexpected upstream conflict in $FILE; refusing to guess a resolution."
+                  exit "$MERGE_STATUS"
+                  ;;
+              esac
+            done
+
+            if git -C /tmp/nuvio-upstream diff --name-only --diff-filter=U | grep -q .; then
+              echo "::error::Unresolved upstream conflicts remain."
+              exit "$MERGE_STATUS"
+            fi
           fi
 
           # These are invariants of our fork. If upstream ever changes in a way
