@@ -6,3 +6,4 @@
 - App id: `com.rolex86.nuviorsplus`
 - App name: `Nuvio RS Plus`
 - Update repository: `rolex86/android-tv`
+- Upstream sync dispatches the Plus build explicitly after a successful merge.

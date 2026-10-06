@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: nuvio-rs-plus-upstream-sync
@@ -174,6 +175,7 @@ jobs:
         env:
           BASELINE: ${{ steps.upstream.outputs.baseline }}
           LATEST: ${{ steps.upstream.outputs.latest }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
@@ -189,5 +191,10 @@ jobs:
           git commit -m "Sync Nuvio RS Plus with upstream $LATEST"
           git push origin HEAD:main
 
+          # Pushes made with GITHUB_TOKEN do not start another push-triggered
+          # workflow. Explicitly dispatch the Plus build from the freshly
+          # updated main branch instead.
+          gh workflow run build-nuvio-rs-plus.yml --ref main
+
           echo "Synced Nuvio RS Plus from $BASELINE to $LATEST."
-          echo "The push to nuvio-rs-plus/** automatically starts Build Nuvio RS Plus."
+          echo "Dispatched Build Nuvio RS Plus from updated main."
