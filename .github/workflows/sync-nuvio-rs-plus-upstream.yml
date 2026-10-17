@@ -140,6 +140,16 @@ jobs:
             mapfile -t CONFLICTS < <(git -C /tmp/nuvio-upstream diff --name-only --diff-filter=U)
           fi
           
+            # Reviewed beta.7.1 -> beta.7.2 merge. Fail closed for other conflicts.
+            if [[ "$BASELINE" == "1.1.0-beta.7-autosync.1" &&
+                  "$LATEST" == "1.1.0-beta.7-autosync.2" &&
+                  "${CONFLICTS[*]}" == "app/src/main/java/com/nuvio/tv/ui/screens/player/autosync/bubble/AutoSyncBubbleToast.kt app/src/main/java/com/nuvio/tv/ui/screens/player/autosync/bubble/AutoSyncBubbleToasts.kt" ]]; then
+              git -C /tmp/nuvio-upstream checkout --theirs -- "${CONFLICTS[@]}"
+              python3 .github/scripts/resolve_nuvio_plus_beta7_bubbles.py /tmp/nuvio-upstream
+              git -C /tmp/nuvio-upstream add -- "${CONFLICTS[@]}"
+              mapfile -t CONFLICTS < <(git -C /tmp/nuvio-upstream diff --name-only --diff-filter=U)
+            fi
+
           # These files belong to the nested upstream checkout and are not part
             # of the Plus-specific product surface. Always follow the new upstream
             # copy so release-note/workflow churn cannot block the app sync.
