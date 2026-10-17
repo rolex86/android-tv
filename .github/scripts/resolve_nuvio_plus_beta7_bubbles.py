@@ -184,7 +184,7 @@ def main() -> None:
     ):
         path = checkout / DIRECTORY / filename
         raw = path.read_bytes()
-        blob = hashlib.sha1(f"blob {len(raw)}\\0".encode() + raw).hexdigest()
+        blob = hashlib.sha1(f"blob {len(raw)}\0".encode() + raw).hexdigest()
         if blob != EXPECTED_UPSTREAM_BLOBS[filename]:
             raise RuntimeError(f"{filename}: upstream blob changed ({blob}); refusing unsafe merge")
         patched = patcher(raw.decode("utf-8"))
