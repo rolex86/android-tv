@@ -99,7 +99,7 @@ private const val IDLE_TICK_MS = 250L
 /** The words' fold-away spring has settled by then; until it has, the bubble animates every frame. */
 private const val FOLD_SETTLE_MS = 800L
 
-/** Working stages are informational only: show briefly, then get fully out of the film. */
+/** Plus: informational progress stays visible briefly, then fully clears the video. */
 private const val WORKING_PREVIEW_MS = 4_500L
 private const val SUCCESS_HOLD_MS = 1_800L
 /** A little longer than the phone: the explanation is read from across the room. */
@@ -155,6 +155,7 @@ internal fun BoxScope.AutoSyncBubbleToastHost(controlsVisible: Boolean) {
 
 @Composable
 private fun AutoSyncBubble(message: AutoSyncBubbleMessage, colors: BubbleColors, modifier: Modifier) {
+    val latestMessage by rememberUpdatedState(message)
     val kind = message.kind
     val kindState = rememberUpdatedState(kind)
     val colorsState = rememberUpdatedState(colors)
@@ -177,9 +178,10 @@ private fun AutoSyncBubble(message: AutoSyncBubbleMessage, colors: BubbleColors,
         label = "tinted",
     )
 
-    fun dismiss() {
+    fun dismiss(hideWorking: Boolean = false) {
         if (leaving) return
         leaving = true
+        if (hideWorking) AutoSyncBubbleToasts.hideWorking(message.session)
         AutoSyncBubbleToasts.leaving(message.session)
         scope.launch {
             cardOpen = false
@@ -187,7 +189,7 @@ private fun AutoSyncBubble(message: AutoSyncBubbleMessage, colors: BubbleColors,
             labelVisible = false
             delay(240)
             leave.animateTo(1f, tween(340, easing = FastOutSlowInEasing))
-            AutoSyncBubbleToasts.finished(message.id)
+            AutoSyncBubbleToasts.finished(latestMessage.id)
         }
     }
 
@@ -209,11 +211,13 @@ private fun AutoSyncBubble(message: AutoSyncBubbleMessage, colors: BubbleColors,
             withFrameNanos { clock.floatValue = (it - start) / 1_000_000_000f * 0.6f }
         }
     }
+    // Plus: routine progress updates must not prolong the working notification.
+    // A new explicitly requested preview may restart this short window.
     LaunchedEffect(message.workingPreviewId, kind) {
         if (kind != AutoSyncBubbleKind.Working) return@LaunchedEffect
         labelVisible = true
         delay(WORKING_PREVIEW_MS)
-        dismiss()
+        dismiss(hideWorking = true)
     }
     LaunchedEffect(kind) {
         when (kind) {
