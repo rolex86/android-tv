@@ -107,7 +107,40 @@ jobs:
             mapfile -t CONFLICTS < <(git -C /tmp/nuvio-upstream diff --name-only --diff-filter=U)
             printf 'Upstream merge conflicts: %s\n' "${CONFLICTS[*]}"
 
-            # These files belong to the nested upstream checkout and are not part
+            # One-time, fail-closed conflict resolution for the reviewed beta.5 -> beta.7 sync.
+          # Git first merges every non-conflicting upstream/Plus change automatically.
+          # For these exact three conflicts, retain the full upstream file and reapply
+          # ALL Plus-specific edits from the beta.5 baseline using unique text anchors.
+          if [[ "$BASELINE" == "1.1.0-beta.5-autosync.1" && "$LATEST" == "1.1.0-beta.7-autosync.1" && "${CONFLICTS[*]}" == "app/src/main/java/com/nuvio/tv/ui/screens/player/PlayerRuntimeControllerMpv.kt app/src/main/java/com/nuvio/tv/ui/screens/player/PlayerRuntimeControllerPlaybackEvents.kt app/src/main/java/com/nuvio/tv/ui/screens/player/PlayerRuntimeControllerTrackSelection.kt" ]]; then
+            echo "Resolving three reviewed player conflicts while preserving Plus features"
+            git -C /tmp/nuvio-upstream checkout --theirs -- "${CONFLICTS[@]}"
+            python3 - <<'PY'
+          from pathlib import Path
+          import json
+          patches = json.loads(r"""{"PlayerRuntimeControllerMpv.kt":[["                channelCount = track.channelCount,\n                isSelected = track.isSelected\n            )\n        }\n\n    val internalSubtitleTracks","                channelCount = track.channelCount,\n                isSelected = track.isSelected,\n                rawLabel = track.name\n            )\n        }\n\n    val internalSubtitleTracks"],["    markMpvTextTracksScannedIfReady(hasInternalSubtitleTracks = internalSubtitleTracks.isNotEmpty())\n    maybeRestorePendingAudioSelectionAfterSubtitleRefresh(audioTracks)","    markMpvTextTracksScannedIfReady(hasInternalSubtitleTracks = internalSubtitleTracks.isNotEmpty())\n    val restoredAudioAfterSubtitleRefresh =\n        maybeRestorePendingAudioSelectionAfterSubtitleRefresh(audioTracks)"],["    applyPersistedTrackPreference(\n        audioTracks = audioTracks,\n        subtitleTracks = internalSubtitleTracks\n    )\n    logSwitchTrace(","    val rememberedAudioHandled = applyPersistedTrackPreference(\n        audioTracks = audioTracks,\n        subtitleTracks = internalSubtitleTracks\n    )\n    if (restoredAudioAfterSubtitleRefresh == null && !rememberedAudioHandled) {\n        tryApplySmartAudioSelection(audioTracks)\n    }\n    logSwitchTrace("]],"PlayerRuntimeControllerPlaybackEvents.kt":[["import com.nuvio.tv.domain.model.WatchProgress","import com.nuvio.tv.domain.model.WatchProgress\nimport com.nuvio.tv.ui.screens.player.aisubtitles.isAiSubtitle"],["        PlayerEvent.OnSeekBackward -> {\n            if (_playbackTimeline.value.isLive) return\n            onEvent(PlayerEvent.OnSeekBy(deltaMs = -PlayerScrubRates.STEP_SHORT_MS))\n        }\n        is PlayerEvent.OnSeekBy -> {","        PlayerEvent.OnSeekBackward -> {\n            if (_playbackTimeline.value.isLive) return\n            onEvent(PlayerEvent.OnSeekBy(deltaMs = -PlayerScrubRates.STEP_SHORT_MS))\n        }\n        PlayerEvent.OnPlusWhatDidTheySay -> {\n            runPlusWhatDidTheySay()\n        }\n        is PlayerEvent.OnSeekBy -> {"],["            autoSubtitleSelected = true\n            rememberAddonSubtitleSelection(event.subtitle)\n            selectAddonSubtitle(event.subtitle)\n            if (hasBurnedInServerSubtitle) clearServerSubtitle()\n            runSelectedAutomaticSubtitleSync(event.subtitle) // AutoSync hook","            autoSubtitleSelected = true\n            if (hasBurnedInServerSubtitle) clearServerSubtitle()\n            if (isAiSubtitle(event.subtitle)) {\n                selectAddonSubtitle(event.subtitle)\n            } else {\n                rememberAddonSubtitleSelection(event.subtitle)\n                selectAddonSubtitle(event.subtitle)\n                runSelectedAutomaticSubtitleSync(event.subtitle) // AutoSync hook\n            }"]],"PlayerRuntimeControllerTrackSelection.kt":[["import com.nuvio.tv.domain.model.Subtitle\nimport com.nuvio.tv.ui.screens.player.autosync.AutoSyncSyncedSubtitle","import com.nuvio.tv.domain.model.Subtitle\nimport com.nuvio.tv.ui.screens.player.aisubtitles.AiSubtitleFileStore\nimport com.nuvio.tv.ui.screens.player.aisubtitles.isAiSubtitle\nimport com.nuvio.tv.ui.screens.player.autosync.AutoSyncSyncedSubtitle"],["                \"id=${subtitle.id} inferredMime=$inferredMime \" +\n                \"url=${subtitle.url}\"\n        )\n\n        // Prefer sidecar hot-attach","                \"id=${subtitle.id} inferredMime=$inferredMime \" +\n                \"url=${subtitle.url}\"\n        )\n\n        if (isAiSubtitle(subtitle)) {\n            val body = AiSubtitleFileStore.read(subtitle) ?: return@let\n            disableSubtitles()\n            pendingAddonSubtitleLanguage = null\n            pendingAddonSubtitleTrackId = null\n            pendingAudioSelectionAfterSubtitleRefresh = null\n            _uiState.update {\n                it.copy(selectedAddonSubtitle = subtitle, selectedSubtitleTrackIndex = -1)\n            }\n            startSidecarAddonSubtitle(subtitle, rawBodyLoader = { body })\n            return@let\n        }\n\n        // Prefer sidecar hot-attach"]]}""")
+          required = json.loads(r"""{"PlayerRuntimeControllerMpv.kt":["rawLabel = track.name","markMpvTextTracksScannedIfReady","tryApplySmartAudioSelection(audioTracks)"],"PlayerRuntimeControllerPlaybackEvents.kt":["runPlusWhatDidTheySay()","isAiSubtitle(event.subtitle)","clearServerSubtitle()","publishPartyPlayback"],"PlayerRuntimeControllerTrackSelection.kt":["AiSubtitleFileStore.read(subtitle)","AutoSyncSyncedSubtitle.clear()","startSidecarAddonSubtitle(subtitle, rawBodyLoader = { body })"]}""")
+          root = Path("/tmp/nuvio-upstream/app/src/main/java/com/nuvio/tv/ui/screens/player/")
+          for filename, replacements in patches.items():
+              path = root / filename
+              body = path.read_text(encoding='utf-8')
+              for before, after in replacements:
+                  count = body.count(before)
+                  if count != 1:
+                      raise SystemExit(f'Unsafe Plus merge: {filename} expected 1 anchor, found {count}')
+                  body = body.replace(before, after, 1)
+              for token in required[filename]:
+                  if token not in body:
+                      raise SystemExit(f'Unsafe Plus merge: {filename} missing {token}')
+              if '<<<<<<<' in body or '>>>>>>>' in body:
+                  raise SystemExit(f'Unresolved conflict markers in {filename}')
+              path.write_text(body, encoding='utf-8')
+              print(f'Applied reviewed Plus preservation patch to {filename}')
+          PY
+            git -C /tmp/nuvio-upstream add -- "${CONFLICTS[@]}"
+            mapfile -t CONFLICTS < <(git -C /tmp/nuvio-upstream diff --name-only --diff-filter=U)
+          fi
+          
+          # These files belong to the nested upstream checkout and are not part
             # of the Plus-specific product surface. Always follow the new upstream
             # copy so release-note/workflow churn cannot block the app sync.
             for FILE in "${CONFLICTS[@]}"; do
