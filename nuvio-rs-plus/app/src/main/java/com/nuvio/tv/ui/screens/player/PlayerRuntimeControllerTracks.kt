@@ -428,7 +428,7 @@ internal fun PlayerRuntimeController.maybeAdjustLibassPipelineForTracks(tracks: 
     }
 
     scope.launch {
-        releasePlayer()
+        releasePlayer(flushPlaybackState = true, keepTorrentStream = true)
         initializePlayer(currentStreamUrl, currentHeaders)
     }
 }
@@ -1618,6 +1618,10 @@ internal fun PlayerRuntimeController.tryAutoSelectPreferredSubtitleFromAvailable
         Log.d(PlayerRuntimeController.TAG, "AUTO_SUB stop: user explicitly selected current subtitle")
         return
     }
+    if (hasBurnedInServerSubtitle) {
+        Log.d(PlayerRuntimeController.TAG, "AUTO_SUB stop: server is burning in a subtitle")
+        return
+    }
     val state = _uiState.value
     val preferredTargets = subtitleLanguageTargets()
     val primaryTarget = preferredTargets.firstOrNull()
@@ -1909,12 +1913,7 @@ internal fun PlayerRuntimeController.startFrameRateProbe(
     frameRateProbeJob?.cancel()
     _uiState.update { state ->
         if (!preserveCurrentDetection) {
-            state.copy(
-                detectedFrameRateRaw = 0f,
-                detectedFrameRate = 0f,
-                detectedFrameRateSource = null,
-                afrProbeRunning = false
-            )
+            state.clearFrameRateDetection().copy(afrProbeRunning = false)
         } else {
             state.copy(afrProbeRunning = false)
         }
