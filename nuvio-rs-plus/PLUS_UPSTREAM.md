@@ -2,7 +2,7 @@
 
 - Upstream: https://github.com/DavidVamaiotu/NuvioTV-Reshaped
 - Branch: `subtitle-autosync`
-- Synced baseline: `1.1.0-beta.7-autosync.2`
+- Synced baseline: `1.1.0-beta.7-autosync.3`
 - App id: `com.rolex86.nuviorsplus`
 - App name: `Nuvio RS Plus`
 - Update repository: `rolex86/android-tv`

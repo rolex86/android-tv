@@ -46,11 +46,14 @@ internal fun NuvioReshapedSettingsContent(
         )
         autoSyncBubbleSettingsItems(enabled = playerSettings.playerPreference != PlayerPreference.EXTERNAL) // Nuvio RS hook: AutoSync bubble
         aiSubtitleSettingsItems(enabled = playerSettings.playerPreference != PlayerPreference.EXTERNAL)
+        autoSourceRecoverySettingsItems(playerSettings)
+        reshapedFormatsSettingsItems(playerSettings) // Nuvio RS: Arc sound and picture formats
         seekrKeySettingsItems()
         seekPreviewSettingsItems()
         subtitleFontSettingsItems()
         connectionSpeedSettingsItems()
         pillNavSettingsItems()
+        netflixUiSettingsItems()
         liveTvSettingsItems()
 
         item(key = "plus_home_focus_diagnostics") {
