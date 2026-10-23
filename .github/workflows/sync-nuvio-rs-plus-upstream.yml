@@ -210,22 +210,16 @@ jobs:
           settings = root / "app/src/main/java/com/nuvio/tv/ui/screens/settings/NuvioReshapedSettingsContent.kt"
           replace_once(
               settings,
-              """        autoSyncBubbleSettingsItems(enabled = playerSettings.playerPreference != PlayerPreference.EXTERNAL) // Nuvio RS hook: AutoSync bubble
-              aiSubtitleSettingsItems(enabled = playerSettings.playerPreference != PlayerPreference.EXTERNAL)
-              seekrKeySettingsItems()""",
-              """        autoSyncBubbleSettingsItems(enabled = playerSettings.playerPreference != PlayerPreference.EXTERNAL) // Nuvio RS hook: AutoSync bubble
-              aiSubtitleSettingsItems(enabled = playerSettings.playerPreference != PlayerPreference.EXTERNAL)
-              autoSourceRecoverySettingsItems(playerSettings)
-              reshapedFormatsSettingsItems(playerSettings) // Nuvio RS: Arc sound and picture formats
-              seekrKeySettingsItems()""",
+              "        aiSubtitleSettingsItems(enabled = playerSettings.playerPreference != PlayerPreference.EXTERNAL)\n",
+              "        aiSubtitleSettingsItems(enabled = playerSettings.playerPreference != PlayerPreference.EXTERNAL)\n"
+              "        autoSourceRecoverySettingsItems(playerSettings)\n"
+              "        reshapedFormatsSettingsItems(playerSettings) // Nuvio RS: Arc sound and picture formats\n",
           )
           replace_once(
               settings,
-              """        pillNavSettingsItems()
-              liveTvSettingsItems()""",
-              """        pillNavSettingsItems()
-              netflixUiSettingsItems()
-              liveTvSettingsItems()""",
+              "        liveTvSettingsItems()\n",
+              "        netflixUiSettingsItems()\n"
+              "        liveTvSettingsItems()\n",
           )
 
           required = {
