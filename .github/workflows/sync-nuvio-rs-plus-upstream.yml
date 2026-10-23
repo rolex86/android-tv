@@ -150,6 +150,121 @@ jobs:
               mapfile -t CONFLICTS < <(git -C /tmp/nuvio-upstream diff --name-only --diff-filter=U)
             fi
 
+            # Reviewed beta.7.2 -> beta.7.3 merge.
+            # Keep the Plus track-selection/settings additions, add every new Arc hook from
+            # upstream, and adopt upstream's new AudioSync notification policy wholesale.
+            if [[ "$BASELINE" == "1.1.0-beta.7-autosync.2" &&
+                  "$LATEST" == "1.1.0-beta.7-autosync.3" &&
+                  "${CONFLICTS[*]}" == "app/src/main/java/com/nuvio/tv/ui/screens/player/PlayerRuntimeControllerTracks.kt app/src/main/java/com/nuvio/tv/ui/screens/player/audiosync/AudioSyncFallback.kt app/src/main/java/com/nuvio/tv/ui/screens/settings/NuvioReshapedSettingsContent.kt" ]]; then
+              TRACKS="app/src/main/java/com/nuvio/tv/ui/screens/player/PlayerRuntimeControllerTracks.kt"
+              AUDIO_SYNC="app/src/main/java/com/nuvio/tv/ui/screens/player/audiosync/AudioSyncFallback.kt"
+              SETTINGS="app/src/main/java/com/nuvio/tv/ui/screens/settings/NuvioReshapedSettingsContent.kt"
+
+              git -C /tmp/nuvio-upstream checkout --ours -- "$TRACKS" "$SETTINGS"
+              git -C /tmp/nuvio-upstream checkout --theirs -- "$AUDIO_SYNC"
+
+              python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path("/tmp/nuvio-upstream")
+
+          def replace_once(path, before, after):
+              body = path.read_text(encoding="utf-8")
+              count = body.count(before)
+              if count != 1:
+                  raise SystemExit(f"Unsafe beta.7.3 merge: {path.name} expected 1 anchor, found {count}")
+              path.write_text(body.replace(before, after, 1), encoding="utf-8")
+
+          tracks = root / "app/src/main/java/com/nuvio/tv/ui/screens/player/PlayerRuntimeControllerTracks.kt"
+          replace_once(
+              tracks,
+              """    if (restoredAudioAfterSubtitleRefresh == null && !rememberedAudioHandled) {
+                  tryApplySmartAudioSelection(audioTracks)
+              }
+              if (currentStreamHasVideoTrack) {
+                  maybeScheduleFirstFrameWatchdog()
+              } else {
+                  cancelFirstFrameWatchdog()
+              }""",
+              """    if (restoredAudioAfterSubtitleRefresh == null && !rememberedAudioHandled) {
+                  tryApplySmartAudioSelection(audioTracks)
+              }
+              applyLosslessAudioDefaultIfUnset(audioTracks) // Nuvio RS hook: Arc formats
+              if (currentStreamHasVideoTrack) {
+                  maybeScheduleFirstFrameWatchdog()
+                  maybeScheduleTunnelAvSyncWatchdog() // Nuvio RS hook: Arc formats
+              } else {
+                  cancelFirstFrameWatchdog()
+                  cancelTunnelAvSyncWatchdog() // Nuvio RS hook: Arc formats
+              }""",
+          )
+          replace_once(
+              tracks,
+              """    pending.audio?.let { audioSelection ->
+                  if (audioTracks.isEmpty()) {""",
+              """    pending.audio?.let { audioSelection ->
+                  persistedAudioPreferenceSeenForStream = true // Nuvio RS hook: the lossless default never runs over a saved pick
+                  if (audioTracks.isEmpty()) {""",
+          )
+
+          settings = root / "app/src/main/java/com/nuvio/tv/ui/screens/settings/NuvioReshapedSettingsContent.kt"
+          replace_once(
+              settings,
+              """        autoSyncBubbleSettingsItems(enabled = playerSettings.playerPreference != PlayerPreference.EXTERNAL) // Nuvio RS hook: AutoSync bubble
+              aiSubtitleSettingsItems(enabled = playerSettings.playerPreference != PlayerPreference.EXTERNAL)
+              seekrKeySettingsItems()""",
+              """        autoSyncBubbleSettingsItems(enabled = playerSettings.playerPreference != PlayerPreference.EXTERNAL) // Nuvio RS hook: AutoSync bubble
+              aiSubtitleSettingsItems(enabled = playerSettings.playerPreference != PlayerPreference.EXTERNAL)
+              autoSourceRecoverySettingsItems(playerSettings)
+              reshapedFormatsSettingsItems(playerSettings) // Nuvio RS: Arc sound and picture formats
+              seekrKeySettingsItems()""",
+          )
+          replace_once(
+              settings,
+              """        pillNavSettingsItems()
+              liveTvSettingsItems()""",
+              """        pillNavSettingsItems()
+              netflixUiSettingsItems()
+              liveTvSettingsItems()""",
+          )
+
+          required = {
+              tracks: [
+                  "tryApplySmartAudioSelection(audioTracks)",
+                  "PlusAudioAwareSubtitleRules.resolve(",
+                  "PlusSubtitleSourcePolicy.shouldPreferAddon(",
+                  "applyLosslessAudioDefaultIfUnset(audioTracks)",
+                  "maybeScheduleTunnelAvSyncWatchdog()",
+                  "persistedAudioPreferenceSeenForStream = true",
+              ],
+              settings: [
+                  "aiSubtitleSettingsItems(",
+                  "PlusHomeFocusDiagnosticsSettingsSection()",
+                  "autoSourceRecoverySettingsItems(playerSettings)",
+                  "reshapedFormatsSettingsItems(playerSettings)",
+                  "netflixUiSettingsItems()",
+              ],
+              root / "app/src/main/java/com/nuvio/tv/ui/screens/player/audiosync/AudioSyncFallback.kt": [
+                  "private val syncAnnounced = AtomicBoolean(false)",
+                  "syncAnnounced.set(false)",
+                  "is AudioSyncStatus.Estimated, is AudioSyncStatus.Adjusted -> return",
+                  "is AudioSyncStatus.Synced -> if (!syncAnnounced.compareAndSet(false, true)) return",
+                  "controller.prepareRecognizer()",
+              ],
+          }
+          for path, tokens in required.items():
+              body = path.read_text(encoding="utf-8")
+              for token in tokens:
+                  if token not in body:
+                      raise SystemExit(f"Unsafe beta.7.3 merge: {path.name} missing {token}")
+              if "<<<<<<<" in body or ">>>>>>>" in body:
+                  raise SystemExit(f"Unresolved conflict markers in {path.name}")
+          PY
+
+              git -C /tmp/nuvio-upstream add -- "$TRACKS" "$AUDIO_SYNC" "$SETTINGS"
+              mapfile -t CONFLICTS < <(git -C /tmp/nuvio-upstream diff --name-only --diff-filter=U)
+            fi
+
           # These files belong to the nested upstream checkout and are not part
             # of the Plus-specific product surface. Always follow the new upstream
             # copy so release-note/workflow churn cannot block the app sync.
