@@ -115,6 +115,12 @@ private fun PlaybackNavHost(
         )
     }
 
+    androidx.compose.runtime.LaunchedEffect(navController) {
+        navController.currentBackStackEntryFlow.collect { entry ->
+            android.util.Log.i("NRSP_BLACKFLASH", "${android.os.SystemClock.elapsedRealtime()}ms nav destination=${entry.destination.route}")
+        }
+    }
+
     NavHost(
         navController = navController,
         startDestination = startDestination,
