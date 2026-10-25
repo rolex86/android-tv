@@ -7,6 +7,7 @@ on:
   push:
     branches:
       - main
+      - fix/nrsp-beta8-autosync-conflicts
     paths:
       - '.github/workflows/sync-nuvio-rs-plus-upstream.yml'
 
@@ -106,6 +107,13 @@ jobs:
           if (( MERGE_STATUS != 0 )); then
             mapfile -t CONFLICTS < <(git -C /tmp/nuvio-upstream diff --name-only --diff-filter=U)
             printf 'Upstream merge conflicts: %s\n' "${CONFLICTS[*]}"
+            if [[ "${GITHUB_REF_NAME}" == "fix/nrsp-beta8-autosync-conflicts" ]]; then
+              for f in "${CONFLICTS[@]}"; do
+                echo "::group::Merge conflicts: $f"
+                grep -n -C 12 -E "^(<<<<<<<|=======|>>>>>>>)" "/tmp/nuvio-upstream/$f" || true
+                echo "::endgroup::"
+              done
+            fi
 
             # One-time, fail-closed conflict resolution for the reviewed beta.5 -> beta.7 sync.
           # Git first merges every non-conflicting upstream/Plus change automatically.
@@ -341,6 +349,10 @@ jobs:
           fi
 
           git commit -m "Sync Nuvio RS Plus with upstream $LATEST"
+          if [[ "${GITHUB_REF_NAME}" == "fix/nrsp-beta8-autosync-conflicts" ]]; then
+            echo "Diagnostic branch: do not publish unreviewed sync to main."
+            exit 0
+          fi
           git push origin HEAD:main
 
           # Pushes made with GITHUB_TOKEN do not start another push-triggered
