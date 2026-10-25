@@ -107,6 +107,13 @@ jobs:
             mapfile -t CONFLICTS < <(git -C /tmp/nuvio-upstream diff --name-only --diff-filter=U)
             printf 'Upstream merge conflicts: %s\n' "${CONFLICTS[*]}"
 
+            # Reviewed beta.7.3 -> beta.8.1 merge; preserve both Plus and upstream additions.
+            if [[ "$BASELINE" == "1.1.0-beta.7-autosync.3" && "$LATEST" == "1.1.0-beta.8-autosync.1" && "${CONFLICTS[*]}" == "app/src/full/AndroidManifest.xml app/src/main/java/com/nuvio/tv/data/local/PlayerSettingsDataStore.kt app/src/main/java/com/nuvio/tv/ui/components/StartupSplashScreen.kt app/src/main/java/com/nuvio/tv/ui/screens/player/PlayerScreen.kt app/src/main/java/com/nuvio/tv/ui/screens/settings/PlaybackSubtitleSettings.kt" ]]; then
+              python3 .github/scripts/resolve_nrsp_beta8.py /tmp/nuvio-upstream
+              git -C /tmp/nuvio-upstream add -- "${CONFLICTS[@]}"
+              mapfile -t CONFLICTS < <(git -C /tmp/nuvio-upstream diff --name-only --diff-filter=U)
+            fi
+
             # One-time, fail-closed conflict resolution for the reviewed beta.5 -> beta.7 sync.
           # Git first merges every non-conflicting upstream/Plus change automatically.
           # For these exact three conflicts, retain the full upstream file and reapply
