@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - debug/nrsp-player-black-flash
     paths:
       - 'nuvio-rs-plus/**'
 
@@ -303,6 +304,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub release
+        if: github.ref == 'refs/heads/main'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
