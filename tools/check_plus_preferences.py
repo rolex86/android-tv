@@ -19,6 +19,36 @@ TEST_PATH = (
 OFFSET_TEST_PATH = TEST_PATH.with_name("OffsetSubtitleParserFactoryTest.java")
 END_TIME_TEST_PATH = TEST_PATH.with_name("PlaybackEndTimeTest.java")
 STREMIO_TEST_PATH = TEST_PATH.with_name("StremioNextEpisodeTest.java")
+STREMIO_ACCOUNT_SYNC_TEST_PATH = TEST_PATH.with_name("StremioAccountSyncTest.java")
+STREMIO_ACCOUNT_SYNC_COORDINATOR_PATH = (
+    APP / "java" / "com" / "brouken" / "player"
+    / "StremioAccountSyncCoordinator.java"
+)
+STREMIO_ACCOUNT_SYNC_WORKER_PATH = STREMIO_ACCOUNT_SYNC_COORDINATOR_PATH.with_name(
+    "StremioAccountSyncWorker.java"
+)
+STREMIO_BOOT_RECEIVER_PATH = STREMIO_ACCOUNT_SYNC_COORDINATOR_PATH.with_name(
+    "StremioConnectorBootReceiver.java"
+)
+APPLICATION_PATH = STREMIO_ACCOUNT_SYNC_COORDINATOR_PATH.with_name(
+    "JustPlayerPlusApplication.java"
+)
+MANIFEST_PATH = APP / "AndroidManifest.xml"
+APP_BUILD_PATH = ROOT / "just-player-plus" / "app" / "build.gradle"
+CHANGELOG_PATH = ROOT / "just-player-plus" / "PLUS_CHANGELOG.md"
+STREMIO_STREAM_TEST_PATH = TEST_PATH.with_name("StremioStreamPipelineTest.java")
+STREMIO_CONNECTOR_TEST_PATH = TEST_PATH.with_name("StremioConnectorServiceTest.java")
+STREMIO_AGGREGATOR_PATH = STREMIO_ACCOUNT_SYNC_COORDINATOR_PATH.with_name(
+    "StremioStreamAggregator.java"
+)
+STREMIO_MANIFEST_CACHE_PATH = STREMIO_AGGREGATOR_PATH.with_name(
+    "StremioManifestCache.java"
+)
+STREMIO_ADDON_CLIENT_PATH = STREMIO_AGGREGATOR_PATH.with_name(
+    "StremioAddonClient.java"
+)
+EXTERNAL_RESULT_TEST_PATH = TEST_PATH.with_name("ExternalPlaybackResultPolicyTest.java")
+STREMIO_AGGREGATION_PREFS_PATH = APP / "java" / "com" / "brouken" / "player" / "StremioAggregationPreferences.java"
 AI_TEST_PATH = (
     ROOT / "just-player-plus" / "app" / "src" / "test" / "java"
     / "com" / "brouken" / "player" / "aisubtitles" / "AiSubtitlePolicyTest.java"
@@ -70,6 +100,7 @@ runtime_anchors = {
     "KEY_COMPLETION_RULE": "mPlusPrefs.completionRule",
     "KEY_EXTERNAL_PLAYER_DIAGNOSTICS": "PlusPrefs.KEY_EXTERNAL_PLAYER_DIAGNOSTICS",
     "KEY_STREMIO_CONNECTOR_ENABLED": "mPlusPrefs.stremioConnectorEnabled",
+    "KEY_STREMIO_ACCOUNT_SYNC_ENABLED": "PlusPrefs.KEY_STREMIO_ACCOUNT_SYNC_ENABLED",
     "KEY_NEXT_EPISODE_NOTICE_SECONDS": "mPlusPrefs.nextEpisodeNoticeSeconds",
     "KEY_NEXT_EPISODE_POPUP_SIZE": "mPlusPrefs.nextEpisodePopupSize",
     "KEY_AI_SUBTITLES_ENABLED": "mPlusPrefs.aiSubtitlesEnabled",
@@ -120,9 +151,9 @@ for snippet in protected_snippets:
         errors.append(f"Protected playback snippet must occur once: {snippet!r}; found {count}")
 
 parser_injections = player.count(".setSubtitleParserFactory(subtitleParserFactory)")
-if parser_injections != 2:
+if parser_injections != 4:
     errors.append(
-        "Subtitle delay parser must be injected into the extractor and unified media source; "
+        "Subtitle delay parser must cover normal playback and the isolated next-episode probe; "
         f"found {parser_injections} injections"
     )
 
@@ -153,7 +184,7 @@ runtime_regression_anchors = (
     "updateExpectedEndTime(newPosition.positionMs)",
     "onPlaybackParametersChanged",
     "getTimeFormat(this)",
-    "now, getStremioLaunchIdentity())",
+    "getStremioMediaIdentity(), getStremioLaunchIdentity())",
     "metadata_resolution_started",
     "setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS)",
     "if (mPlusPrefs.aiSubtitlesEnabled)",
@@ -192,6 +223,42 @@ for forbidden in (
             "Late OpenSubtitles must not rebuild the active media item: " + forbidden
         )
 
+for forbidden in (
+    "StremioNextEpisodeDeepLink",
+    "next_episode_deep_link",
+    "autoPlay=true",
+):
+    if forbidden in external_java:
+        errors.append(
+            "Next-episode continuation must stay inside JustPlayer Plus and a safe-failure "
+            "link must never autoplay an unverified Stremio stream: " + forbidden
+        )
+
+for continuation_anchor in (
+    'beginNextEpisodeTransition("natural_end")',
+    'beginNextEpisodeTransition("play_now")',
+    "NextEpisodePlaybackPlan.order(",
+    "NextEpisodeTrackContract.fromSelection(",
+    '"strict_next_episode_contract"',
+    "new StremioWatchJournal(this).record(",
+    "ExternalPlaybackResultPolicy.endBy(",
+):
+    if continuation_anchor not in player:
+        errors.append(
+            "Missing in-player next-episode continuation hook: " + continuation_anchor
+        )
+
+if not EXTERNAL_RESULT_TEST_PATH.exists():
+    errors.append("External-player result regression tests are missing")
+else:
+    external_result_tests = EXTERNAL_RESULT_TEST_PATH.read_text(encoding="utf-8")
+    for test_name in (
+        "completedPlaybackDelegatesContinuationWithoutOldEpisodeProgress",
+        "dismissedNextEpisodeCannotTriggerCallerContinuation",
+    ):
+        if test_name not in external_result_tests:
+            errors.append(f"Missing external-player result regression test: {test_name}")
+
 if not TEST_PATH.exists():
     errors.append("Smart-selection regression tests are missing")
 else:
@@ -201,6 +268,7 @@ else:
         "dubbedLabelsIncludeSynchronizedVariants",
         "subtitleMediaDefaultKeepsItsConfiguredPosition",
         "audioAndSubtitleMemoryProvenanceAreIndependent",
+        "rememberedSeriesTrackSurvivesMissingLanguageMetadataOnAnotherSource",
     ):
         if test_name not in tests:
             errors.append(f"Missing smart-selection regression test: {test_name}")
@@ -238,6 +306,8 @@ else:
     for test_name in (
         "freshMovieRequestSupersedesStaleSeriesRequest",
         "launchIdentityIsStableAndDoesNotStoreTheRawTitle",
+        "directFallbackQueuePreservesFinalConnectorOrderAcrossSources",
+        "fallbackRequiresTheExactCurrentEpisodeStreamAndSkipsAttempts",
         "rememberedContentRejectsMalformedTypesAndIds",
         "movieMetadataUsesCinemetaName",
         "subtitleRequestRecoversEpisodeIdentityAndFilename",
@@ -252,6 +322,117 @@ else:
     ):
         if test_name not in stremio_tests:
             errors.append(f"Missing Stremio metadata regression test: {test_name}")
+
+if not STREMIO_ACCOUNT_SYNC_TEST_PATH.exists():
+    errors.append("Stremio account sync regression tests are missing")
+else:
+    account_sync_tests = STREMIO_ACCOUNT_SYNC_TEST_PATH.read_text(encoding="utf-8")
+    for test_name in (
+        "officialWatchedFieldRoundTripsAndPreservesExistingEpisodes",
+        "anchorOffsetSurvivesAChangedVideoPrefix",
+        "partialCheckpointChangesOnlyResumeState",
+        "completedCheckpointAddsOnlyTheTargetWatchedBit",
+        "newerServerProgressAcceptsRfc3339FractionsAndOffsets",
+    ):
+        if test_name not in account_sync_tests:
+            errors.append(f"Missing Stremio account sync regression test: {test_name}")
+
+if not STREMIO_ACCOUNT_SYNC_COORDINATOR_PATH.exists():
+    errors.append("Stremio account sync coordinator is missing")
+else:
+    account_sync_coordinator = STREMIO_ACCOUNT_SYNC_COORDINATOR_PATH.read_text(
+        encoding="utf-8"
+    )
+    for anchor in (
+        "NetworkType.CONNECTED",
+        "BackoffPolicy.EXPONENTIAL",
+        "ExistingWorkPolicy.REPLACE",
+        "ExistingWorkPolicy.KEEP",
+        "Executors.newSingleThreadExecutor",
+        "static void flushAsync(Context context)",
+        "cancelUniqueWork(UNIQUE_WORK_NAME)",
+        "while (isEnabled(app))",
+        "queue.removeIfCurrent(checkpoint)",
+    ):
+        if anchor not in account_sync_coordinator:
+            errors.append(f"Missing durable Stremio retry hook: {anchor}")
+
+if "StremioAccountSyncCoordinator.flush(this);" in player:
+    errors.append("Player startup must not synchronously flush the Stremio account queue")
+if player.count(
+    "StremioAccountSyncCoordinator.flushAsync(PlayerActivity.this)"
+) != 1:
+    errors.append(
+        "Stremio account queue must be flushed asynchronously once after playback starts"
+    )
+if "stremioAccountStartupFlushDispatched" not in player:
+    errors.append("Playback-start Stremio account flush is missing its one-shot gate")
+
+if not STREMIO_ACCOUNT_SYNC_WORKER_PATH.exists():
+    errors.append("Stremio account sync WorkManager worker is missing")
+else:
+    account_sync_worker = STREMIO_ACCOUNT_SYNC_WORKER_PATH.read_text(encoding="utf-8")
+    for anchor in (
+        "StremioAccountSyncCoordinator.drainQueue(getApplicationContext())",
+        "Result.success()",
+        "Result.retry()",
+        "StremioAccountSyncCoordinator.cancelCurrentAttempt()",
+    ):
+        if anchor not in account_sync_worker:
+            errors.append(f"Missing Stremio background worker hook: {anchor}")
+
+stremio_boot_receiver = (
+    STREMIO_BOOT_RECEIVER_PATH.read_text(encoding="utf-8")
+    if STREMIO_BOOT_RECEIVER_PATH.exists()
+    else ""
+)
+if "StremioAccountSyncCoordinator.flush(context)" not in stremio_boot_receiver:
+    errors.append("Shield reboot must restore pending Stremio account sync work")
+if "Intent.ACTION_MY_PACKAGE_REPLACED" not in stremio_boot_receiver:
+    errors.append("Application updates must restart the explicitly enabled Connector")
+
+app_build = APP_BUILD_PATH.read_text(encoding="utf-8")
+if "androidx.work:work-runtime:2.11.2" not in app_build:
+    errors.append("Stremio retry requires the audited WorkManager 2.11.2 runtime")
+
+changelog = CHANGELOG_PATH.read_text(encoding="utf-8")
+version_match = re.search(r"^\s*versionCode\s+(\d+)\s*$", app_build, re.MULTILINE)
+step_match = re.search(r"^## Step (\d+)\b", changelog, re.MULTILINE)
+if version_match is None or step_match is None:
+    errors.append("Application version or latest changelog step could not be parsed")
+else:
+    version_code = int(version_match.group(1))
+    latest_step = int(step_match.group(1))
+    expected_version = 242 + latest_step
+    if version_code != expected_version:
+        errors.append(
+            "Every new JustPlayer Plus step must increment versionCode: "
+            f"Step {latest_step} requires {expected_version}, found {version_code}"
+        )
+    if f"Raised the application version code to {version_code}" not in changelog:
+        errors.append("Latest application version is missing from PLUS_CHANGELOG.md")
+
+manifest = MANIFEST_PATH.read_text(encoding="utf-8")
+if 'android.intent.action.MY_PACKAGE_REPLACED' not in manifest:
+    errors.append("Connector package-replacement recovery is missing from AndroidManifest.xml")
+if 'android:name=".JustPlayerPlusApplication"' not in manifest:
+    errors.append("WorkManager on-demand configuration Application is not registered")
+if (
+    'android:name="androidx.work.WorkManagerInitializer"' not in manifest
+    or 'tools:node="remove"' not in manifest
+):
+    errors.append("Default WorkManager cold-start initialization must remain disabled")
+if not APPLICATION_PATH.exists():
+    errors.append("WorkManager on-demand configuration Application is missing")
+else:
+    application = APPLICATION_PATH.read_text(encoding="utf-8")
+    for anchor in (
+        "implements Configuration.Provider",
+        "getWorkManagerConfiguration()",
+        "new Configuration.Builder().build()",
+    ):
+        if anchor not in application:
+            errors.append(f"Missing WorkManager on-demand initialization hook: {anchor}")
 
 if not AI_TEST_PATH.exists():
     errors.append("AI subtitle policy regression tests are missing")
@@ -317,6 +498,138 @@ if preferences_xml.count('app:key="aiSubtitleApiToken"') != 1:
     errors.append("AI subtitle access token must occur exactly once in root_preferences.xml")
 if "AiSubtitlePreferences.KEY_API_TOKEN" not in external_java:
     errors.append("AI subtitle access token has no runtime hook")
+
+aggregation_keys = (
+    "stremioAggregationEnabled",
+    "stremioAggregationSources",
+    "stremioAggregationSourceWaitSeconds",
+    "stremioAggregationSortMode",
+    "stremioAggregationPreferCached",
+    "stremioAggregationSizeSort",
+    "stremioAggregationPreferredLanguages",
+    "stremioAggregationResolutions",
+    "stremioAggregationStreamTypes",
+    "stremioAggregationBlockedReleases",
+    "stremioAggregationCodecs",
+    "stremioAggregationHdrFormats",
+    "stremioAggregationKeepUnknownTech",
+    "stremioAggregationAllowedLanguages",
+    "stremioAggregationKeepUnknownLanguage",
+    "stremioAggregationMinSizeGb",
+    "stremioAggregationMaxSizeGb",
+    "stremioAggregationKeepUnknownSize",
+    "stremioAggregationBlockedText",
+    "stremioAggregationMaxTotal",
+    "stremioAggregationMaxPerSource",
+    "stremioAggregationMaxPerQuality",
+    "stremioAggregationDeduplication",
+    "stremioAggregationBingeGroup",
+    "stremioAggregationDisplayFields",
+    "stremioAggregationReset",
+)
+if not STREMIO_AGGREGATION_PREFS_PATH.exists():
+    errors.append("Stremio aggregation preferences are missing")
+else:
+    aggregation_preferences = STREMIO_AGGREGATION_PREFS_PATH.read_text(encoding="utf-8")
+    for aggregation_key in aggregation_keys:
+        if aggregation_key not in aggregation_preferences:
+            errors.append(f"Aggregation preference has no runtime definition: {aggregation_key}")
+        if preferences_xml.count(f'app:key="{aggregation_key}"') != 1:
+            errors.append(
+                f"Aggregation preference must occur once in XML: {aggregation_key}"
+            )
+
+for source_wait_hook in (
+    'app:min="3"',
+    'android:max="30"',
+    'app:defaultValue="9"',
+    'app:seekBarIncrement="1"',
+    'app:updatesContinuously="true"',
+    "request.settings.sourceWaitMs()",
+    "remainingTimeoutMs(deadlineNanos)",
+):
+    if source_wait_hook not in preferences_xml + external_java:
+        errors.append(f"Missing configurable source-wait hook: {source_wait_hook}")
+
+for aggregation_hook in (
+    "StremioAggregationPreferences.isEnabled(this)",
+    "streamResponse(\n                aggregationEnabled",
+    "new StremioStreamSourceStore(requireContext())",
+    "StremioAddonClient.parseManifestUrl(url)",
+    "aggregator.shutdown()",
+):
+    if aggregation_hook not in external_java:
+        errors.append(f"Missing Stremio aggregation runtime hook: {aggregation_hook}")
+
+if not STREMIO_STREAM_TEST_PATH.exists():
+    errors.append("Stremio stream aggregation regression tests are missing")
+else:
+    stream_tests = STREMIO_STREAM_TEST_PATH.read_text(encoding="utf-8")
+    for test_name in (
+        "disabledGateReturnsExactVersion258ResponseWithoutInvokingAggregator",
+        "qualityOrderingInterleavesSourcesAndKeepsOriginalPlaybackFields",
+        "fullUpstreamRelevanceKeepsActualBlueyAheadOfLargerFalseTitles",
+        "safeDeduplicationUsesExactPlaybackIdentityAndHigherSourcePriority",
+        "filtersReleaseLanguageSizeTypeAndUserTextConservatively",
+        "bingeModesAreStableAndNonePreservesOriginalHint",
+        "streamEndpointDerivationPreservesConfiguredPathAndQuery",
+    ):
+        if test_name not in stream_tests:
+            errors.append(f"Missing Stremio stream regression test: {test_name}")
+
+if not STREMIO_AGGREGATOR_PATH.exists():
+    errors.append("Stremio stream aggregator is missing")
+else:
+    stream_aggregator = STREMIO_AGGREGATOR_PATH.read_text(encoding="utf-8")
+    for isolation_hook in (
+        "DEGRADED_PROBE_GRACE_MS = 250L",
+        "StremioSourceHealthTracker",
+        "task.foregroundRequested",
+        '"aggregation_source_background"',
+    ):
+        if isolation_hook not in stream_aggregator:
+            errors.append(f"Missing stalled-source isolation hook: {isolation_hook}")
+
+if not STREMIO_MANIFEST_CACHE_PATH.exists():
+    errors.append("Stremio manifest routing cache is missing")
+else:
+    manifest_cache = STREMIO_MANIFEST_CACHE_PATH.read_text(encoding="utf-8")
+    for cache_hook in (
+        "FRESH_AGE_MS = 60L * 60L * 1_000L",
+        "MAX_STALE_AGE_MS = 24L * 60L * 60L * 1_000L",
+        "sanitizeManifest",
+        "manifestFingerprint",
+    ):
+        if cache_hook not in manifest_cache:
+            errors.append(f"Missing manifest cache safety hook: {cache_hook}")
+
+if not STREMIO_ADDON_CLIENT_PATH.exists():
+    errors.append("Stremio add-on client is missing")
+else:
+    addon_client = STREMIO_ADDON_CLIENT_PATH.read_text(encoding="utf-8")
+    for refresh_hook in (
+        'header("If-None-Match"',
+        'header("If-Modified-Since"',
+        "scheduleManifestRefresh",
+        "isHardManifestFailure",
+    ):
+        if refresh_hook not in addon_client:
+            errors.append(f"Missing manifest refresh hook: {refresh_hook}")
+
+if not STREMIO_CONNECTOR_TEST_PATH.exists():
+    errors.append("Stremio Connector regression tests are missing")
+else:
+    connector_tests = STREMIO_CONNECTOR_TEST_PATH.read_text(encoding="utf-8")
+    for test_name in (
+        "foregroundAwaitsEveryHealthySourceButBackgroundsDegradedSources",
+        "sourceWaitDefaultsToNineSecondsAndStaysWithinTvSliderRange",
+        "sourceHealthRecoversOnSuccessAndDoesNotFollowAnEditedUrl",
+        "manifestCacheUsesOneHourFreshAnd24HourStaleWindows",
+        "manifestCachePersistsRoutingButNoUrlsOrArbitraryFields",
+        "hardManifestFailuresInvalidateButTransientFailuresCanUseStaleData",
+    ):
+        if test_name not in connector_tests:
+            errors.append(f"Missing stalled-source regression test: {test_name}")
 
 # These binaries contain the protected Media3 renderer/audio path and extension decoders.
 # An intentional upstream refresh must review the playback regression matrix and update hashes.

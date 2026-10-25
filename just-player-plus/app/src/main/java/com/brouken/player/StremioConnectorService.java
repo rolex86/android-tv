@@ -7,8 +7,10 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.IBinder;
+import android.preference.PreferenceManager;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
@@ -20,9 +22,9 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.net.SocketException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
@@ -31,19 +33,24 @@ import java.util.concurrent.RejectedExecutionException;
 
 import okhttp3.OkHttpClient;
 
-/** Loopback-only Stremio addon that observes content identity and preloads subtitle listings. */
+/** Loopback-only Stremio addon that observes identity and preloads subtitles and stream lists. */
 public final class StremioConnectorService extends Service {
     static final int PORT = 16745;
+    static final String LEGACY_STREAM_RESPONSE = "{\"streams\":[]}";
     static final String HTTP_MANIFEST_URL =
             "http://127.0.0.1:" + PORT + "/manifest.json";
     static final String STREMIO_ADDONS_URL = "stremio:///addons/series";
 
     private static final int MAX_REQUEST_LINE_LENGTH = 4_096;
+    private static final String ACTION_PREFETCH_STREAMS =
+            BuildConfig.APPLICATION_ID + ".action.PREFETCH_STREMIO_STREAMS";
+    private static final String EXTRA_PREFETCH_TYPE = "prefetch_type";
+    private static final String EXTRA_PREFETCH_ID = "prefetch_id";
     private static final String CHANNEL_ID = "stremio_connector";
     private static final int NOTIFICATION_ID = 16745;
     private static final String MANIFEST = "{"
             + "\"id\":\"com.justplayerplus.connector\","
-            + "\"version\":\"1.7.0\","
+            + "\"version\":\"1.14.0\","
             + "\"name\":\"JustPlayer Plus Connector\","
             + "\"description\":\"Local metadata bridge for JustPlayer Plus\","
             + "\"resources\":["
@@ -57,12 +64,16 @@ public final class StremioConnectorService extends Service {
 
     private final ExecutorService clients = Executors.newFixedThreadPool(4);
     private volatile boolean running;
+    private volatile boolean destroyed;
     private ServerSocket serverSocket;
     private Thread acceptThread;
     private StremioConnectorStore store;
     private ExternalPlayerDiagnostics diagnostics;
     private OkHttpClient subtitleHttpClient;
     private StremioConnectorOpenSubtitles openSubtitles;
+    @Nullable private StremioStreamAggregator streamAggregator;
+    @Nullable private SharedPreferences aggregationPreferences;
+    @Nullable private SharedPreferences.OnSharedPreferenceChangeListener aggregationListener;
 
     static boolean start(Context context) {
         try {
@@ -76,30 +87,122 @@ public final class StremioConnectorService extends Service {
 
     static void stop(Context context) {
         context.stopService(new Intent(context, StremioConnectorService.class));
+        new StremioProtectedPrefetchCache(context).clear();
+    }
+
+    static boolean prefetchNextEpisode(Context context, StremioEpisodeId episode) {
+        if (episode == null
+                || !new PlusPrefs(context).stremioConnectorEnabled
+                || !StremioAggregationPreferences.isEnabled(context)) {
+            return false;
+        }
+        Intent intent = new Intent(context, StremioConnectorService.class)
+                .setAction(ACTION_PREFETCH_STREAMS)
+                .putExtra(EXTRA_PREFETCH_TYPE, "series")
+                .putExtra(EXTRA_PREFETCH_ID, episode.raw);
+        try {
+            ContextCompat.startForegroundService(context, intent);
+            return true;
+        } catch (RuntimeException error) {
+            return false;
+        }
+    }
+
+    static boolean isValidPrefetchRequest(@Nullable String type, @Nullable String id) {
+        return "series".equals(type) && StremioEpisodeId.parse(id) != null;
     }
 
     @Override
     public void onCreate() {
         super.onCreate();
+        destroyed = false;
         store = new StremioConnectorStore(this);
         diagnostics = new ExternalPlayerDiagnostics(this);
         subtitleHttpClient = StremioConnectorOpenSubtitles.newHttpClient();
         openSubtitles = new StremioConnectorOpenSubtitles(subtitleHttpClient);
+        aggregationPreferences = PreferenceManager.getDefaultSharedPreferences(this);
+        aggregationListener = (preferences, key) -> {
+            if (StremioAggregationPreferences.KEY_ENABLED.equals(key)
+                    && !preferences.getBoolean(
+                    StremioAggregationPreferences.KEY_ENABLED, false)) {
+                releaseStreamAggregator();
+                new StremioProtectedPrefetchCache(this).clear();
+            }
+        };
+        aggregationPreferences.registerOnSharedPreferenceChangeListener(aggregationListener);
         createNotificationChannel();
         startForeground(NOTIFICATION_ID, buildNotification());
-        startServer();
+        diagnostics.recordStremioConnector(
+                "service_created", "version=" + BuildConfig.VERSION_NAME);
+        startServer("service_create");
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        diagnostics.recordStremioConnector(
+                "service_start_command",
+                "startId=" + startId
+                        + " flags=" + flags
+                        + " action=" + (intent == null || intent.getAction() == null
+                        ? "none" : intent.getAction())
+                        + " serverRunning=" + running);
         if (!new PlusPrefs(this).stremioConnectorEnabled) {
             stopSelf();
             return START_NOT_STICKY;
         }
         if (!running) {
-            startServer();
+            startServer("start_command");
+        }
+        if (intent != null && ACTION_PREFETCH_STREAMS.equals(intent.getAction())) {
+            String type = intent.getStringExtra(EXTRA_PREFETCH_TYPE);
+            String id = intent.getStringExtra(EXTRA_PREFETCH_ID);
+            if (StremioAggregationPreferences.isEnabled(this)
+                    && isValidPrefetchRequest(type, id)) {
+                StremioStreamAggregator aggregator = getStreamAggregator();
+                aggregator.prefetch(type, id);
+                if (!dispatchClient(clients, () -> completePlaybackPlanPrefetch(
+                        aggregator, type, id))) {
+                    diagnostics.recordStremioConnector(
+                            "aggregation_prefetch_plan_dispatch_failed",
+                            type + "/" + id);
+                }
+            } else {
+                diagnostics.recordStremioConnector(
+                        "aggregation_prefetch_skipped",
+                        "reason=disabled_or_invalid_request");
+            }
         }
         return START_STICKY;
+    }
+
+    private void completePlaybackPlanPrefetch(
+            StremioStreamAggregator aggregator, String type, String id) {
+        if (destroyed || !StremioAggregationPreferences.isEnabled(this)) {
+            return;
+        }
+        String response;
+        try {
+            // aggregate() joins the in-flight prefetch and returns its protected final ordering;
+            // it does not start a second upstream request for the same snapshot.
+            response = aggregator.aggregate(type, id);
+        } catch (RuntimeException error) {
+            diagnostics.recordStremioConnector(
+                    "aggregation_prefetch_plan_failed",
+                    type + "/" + id + " error=" + error.getClass().getSimpleName());
+            return;
+        }
+        int streamCount = streamCount(response);
+        if (streamCount <= 0 || destroyed
+                || !StremioAggregationPreferences.isEnabled(this)) {
+            diagnostics.recordStremioConnector(
+                    "aggregation_prefetch_plan_empty",
+                    type + "/" + id + " streams=" + streamCount);
+            return;
+        }
+        store.recordStreamFallbacks(type, id, response, System.currentTimeMillis());
+        diagnostics.recordStremioConnector(
+                "aggregation_prefetch_plan_ready",
+                type + "/" + id + " streams=" + streamCount);
     }
 
     @Nullable
@@ -110,8 +213,20 @@ public final class StremioConnectorService extends Service {
 
     @Override
     public void onDestroy() {
+        destroyed = true;
+        if (diagnostics != null) {
+            diagnostics.recordStremioConnector(
+                    "service_destroyed", "serverRunning=" + running);
+        }
         stopServer();
         clients.shutdownNow();
+        if (aggregationPreferences != null && aggregationListener != null) {
+            aggregationPreferences.unregisterOnSharedPreferenceChangeListener(
+                    aggregationListener);
+        }
+        aggregationPreferences = null;
+        aggregationListener = null;
+        releaseStreamAggregator();
         openSubtitles = null;
         if (subtitleHttpClient != null) {
             subtitleHttpClient.dispatcher().cancelAll();
@@ -133,21 +248,29 @@ public final class StremioConnectorService extends Service {
         }
     }
 
-    private synchronized void startServer() {
-        if (running) {
+    private synchronized void startServer(String reason) {
+        if (running || destroyed) {
             return;
         }
+        ServerSocket candidate = null;
         try {
-            serverSocket = new ServerSocket(PORT, 16, InetAddress.getByName("127.0.0.1"));
-            serverSocket.setReuseAddress(true);
+            candidate = new ServerSocket();
+            candidate.setReuseAddress(true);
+            candidate.bind(new InetSocketAddress(
+                    InetAddress.getByName("127.0.0.1"), PORT), 16);
+            serverSocket = candidate;
             running = true;
             acceptThread = new Thread(this::acceptLoop, "stremio-connector-accept");
             acceptThread.start();
-            diagnostics.recordStremioConnector("listening", HTTP_MANIFEST_URL);
+            diagnostics.recordStremioConnector(
+                    "listening", HTTP_MANIFEST_URL + " reason=" + reason);
         } catch (IOException error) {
+            closeQuietly(candidate);
+            serverSocket = null;
             running = false;
             diagnostics.recordStremioConnector(
-                    "listen_failed", error.getClass().getSimpleName());
+                    "listen_failed",
+                    "reason=" + reason + " error=" + error.getClass().getSimpleName());
             stopSelf();
         }
     }
@@ -161,14 +284,9 @@ public final class StremioConnectorService extends Service {
             Socket socket;
             try {
                 socket = listener.accept();
-            } catch (SocketException error) {
-                if (running) {
-                    stopSelf();
-                }
+            } catch (IOException error) {
+                recoverServerAfterAcceptFailure(listener, error);
                 return;
-            } catch (IOException ignored) {
-                // A malformed/aborted local request must not terminate the connector.
-                continue;
             }
             if (!running) {
                 closeQuietly(socket);
@@ -179,6 +297,24 @@ public final class StremioConnectorService extends Service {
                 return;
             }
         }
+    }
+
+    private void recoverServerAfterAcceptFailure(ServerSocket failedListener, IOException error) {
+        synchronized (this) {
+            if (!running || destroyed || serverSocket != failedListener) {
+                return;
+            }
+            diagnostics.recordStremioConnector(
+                    "server_accept_failed", error.getClass().getSimpleName());
+            running = false;
+            serverSocket = null;
+            acceptThread = null;
+            closeQuietly(failedListener);
+        }
+        // Keep the service and its in-memory aggregator alive. If rebinding still fails,
+        // startServer records the failure and lets Android recreate this START_STICKY service;
+        // the completed protected prefetch remains available from its private disk cache.
+        startServer("accept_recovery");
     }
 
     static boolean dispatchClient(ExecutorService executor, Runnable task) {
@@ -241,11 +377,9 @@ public final class StremioConnectorService extends Service {
             } else if ("/manifest.json".equals(path) || "/".equals(path)) {
                 writeResponse(writer, 200, "application/json", MANIFEST);
             } else if (path.startsWith("/stream/series/") && path.endsWith(".json")) {
-                recordStreamRequest(path, "series");
-                writeResponse(writer, 200, "application/json", "{\"streams\":[]}");
+                handleStreamRequest(writer, path, "series");
             } else if (path.startsWith("/stream/movie/") && path.endsWith(".json")) {
-                recordStreamRequest(path, "movie");
-                writeResponse(writer, 200, "application/json", "{\"streams\":[]}");
+                handleStreamRequest(writer, path, "movie");
             } else if (path.startsWith("/subtitles/") && path.endsWith(".json")) {
                 StremioSubtitleRequest request = recordSubtitleRequest(requestTarget);
                 String body;
@@ -317,12 +451,116 @@ public final class StremioConnectorService extends Service {
         return null;
     }
 
-    private void recordStreamRequest(String path, String type) throws IOException {
+    private void handleStreamRequest(BufferedWriter writer, String path, String type)
+            throws IOException {
+        String id = recordStreamRequest(path, type);
+        long startedAt = System.currentTimeMillis();
+        boolean aggregationEnabled = StremioAggregationPreferences.isEnabled(this);
+        String response = streamResponse(
+                aggregationEnabled,
+                () -> getStreamAggregator().aggregate(type, id),
+                error -> diagnostics.recordStremioConnector(
+                        "aggregation_failed",
+                        type + "/" + id + " error="
+                                + error.getClass().getSimpleName()));
+        if (aggregationEnabled && !StremioAggregationPreferences.isEnabled(this)) {
+            // The preference listener cancels in-flight calls; never publish a result that won
+            // the race with the kill switch.
+            response = LEGACY_STREAM_RESPONSE;
+            diagnostics.recordStremioConnector(
+                    "aggregation_kill_switch", type + "/" + id);
+        }
+        int streamCount = streamCount(response);
+        if (aggregationEnabled
+                && StremioAggregationPreferences.isEnabled(this)
+                && streamCount >= 0) {
+            store.recordStreamFallbacks(
+                    type, id, response, System.currentTimeMillis());
+        }
+        int responseBytes = response.getBytes(StandardCharsets.UTF_8).length;
+        diagnostics.recordStremioConnector(
+                "aggregation_response_ready",
+                type + "/" + id + " streams=" + streamCount
+                        + " bytes=" + responseBytes);
+        try {
+            writeResponse(writer, 200, "application/json", response);
+        } catch (IOException error) {
+            diagnostics.recordStremioConnector(
+                    "aggregation_response_failed",
+                    type + "/" + id + " streams=" + streamCount
+                            + " bytes=" + responseBytes
+                            + " error=" + error.getClass().getSimpleName());
+            throw error;
+        }
+        diagnostics.recordStremioConnector(
+                "aggregation_response_written",
+                type + "/" + id + " streams=" + streamCount
+                        + " bytes=" + responseBytes
+                        + " durationMs="
+                        + Math.max(0L, System.currentTimeMillis() - startedAt));
+    }
+
+    static String streamResponse(boolean aggregationEnabled, StreamResponseProvider provider) {
+        return streamResponse(aggregationEnabled, provider, null);
+    }
+
+    static String streamResponse(boolean aggregationEnabled,
+                                 StreamResponseProvider provider,
+                                 @Nullable StreamResponseErrorHandler errorHandler) {
+        if (!aggregationEnabled) {
+            return LEGACY_STREAM_RESPONSE;
+        }
+        try {
+            String response = provider.load();
+            return response == null ? LEGACY_STREAM_RESPONSE : response;
+        } catch (RuntimeException error) {
+            if (errorHandler != null) {
+                errorHandler.onError(error);
+            }
+            return LEGACY_STREAM_RESPONSE;
+        }
+    }
+
+    static int streamCount(String response) {
+        try {
+            org.json.JSONArray streams = new org.json.JSONObject(response)
+                    .optJSONArray("streams");
+            return streams == null ? -1 : streams.length();
+        } catch (org.json.JSONException | RuntimeException error) {
+            return -1;
+        }
+    }
+
+    private synchronized StremioStreamAggregator getStreamAggregator() {
+        if (streamAggregator == null) {
+            streamAggregator = new StremioStreamAggregator(this, diagnostics);
+        }
+        return streamAggregator;
+    }
+
+    private synchronized void releaseStreamAggregator() {
+        StremioStreamAggregator aggregator = streamAggregator;
+        streamAggregator = null;
+        if (aggregator != null) {
+            aggregator.shutdown();
+        }
+    }
+
+    private String recordStreamRequest(String path, String type) throws IOException {
         String prefix = "/stream/" + type + "/";
         String encodedId = path.substring(prefix.length(), path.length() - ".json".length());
         String id = URLDecoder.decode(encodedId, StandardCharsets.UTF_8.name());
         store.record(type, id, System.currentTimeMillis());
         diagnostics.recordStremioConnector("stream_request", type + "/" + id);
+        return id;
+    }
+
+    interface StreamResponseProvider {
+        String load();
+    }
+
+    interface StreamResponseErrorHandler {
+        void onError(RuntimeException error);
     }
 
     @Nullable

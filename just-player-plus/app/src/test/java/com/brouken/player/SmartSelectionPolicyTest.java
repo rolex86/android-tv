@@ -60,6 +60,20 @@ public class SmartSelectionPolicyTest {
     }
 
     @Test
+    public void rememberedSeriesTrackSurvivesMissingLanguageMetadataOnAnotherSource() {
+        assertEquals(0L, RememberedTrackStore.languageMatchPenalty(
+                "ces", "cs", "Czech", "Čeština"));
+        assertTrue(RememberedTrackStore.languageMatchPenalty(
+                "ces", null, "Czech", null) > 0L);
+        assertTrue(RememberedTrackStore.languageMatchPenalty(
+                null, "cs", "Czech", "Czech") > 0L);
+        assertEquals(-1L, RememberedTrackStore.languageMatchPenalty(
+                null, "eng", "Audio 1", "English"));
+        assertEquals(-1L, RememberedTrackStore.languageMatchPenalty(
+                "ces", "eng", "Czech", "English"));
+    }
+
+    @Test
     public void subtitleSourcePreferenceRecognizesMedia3PrefixedExternalIds() {
         Format external = new Format.Builder()
                 .setId("1:plus-external:opensubtitles-v3:abc")
