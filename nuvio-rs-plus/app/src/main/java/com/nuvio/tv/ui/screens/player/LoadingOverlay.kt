@@ -65,6 +65,10 @@ fun LoadingOverlay(
     var logoLoadFailed by remember(logoUrl) { mutableStateOf(false) }
     val showLogo = !logoUrl.isNullOrBlank() && !logoLoadFailed
 
+    androidx.compose.runtime.LaunchedEffect(visible) {
+        PlayerBlackFlashTrace.log("overlay visible=$visible")
+    }
+
     AnimatedVisibility(
         visible = visible,
         enter = fadeIn(animationSpec = tween(250)),
