@@ -258,7 +258,11 @@ fun PlayerScreen(
         preferBingeGroupForNextEpisode = uiState.streamAutoPlayPreferBingeGroupForNextEpisode
     )
 
-    androidx.compose.runtime.LaunchedEffect(uiState.showLoadingOverlay, uiState.loadingMessage, uiState.isBuffering, uiState.isPlaying) {\n        PlayerBlackFlashTrace.log("player_ui loading=${uiState.showLoadingOverlay} buffering=${uiState.isBuffering} playing=${uiState.isPlaying} message=${uiState.loadingMessage}")\n    }\n\n    val exitPlayer: () -> Unit = exitPlayer@{
+    androidx.compose.runtime.LaunchedEffect(uiState.showLoadingOverlay, uiState.loadingMessage, uiState.isBuffering, uiState.isPlaying) {
+        PlayerBlackFlashTrace.log("player_ui loading=${uiState.showLoadingOverlay} buffering=${uiState.isBuffering} playing=${uiState.isPlaying} message=${uiState.loadingMessage}")
+    }
+
+    val exitPlayer: () -> Unit = exitPlayer@{
         if (exitDispatched) return@exitPlayer
         exitDispatched = true
         val timeline = viewModel.playbackTimeline.value
@@ -2224,7 +2228,8 @@ private fun ExoPlayerSurface(
     val latestSubtitleLiftPx by rememberUpdatedState(subtitleLiftPx)
     val latestMetricsCallback by rememberUpdatedState(onSubtitleTextMetricsChanged)
     val playerView = remember(context, player) {
-        PlayerBlackFlashTrace.log("exo PlayerView create")\n        PlayerView(context).apply {
+        PlayerBlackFlashTrace.log("exo PlayerView create")
+        PlayerView(context).apply {
             useController = false
             isFocusable = false
             isFocusableInTouchMode = false
