@@ -80,22 +80,6 @@ private const val SubtitleOffLanguageKey = "__off__"
 private const val SubtitleUnknownLanguageKey = "__unknown__"
 private const val SubtitleFocusTag = "SubtitleFocus"
 
-private val OverlayTextColors = listOf(
-    Color.White,
-    Color(0xFFD9D9D9),
-    Color(0xFFFFD700),
-    Color(0xFF00E5FF),
-    Color(0xFFFF5C5C),
-    Color(0xFF00FF88)
-)
-
-private val OverlayOutlineColors = listOf(
-    Color.Black,
-    Color.White,
-    Color(0xFF00E5FF),
-    Color(0xFFFF5C5C)
-)
-
 private const val RailFadeDurationMs = 120
 
 @Composable
@@ -106,6 +90,7 @@ internal fun SubtitleSelectionOverlay(
     addonSubtitles: List<Subtitle>,
     selectedAddonSubtitle: Subtitle?,
     subtitleStyle: SubtitleStyleSettings,
+    isEditingHdrStyle: Boolean = false,
     subtitleDelayMs: Int,
     installedSubtitleAddonOrder: List<String>,
     isLoadingAddons: Boolean,
@@ -352,6 +337,7 @@ internal fun SubtitleSelectionOverlay(
             requestedKey.startsWith("${StyleFocusKey.OutlineColorPrefix}:") && !subtitleStyle.outlineEnabled -> {
                 StyleFocusKey.OutlineToggle
             }
+            requestedKey.isHdrBrightnessFocusKey() && !isEditingHdrStyle -> StyleFocusKey.OpacityDecrease
             else -> requestedKey
         }.takeIf { key -> styleRequesters.containsKey(key) } ?: StyleFocusKey.DelaySet
         if (
@@ -469,7 +455,7 @@ internal fun SubtitleSelectionOverlay(
                 pendingStyleFocusKey = null
                 return@LaunchedEffect
             }
-            val targetIndex = styleListIndexForFocusKey(targetKey)
+            val targetIndex = styleListIndexForFocusKey(targetKey, hasHdrBrightnessItem = isEditingHdrStyle)
             repeat(8) { attempt ->
                 styleListState.scrollItemIntoView(targetIndex)
                 Log.d(
@@ -612,6 +598,7 @@ internal fun SubtitleSelectionOverlay(
                 RailFadeIn(visible = styleRailVisible) {
                     SubtitleStyleRail(
                         subtitleStyle = subtitleStyle,
+                        isEditingHdrStyle = isEditingHdrStyle,
                         subtitleDelayMs = subtitleDelayMs,
                         listState = styleListState,
                         onMoveLeft = ::moveFocusBackToOptionRail,
@@ -828,6 +815,7 @@ private fun SubtitleOptionsRail(
 @Composable
 private fun SubtitleStyleRail(
     subtitleStyle: SubtitleStyleSettings,
+    isEditingHdrStyle: Boolean,
     subtitleDelayMs: Int,
     listState: LazyListState,
     onMoveLeft: () -> Unit,
@@ -944,11 +932,15 @@ private fun SubtitleStyleRail(
             }
             item {
                 OverlaySectionCard(
-                    title = stringResource(R.string.subtitle_style_text_color),
+                    title = if (isEditingHdrStyle) {
+                        stringResource(R.string.subtitle_style_text_color_hdr)
+                    } else {
+                        stringResource(R.string.subtitle_style_text_color)
+                    },
                     modifier = styleCardModifier
                 ) {
                     ColorChipRow(
-                        colors = OverlayTextColors,
+                        colors = SubtitleTextColorPresets,
                         selectedColor = subtitleStyle.textColor,
                         onMoveLeft = onMoveLeft,
                         focusRequesters = focusRequesters,
@@ -960,7 +952,11 @@ private fun SubtitleStyleRail(
             }
             item {
                 OverlaySectionCard(
-                    title = stringResource(R.string.subtitle_style_text_opacity),
+                    title = if (isEditingHdrStyle) {
+                        stringResource(R.string.subtitle_style_text_opacity_hdr)
+                    } else {
+                        stringResource(R.string.subtitle_style_text_opacity)
+                    },
                     modifier = styleCardModifier
                 ) {
                     val currentColor = Color(subtitleStyle.textColor)
@@ -984,6 +980,30 @@ private fun SubtitleStyleRail(
                     )
                 }
             }
+            if (isEditingHdrStyle) {
+                item {
+                    OverlaySectionCard(
+                        title = stringResource(R.string.subtitle_style_brightness_hdr),
+                        modifier = styleCardModifier
+                    ) {
+                        StepperRow(
+                            value = "${subtitleStyle.hdrBrightness}%",
+                            onDecrease = {
+                                dispatchStyleEvent(PlayerEvent.OnSetSubtitleHdrBrightness(subtitleStyle.hdrBrightness - 10))
+                            },
+                            onIncrease = {
+                                dispatchStyleEvent(PlayerEvent.OnSetSubtitleHdrBrightness(subtitleStyle.hdrBrightness + 10))
+                            },
+                            onMoveLeft = onMoveLeft,
+                            decrementFocusRequester = focusRequesters[StyleFocusKey.HdrBrightnessDecrease],
+                            incrementFocusRequester = focusRequesters[StyleFocusKey.HdrBrightnessIncrease],
+                            decrementFocusKey = StyleFocusKey.HdrBrightnessDecrease,
+                            incrementFocusKey = StyleFocusKey.HdrBrightnessIncrease,
+                            onFocusChanged = onStyleFocused
+                        )
+                    }
+                }
+            }
             item {
                 OverlaySectionCard(
                     title = stringResource(R.string.subtitle_style_outline),
@@ -1000,7 +1020,7 @@ private fun SubtitleStyleRail(
                             onClick = { dispatchStyleEvent(PlayerEvent.OnSetSubtitleOutlineEnabled(!subtitleStyle.outlineEnabled)) }
                         )
                         ColorChipRow(
-                            colors = OverlayOutlineColors,
+                            colors = SubtitleOutlineColorPresets,
                             selectedColor = subtitleStyle.outlineColor,
                             enabled = subtitleStyle.outlineEnabled,
                             onMoveLeft = onMoveLeft,
@@ -1704,6 +1724,8 @@ private object StyleFocusKey {
     const val TextColorPrefix = "text_color"
     const val OpacityDecrease = "opacity_decrease"
     const val OpacityIncrease = "opacity_increase"
+    const val HdrBrightnessDecrease = "hdr_brightness_decrease"
+    const val HdrBrightnessIncrease = "hdr_brightness_increase"
     const val OutlineColorPrefix = "outline_color"
 }
 
@@ -1711,6 +1733,16 @@ private enum class OverlayFocusRail {
     LANGUAGE,
     OPTION,
     STYLE
+}
+
+private fun String.isHdrBrightnessFocusKey(): Boolean =
+    this == StyleFocusKey.HdrBrightnessDecrease || this == StyleFocusKey.HdrBrightnessIncrease
+
+/** The HDR brightness item sits right after opacity, shifting every later item down by one. */
+private fun styleListIndexForFocusKey(focusKey: String, hasHdrBrightnessItem: Boolean): Int {
+    if (focusKey.isHdrBrightnessFocusKey()) return 5
+    val index = styleListIndexForFocusKey(focusKey)
+    return if (hasHdrBrightnessItem && index >= 5) index + 1 else index
 }
 
 private fun styleListIndexForFocusKey(focusKey: String): Int {
@@ -1741,16 +1773,18 @@ private fun rememberStyleFocusRequesters(): Map<String, FocusRequester> {
             StyleFocusKey.Bold,
             StyleFocusKey.OpacityDecrease,
             StyleFocusKey.OpacityIncrease,
+            StyleFocusKey.HdrBrightnessDecrease,
+            StyleFocusKey.HdrBrightnessIncrease,
             StyleFocusKey.OutlineToggle,
             StyleFocusKey.OffsetDecrease,
             StyleFocusKey.OffsetIncrease,
             StyleFocusKey.DelaySet,
             StyleFocusKey.Reset
         ).associateWith { FocusRequester() } +
-            OverlayTextColors.associate { color ->
+            SubtitleTextColorPresets.associate { color ->
                 "${StyleFocusKey.TextColorPrefix}:${color.toArgb()}" to FocusRequester()
             } +
-            OverlayOutlineColors.associate { color ->
+            SubtitleOutlineColorPresets.associate { color ->
                 "${StyleFocusKey.OutlineColorPrefix}:${color.toArgb()}" to FocusRequester()
             }
     }

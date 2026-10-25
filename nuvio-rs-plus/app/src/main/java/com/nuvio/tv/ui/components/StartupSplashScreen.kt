@@ -29,6 +29,7 @@ import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.nuvio.tv.R
 import androidx.tv.material3.Text
+import com.nuvio.tv.ui.theme.NuvioPrimitives
 import com.nuvio.tv.ui.theme.NuvioTheme
 
 @Composable
@@ -43,7 +44,7 @@ fun StartupSplashScreen(
     val avatarColor = remember(profileColorHex) {
         profileColorHex?.let {
             runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull()
-        } ?: Color(0xFF1E88E5)
+        } ?: NuvioPrimitives.blue500
     }
 
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
@@ -69,7 +70,7 @@ fun StartupSplashScreen(
             )
         } else if (!skipGradient) {
             val baseBg = Color(0xFF121212)
-            val baseBgElevated = Color(0xFF1E1E1E)
+            val baseBgElevated = NuvioPrimitives.neutral875
             val gradientTop = lerp(baseBgElevated, avatarColor, 0.3f)
             val gradientMid = lerp(baseBg, avatarColor, 0.14f)
             val halfFadeStrong = avatarColor.copy(alpha = 0.26f)

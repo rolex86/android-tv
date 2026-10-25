@@ -7,13 +7,14 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.nuvio.tv.R
 import com.nuvio.tv.data.local.AVAILABLE_SUBTITLE_LANGUAGES
-import com.nuvio.tv.data.local.LibassRenderType
+import com.nuvio.tv.data.local.LibassRenderScale
 import com.nuvio.tv.data.local.PlayerPreference
 import com.nuvio.tv.data.local.PlayerSettings
 import com.nuvio.tv.data.local.PlusSubtitleSourcePreference
 import com.nuvio.tv.data.local.SubtitleLanguageOption
 import com.nuvio.tv.data.local.SubtitleStyleSettings
 import com.nuvio.tv.data.local.displayName
+import com.nuvio.tv.ui.theme.NuvioPrimitives
 
 private val subtitleColors = listOf(
     Color.White,
@@ -31,14 +32,14 @@ private val subtitleBackgroundColors = listOf(
     Color.Transparent,
     Color.Black,
     Color(0x80000000),
-    Color(0xFF1A1A1A),
-    Color(0xFF2D2D2D)
+    NuvioPrimitives.neutral900,
+    NuvioPrimitives.neutral800
 )
 
 private val subtitleOutlineColors = listOf(
     Color.Black,
-    Color(0xFF1A1A1A),
-    Color(0xFF333333),
+    NuvioPrimitives.neutral900,
+    NuvioPrimitives.neutral750,
     Color.White
 )
 
@@ -155,6 +156,31 @@ internal fun PlaybackSubtitlesSection(
             enabled = enabled
         )
     }
+    SettingsToggleRow(
+        title = stringResource(R.string.sub_hdr_style),
+        subtitle = stringResource(R.string.sub_hdr_style_sub),
+        checked = style.hdrStyleEnabled,
+        onToggle = { onUpdate { setSubtitleHdrStyleEnabled(!style.hdrStyleEnabled) } },
+        enabled = enabled
+    )
+    if (style.hdrStyleEnabled) {
+        ColorSettingsItem(
+            title = stringResource(R.string.sub_hdr_text_color),
+            currentColor = Color(style.hdrTextColor),
+            onClick = { onOpenDialog(PlaybackDialog.SUBTITLE_HDR_TEXT_COLOR) },
+            enabled = enabled
+        )
+        SliderSettingsItem(
+            title = stringResource(R.string.sub_hdr_brightness),
+            value = style.hdrBrightness,
+            valueText = "${style.hdrBrightness}%",
+            minValue = SubtitleStyleSettings.HDR_BRIGHTNESS_MIN,
+            maxValue = SubtitleStyleSettings.HDR_BRIGHTNESS_MAX,
+            step = 5,
+            onValueChange = { brightness -> onUpdate { setSubtitleHdrBrightness(brightness) } },
+            enabled = enabled
+        )
+    }
 
     SettingsSectionLabel(text = stringResource(R.string.sub_advanced_section))
     SettingsToggleRow(
@@ -166,10 +192,10 @@ internal fun PlaybackSubtitlesSection(
     )
     if (settings.useLibass) {
         SettingsActionRow(
-            title = stringResource(R.string.sub_libass_mode),
-            subtitle = null,
-            value = libassRenderTypeOptions().firstOrNull { it.value == settings.libassRenderType }?.title,
-            onClick = { onOpenDialog(PlaybackDialog.LIBASS_RENDER_TYPE) }
+            title = stringResource(R.string.sub_libass_render_scale),
+            subtitle = stringResource(R.string.sub_libass_render_scale_sub),
+            value = settings.libassRenderScale.label,
+            onClick = { onOpenDialog(PlaybackDialog.LIBASS_RENDER_SCALE) }
         )
     }
 }
@@ -313,17 +339,31 @@ internal fun SubtitleSettingsDialogs(
             },
             onDismiss = onDismiss
         )
-        PlaybackDialog.LIBASS_RENDER_TYPE -> SettingsSingleChoiceDialog(
-            title = stringResource(R.string.sub_libass_mode),
-            options = libassRenderTypeOptions(),
-            selectedValue = settings.libassRenderType,
-            onOptionSelected = { renderType ->
-                onUpdate { setLibassRenderType(renderType) }
+        PlaybackDialog.SUBTITLE_HDR_TEXT_COLOR -> ColorSelectionDialog(
+            title = stringResource(R.string.sub_hdr_text_color),
+            colors = subtitleColors,
+            selectedColor = Color(style.hdrTextColor),
+            onColorSelected = { color ->
+                onUpdate { setSubtitleHdrTextColor(color.toArgb()) }
                 onDismiss()
             },
-            onDismiss = onDismiss,
-            width = 480.dp,
-            maxHeight = 380.dp
+            onDismiss = onDismiss
+        )
+        PlaybackDialog.LIBASS_RENDER_SCALE -> SettingsSingleChoiceDialog(
+            title = stringResource(R.string.sub_libass_render_scale),
+            options = LibassRenderScale.entries.map { scale ->
+                SettingsPickerOption(
+                    scale,
+                    scale.label,
+                    null
+                )
+            },
+            selectedValue = settings.libassRenderScale,
+            onOptionSelected = { scale ->
+                onUpdate { setLibassRenderScale(scale) }
+                onDismiss()
+            },
+            onDismiss = onDismiss
         )
         else -> Unit
     }

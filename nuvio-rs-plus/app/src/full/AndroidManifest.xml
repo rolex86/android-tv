@@ -10,5 +10,18 @@
          permission/provider. The stock Nuvio RS app may already own that signature
          permission under a different signing certificate, which would make Android
          reject a side-by-side Plus install with INSTALL_FAILED_DUPLICATE_PERMISSION. -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+
+    <application>
+
+        <service
+            android:name=".updater.UpdateJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <receiver
+            android:name=".updater.UpdateInstallResultReceiver"
+            android:exported="false" />
+        </application>
 
 </manifest>
