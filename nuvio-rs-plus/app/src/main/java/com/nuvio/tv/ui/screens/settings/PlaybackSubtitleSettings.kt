@@ -238,35 +238,6 @@ private fun PlusSubtitleSourceDialog(
 }
 
 @Composable
-private fun libassRenderTypeOptions(): List<SettingsPickerOption<LibassRenderType>> = listOf(
-    SettingsPickerOption(
-        LibassRenderType.OVERLAY_OPEN_GL,
-        stringResource(R.string.sub_mode_overlay_gl),
-        stringResource(R.string.sub_mode_overlay_gl_sub)
-    ),
-    SettingsPickerOption(
-        LibassRenderType.OVERLAY_CANVAS,
-        stringResource(R.string.sub_mode_overlay_canvas),
-        stringResource(R.string.sub_mode_overlay_canvas_sub)
-    ),
-    SettingsPickerOption(
-        LibassRenderType.EFFECTS_OPEN_GL,
-        stringResource(R.string.sub_mode_effects_gl),
-        stringResource(R.string.sub_mode_effects_gl_sub)
-    ),
-    SettingsPickerOption(
-        LibassRenderType.EFFECTS_CANVAS,
-        stringResource(R.string.sub_mode_effects_canvas),
-        stringResource(R.string.sub_mode_effects_canvas_sub)
-    ),
-    SettingsPickerOption(
-        LibassRenderType.CUES,
-        stringResource(R.string.sub_mode_standard),
-        stringResource(R.string.sub_mode_standard_sub)
-    )
-)
-
-@Composable
 internal fun SubtitleSettingsDialogs(
     dialog: PlaybackDialog?,
     settings: PlayerSettings,
