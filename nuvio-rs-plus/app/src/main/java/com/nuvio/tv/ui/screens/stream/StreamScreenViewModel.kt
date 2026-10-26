@@ -430,6 +430,7 @@ class StreamScreenViewModel @Inject constructor(
                 // otherwise reopening a partially watched movie can silently replay the
                 // previously chosen source even when "Reuse last link" is disabled.
                 if (!directAutoPlayFlowEnabledForSession &&
+                    playerSettings.streamAutoPlayMode != StreamAutoPlayMode.MANUAL &&
                     PlusBingeGroupReusePolicy.allowForInitialSelection(season, episode) &&
                     playerSettings.streamAutoPlayPreferBingeGroupForNextEpisode &&
                     playerSettings.streamAutoPlayReuseBingeGroup
@@ -472,7 +473,7 @@ class StreamScreenViewModel @Inject constructor(
                 }
             }
 
-            if (!autoPlayHandledForSession && playerSettings.streamReuseLastLinkEnabled) {
+            if (!autoPlayHandledForSession && playerSettings.streamAutoPlayMode != StreamAutoPlayMode.MANUAL && playerSettings.streamReuseLastLinkEnabled) {
                 val cached = streamLinkCacheDataStore.getValid(
                     contentKey = streamCacheKey,
                     maxAgeMs = playerSettings.streamReuseLastLinkCacheHours * 60L * 60L * 1000L
@@ -599,7 +600,8 @@ class StreamScreenViewModel @Inject constructor(
                 // Early binge group match: if we have a persisted binge group, try to
                 // match it immediately on every emission without waiting for all addons.
                 // When a persisted filename is available, prefer binge group + filename first.
-                val earlyBingeGroupMatch = if (!autoPlayHandledForSession && !resolvedAutoPlayTarget && persistedBingeGroup != null) {
+                val earlyBingeGroupMatch = if (!autoPlayHandledForSession && !resolvedAutoPlayTarget &&
+                    playerSettings.streamAutoPlayMode != StreamAutoPlayMode.MANUAL && persistedBingeGroup != null) {
                     val nextFilename = if (persistedFilename != null) {
                         val extracted = com.nuvio.tv.core.player.FilenameEpisodeMatcher.extractSeasonEpisode(persistedFilename)
                         if (extracted != null) {
@@ -634,7 +636,7 @@ class StreamScreenViewModel @Inject constructor(
                         }
                     } else null
                     // Fall back to binge group alone
-                    bingeAndFilename ?: bingeAndInfoHash ?: StreamAutoPlaySelector.selectAutoPlayStreamAsync(
+                    StreamAutoPlaySelector.selectAutoPlayStreamAsync(
                         streams = allStreams,
                         mode = playerSettings.streamAutoPlayMode,
                         regexPattern = playerSettings.streamAutoPlayRegex,
@@ -645,7 +647,8 @@ class StreamScreenViewModel @Inject constructor(
                         selectedPlugins = playerSettings.streamAutoPlaySelectedPlugins,
                         preferredBingeGroup = persistedBingeGroup,
                         preferBingeGroupInSelection = true,
-                        bingeGroupOnly = true
+                        bingeGroupOnly = true,
+                        bingeKeepsFilters = true
                     )
                 } else null
 
@@ -669,7 +672,8 @@ class StreamScreenViewModel @Inject constructor(
                         selectedAddons = playerSettings.streamAutoPlaySelectedAddons,
                         selectedPlugins = playerSettings.streamAutoPlaySelectedPlugins,
                         preferredBingeGroup = persistedBingeGroup,
-                        preferBingeGroupInSelection = persistedBingeGroup != null
+                        preferBingeGroupInSelection = persistedBingeGroup != null,
+                        bingeKeepsFilters = true
                     )
                 }
                 // A manual selection can complete while matching is on the worker.
@@ -874,7 +878,8 @@ class StreamScreenViewModel @Inject constructor(
                                     selectedPlugins = playerSettings.streamAutoPlaySelectedPlugins,
                                     preferredBingeGroup = persistedBingeGroup,
                                     preferBingeGroupInSelection = true,
-                                    bingeGroupOnly = true
+                                    bingeGroupOnly = true,
+                                    bingeKeepsFilters = true
                                 )
                                 if (earlyMatch != null) {
                                     resolvedAutoPlayTarget = true
