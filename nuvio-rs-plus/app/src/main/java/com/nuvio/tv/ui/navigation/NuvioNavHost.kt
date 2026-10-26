@@ -531,6 +531,11 @@ private fun PlaybackNavHost(
                     nullable = true
                     defaultValue = "false"
                 },
+                navArgument("autoContinueEpisode") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = "false"
+                },
                 navArgument("returnToDetailOnBack") {
                     type = NavType.StringType
                     nullable = true
@@ -1026,6 +1031,7 @@ private fun PlaybackNavHost(
                             season = nextSeason,
                             episode = nextEpisode,
                             episodeName = null,
+                            autoContinueEpisode = true,
                             genres = null,
                             year = args?.getString("year"),
                             contentId = contentId.takeIf { it.isNotBlank() },
