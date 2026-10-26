@@ -90,7 +90,7 @@ class StreamAutoPlaySelectorTest {
     }
 
     @Test
-    fun `bingeGroup-first ignores source and addon plugin filters`() {
+    fun `bingeGroup-first respects source and addon plugin filters`() {
         val filteredOutAddonMatch = stream(
             addonName = "AddonFilteredOut",
             url = "https://example.com/addon-match.m3u8",
@@ -114,7 +114,7 @@ class StreamAutoPlaySelectorTest {
             preferBingeGroupInSelection = true
         )
 
-        assertEquals(filteredOutAddonMatch, selected)
+        assertEquals(allowedPluginMatch, selected)
     }
 
     @Test
@@ -174,7 +174,7 @@ class StreamAutoPlaySelectorTest {
     }
 
     @Test
-    fun `manual mode auto-selects matching bingeGroup when prefer enabled`() {
+    fun `manual mode never auto-selects matching bingeGroup when prefer enabled`() {
         // Binge-group continuity is intentionally allowed in MANUAL mode so
         // next-episode / resume can skip the picker when a group was locked in.
         val matched = stream(
@@ -195,7 +195,7 @@ class StreamAutoPlaySelectorTest {
             preferBingeGroupInSelection = true
         )
 
-        assertEquals(matched, selected)
+        assertNull(selected)
     }
 
     @Test
