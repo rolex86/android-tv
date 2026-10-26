@@ -155,6 +155,8 @@ class StreamScreenViewModel @Inject constructor(
     private val contentLanguage: String? = savedStateHandle.getOptionalString("contentLanguage")
     private val playbackProfileId: Int = savedStateHandle.get<String>("profileId")?.toIntOrNull()
         ?: profileManager.activeProfileId.value
+    private val autoContinueEpisode: Boolean = savedStateHandle.get<String>("autoContinueEpisode")
+        ?.toBooleanStrictOrNull() == true
     private val manualSelection: Boolean = savedStateHandle.get<String>("manualSelection")
         ?.toBooleanStrictOrNull()
         ?: false
@@ -430,7 +432,7 @@ class StreamScreenViewModel @Inject constructor(
                 // otherwise reopening a partially watched movie can silently replay the
                 // previously chosen source even when "Reuse last link" is disabled.
                 if (!directAutoPlayFlowEnabledForSession &&
-                    playerSettings.streamAutoPlayMode != StreamAutoPlayMode.MANUAL &&
+                    (playerSettings.streamAutoPlayMode != StreamAutoPlayMode.MANUAL || autoContinueEpisode) &&
                     PlusBingeGroupReusePolicy.allowForInitialSelection(season, episode) &&
                     playerSettings.streamAutoPlayPreferBingeGroupForNextEpisode &&
                     playerSettings.streamAutoPlayReuseBingeGroup
@@ -601,7 +603,7 @@ class StreamScreenViewModel @Inject constructor(
                 // match it immediately on every emission without waiting for all addons.
                 // When a persisted filename is available, prefer binge group + filename first.
                 val earlyBingeGroupMatch = if (!autoPlayHandledForSession && !resolvedAutoPlayTarget &&
-                    playerSettings.streamAutoPlayMode != StreamAutoPlayMode.MANUAL && persistedBingeGroup != null) {
+                    (playerSettings.streamAutoPlayMode != StreamAutoPlayMode.MANUAL || autoContinueEpisode) && persistedBingeGroup != null) {
                     val nextFilename = if (persistedFilename != null) {
                         val extracted = com.nuvio.tv.core.player.FilenameEpisodeMatcher.extractSeasonEpisode(persistedFilename)
                         if (extracted != null) {
@@ -638,7 +640,7 @@ class StreamScreenViewModel @Inject constructor(
                     // Fall back to binge group alone
                     StreamAutoPlaySelector.selectAutoPlayStreamAsync(
                         streams = allStreams,
-                        mode = playerSettings.streamAutoPlayMode,
+                        mode = if (autoContinueEpisode && playerSettings.streamAutoPlayMode == StreamAutoPlayMode.MANUAL) StreamAutoPlayMode.FIRST_STREAM else playerSettings.streamAutoPlayMode,
                         regexPattern = playerSettings.streamAutoPlayRegex,
                         rankedRegexPatterns = playerSettings.streamAutoPlayRankedRegex,
                         source = playerSettings.streamAutoPlaySource,
@@ -673,6 +675,7 @@ class StreamScreenViewModel @Inject constructor(
                         selectedPlugins = playerSettings.streamAutoPlaySelectedPlugins,
                         preferredBingeGroup = persistedBingeGroup,
                         preferBingeGroupInSelection = persistedBingeGroup != null,
+                        bingeGroupOnly = autoContinueEpisode && playerSettings.streamAutoPlayMode == StreamAutoPlayMode.MANUAL,
                         bingeKeepsFilters = true
                     )
                 }
@@ -869,7 +872,7 @@ class StreamScreenViewModel @Inject constructor(
                                 val allStreams = orderedStreams.flatMap { it.streams }
                                 val earlyMatch = StreamAutoPlaySelector.selectAutoPlayStreamAsync(
                                     streams = allStreams,
-                                    mode = playerSettings.streamAutoPlayMode,
+                                    mode = if (autoContinueEpisode && playerSettings.streamAutoPlayMode == StreamAutoPlayMode.MANUAL) StreamAutoPlayMode.FIRST_STREAM else playerSettings.streamAutoPlayMode,
                                     regexPattern = playerSettings.streamAutoPlayRegex,
                                     rankedRegexPatterns = playerSettings.streamAutoPlayRankedRegex,
                                     source = playerSettings.streamAutoPlaySource,
