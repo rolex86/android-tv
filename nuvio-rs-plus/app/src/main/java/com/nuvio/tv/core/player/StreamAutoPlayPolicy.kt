@@ -6,6 +6,7 @@ import com.nuvio.tv.data.local.StreamAutoPlayMode
 
 object StreamAutoPlayPolicy {
     fun isEffectivelyEnabled(playerSettings: PlayerSettings): Boolean {
+        if (playerSettings.streamAutoPlayMode == StreamAutoPlayMode.MANUAL) return false
         if (playerSettings.streamReuseLastLinkEnabled) return true
         if (playerSettings.streamAutoPlayReuseBingeGroup &&
             playerSettings.streamAutoPlayPreferBingeGroupForNextEpisode) return true
