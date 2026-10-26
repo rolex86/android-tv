@@ -108,7 +108,7 @@ object StreamAutoPlaySelector {
         rankedRegexCheckCancelled: () -> Unit = {},
         bingeKeepsFilters: Boolean = false // Nuvio RS: source recovery retries stay inside the user's filters
     ): Stream? {
-        if (streams.isEmpty()) return null
+        if (mode == StreamAutoPlayMode.MANUAL || streams.isEmpty()) return null
 
         val effectiveSource = if (!AppFeaturePolicy.pluginsEnabled && source == StreamAutoPlaySource.ENABLED_PLUGINS_ONLY) {
             StreamAutoPlaySource.INSTALLED_ADDONS_ONLY
@@ -139,7 +139,7 @@ object StreamAutoPlaySelector {
         // not be limited by autoplay source/addon selection filters.
         val targetBingeGroup = preferredBingeGroup?.trim().orEmpty()
         if (preferBingeGroupInSelection && targetBingeGroup.isNotEmpty()) {
-            val bingeGroupMatch = (if (bingeKeepsFilters) candidateStreams else streams).firstOrNull { stream ->
+            val bingeGroupMatch = candidateStreams.firstOrNull { stream ->
                 !stream.isExternal() &&
                     stream.behaviorHints?.bingeGroup == targetBingeGroup &&
                     isPlayable(stream)
