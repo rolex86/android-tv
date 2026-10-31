@@ -93,7 +93,7 @@ object StreamAutoPlaySelector {
         }
         com.nuvio.tv.core.diagnostics.RemoteDebugConsole.record(
             "AUTO_SOURCE",
-            "mode=$mode candidates=${streams.size} selectedIndex=${streams.indexOf(selected)} " +
+            "mode=$mode candidates=${streams.size} selectedIndex=${selected?.let { streams.indexOf(it) } ?: -1} " +
                 "addon=${selected?.addonName?.take(70) ?: "none"} bingePreferred=${preferBingeGroupInSelection}"
         )
         return selected
