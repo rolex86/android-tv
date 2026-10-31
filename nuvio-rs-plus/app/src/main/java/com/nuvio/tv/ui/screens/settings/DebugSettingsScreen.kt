@@ -5,9 +5,6 @@ package com.nuvio.tv.ui.screens.settings
 import com.nuvio.tv.ui.theme.NuvioTheme
 import com.nuvio.tv.core.diagnostics.RemoteDebugConsole
 import androidx.compose.ui.platform.LocalContext
-import android.text.format.Formatter
-import android.net.wifi.WifiManager
-import android.content.Context
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -61,10 +58,15 @@ fun DebugSettingsContent(
     var remoteEnabled by remember { mutableStateOf(RemoteDebugConsole.isEnabled(debugContext)) }
     val accessKey = remember { RemoteDebugConsole.accessKey(debugContext) }
     val address = remember(remoteEnabled) {
-        val wifi = debugContext.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-        @Suppress("DEPRECATION")
-        val ip = wifi?.connectionInfo?.ipAddress ?: 0
-        if (ip == 0) "SHIELD_IP" else Formatter.formatIpAddress(ip)
+        runCatching {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
+                .filter { it.isUp && !it.isLoopback }
+                .sortedBy { if (it.name.startsWith("eth")) 0 else if (it.name.startsWith("wlan")) 1 else 2 }
+            interfaces.asSequence().flatMap { it.inetAddresses.toList().asSequence() }
+                .filterIsInstance<java.net.Inet4Address>()
+                .firstOrNull { !it.isLoopbackAddress && !it.isLinkLocalAddress }
+                ?.hostAddress
+        }.getOrNull() ?: "IP_SHIELDU"
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
