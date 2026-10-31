@@ -652,6 +652,7 @@ private fun PlayerRuntimeController.applySelectedStreamState(
     url: String,
     headers: Map<String, String>
 ) {
+    com.nuvio.tv.core.diagnostics.RemoteStreamDiagnostics.selected("http_playback", stream)
     val playbackRequest = PlayerMediaSourceFactory.normalizePlaybackRequest(url, headers)
     currentStreamUrl = playbackRequest.url
     currentHeaders = playbackRequest.headers
@@ -1111,6 +1112,7 @@ private fun PlayerRuntimeController.switchToTorrentSourceStream(
     resumeSavedProgress: Boolean = true
 ) {
     val infoHash = stream.getEffectiveInfoHash() ?: return
+    com.nuvio.tv.core.diagnostics.RemoteStreamDiagnostics.selected("torrent_playback", stream)
     sourceRecoveryPickerError = null
     sourceStreamsScope?.cancel()
     sourceStreamsScope = null
