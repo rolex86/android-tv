@@ -86,7 +86,7 @@ object RemoteDebugConsole {
                 val reader = client.getInputStream().bufferedReader()
                 val request = reader.readLine() ?: return
                 val parts = request.split(' ')
-                if (parts.size < 2 || parts[0] != "GET") return
+                if (parts.size < 2 || parts[0] !in listOf("GET", "POST")) return
                 var header = reader.readLine()
                 while (header != null && header.isNotEmpty()) header = reader.readLine()
                 val uri = parts[1]
@@ -97,6 +97,10 @@ object RemoteDebugConsole {
                 val (status, type, body) = when {
                     !enabled -> Triple(503, "text/plain", "Disabled")
                     !valid -> Triple(403, "text/plain", "Invalid access key")
+                    path == "/clear" && parts[0] == "POST" -> {
+                        synchronized(lock) { lines.clear() }
+                        Triple(200, "text/plain; charset=utf-8", "Log vymazán")
+                    }
                     path == "/logs" -> Triple(200, "text/plain; charset=utf-8",
                         synchronized(lock) { lines.joinToString("\n") })
                     path == "/export" -> Triple(200, "text/plain; charset=utf-8",
@@ -120,7 +124,7 @@ object RemoteDebugConsole {
         a,button{background:#4e81ee;color:white;border:0;padding:11px 16px;border-radius:8px;text-decoration:none}
         </style><h2>Nuvio RS Plus • Debug Console</h2>
         <p>Aktualizace každé 2 sekundy. Pouze lokální síť.</p>
-        <a id="save">Stáhnout log</a> <button id="copy" type="button">Kopírovat</button> <span id="copyStatus" role="status"></span>
+        <a id="save">Stáhnout log</a> <button id="copy" type="button">Kopírovat</button> <button id="clear" type="button">Smazat log</button> <span id="copyStatus" role="status"></span>
         <pre id="logs">Načítám...</pre>
         <script>
           const key=new URLSearchParams(location.search).get('key');
@@ -143,6 +147,15 @@ object RemoteDebugConsole {
               input.remove();
             }
             status.textContent=copied?'Zkopírováno':'Kopírování blokováno – použij Stáhnout log';
+          });
+          document.getElementById('clear').addEventListener('click', async () => {
+            if (!confirm('Smazat všechny dosavadní záznamy? Nové události se budou dál zapisovat.')) return;
+            const status=document.getElementById('copyStatus');
+            try {
+              const response=await fetch('/clear?key='+encodeURIComponent(key),{method:'POST',cache:'no-store'});
+              status.textContent=response.ok?'Log vymazán':'Smazání selhalo ('+response.status+')';
+              if(response.ok) await refresh();
+            } catch(_) {status.textContent='Smazání selhalo – ztraceno spojení';}
           });
           async function refresh(){
             try{const r=await fetch('/logs?key='+encodeURIComponent(key),{cache:'no-store'});
