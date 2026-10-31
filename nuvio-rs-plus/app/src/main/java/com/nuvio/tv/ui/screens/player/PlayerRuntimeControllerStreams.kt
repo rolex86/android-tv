@@ -2050,6 +2050,25 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                     )
                     if (bingeAndFilename != null) return bingeAndFilename
                 }
+                // Same release family: episode titles legitimately change between episodes.
+                // Stay within the selected binge group and match series prefix, episode number and container.
+                val familyMatch = allStreams.firstOrNull { stream ->
+                    !stream.isExternal() &&
+                        stream.behaviorHints?.bingeGroup == currentStreamBingeGroup &&
+                        com.nuvio.tv.core.player.FilenameEpisodeMatcher.matchesNextRelease(
+                            currentFilename = currentFilename.orEmpty(),
+                            candidateFilename = stream.behaviorHints?.filename,
+                            currentSeason = _uiState.value.currentSeason,
+                            currentEpisode = _uiState.value.currentEpisode ?: 0,
+                            nextSeason = nextVideo.season,
+                            nextEpisode = nextVideo.episode ?: 0
+                        )
+                }
+                com.nuvio.tv.core.diagnostics.RemoteDebugConsole.record(
+                    "BINGE_RELEASE_RESULT",
+                    "matched=${familyMatch != null} name=${familyMatch?.behaviorHints?.filename?.take(110) ?: "-"}"
+                )
+                if (familyMatch != null) return familyMatch
                 com.nuvio.tv.core.diagnostics.RemoteDebugConsole.record(
                     "BINGE_FALLBACK",
                     "reason=${if (nextFilename == null) "no_expected_filename" else "no_filename_match"} action=binge_group_only"
