@@ -2026,6 +2026,14 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                     nextSeason = nextVideo.season,
                     nextEpisode = nextVideo.episode ?: 0
                 ) ?: currentFilename?.takeIf { it.isNotBlank() }
+                com.nuvio.tv.core.diagnostics.RemoteDebugConsole.record(
+                    "BINGE_MATCH",
+                    "season=${_uiState.value.currentSeason} episode=${_uiState.value.currentEpisode} " +
+                        "nextSeason=${nextVideo.season} nextEpisode=${nextVideo.episode} " +
+                        "currentFilename=${currentFilename?.take(110) ?: "-"} " +
+                        "expectedFilename=${nextFilename?.take(110) ?: "-"} " +
+                        "groupPresent=${!currentStreamBingeGroup.isNullOrBlank()} candidates=${allStreams.size}"
+                )
                 if (nextFilename != null) {
                     val bingeAndFilename = allStreams.firstOrNull { stream ->
                         !stream.isExternal() &&
@@ -2034,8 +2042,18 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                                 stream.behaviorHints?.filename, nextFilename
                             )
                     }
+                    com.nuvio.tv.core.diagnostics.RemoteDebugConsole.record(
+                        "BINGE_FILENAME_RESULT",
+                        "matched=${bingeAndFilename != null} " +
+                            "name=${bingeAndFilename?.behaviorHints?.filename?.take(110) ?: "-"} " +
+                            "addon=${bingeAndFilename?.addonName ?: "-"}"
+                    )
                     if (bingeAndFilename != null) return bingeAndFilename
                 }
+                com.nuvio.tv.core.diagnostics.RemoteDebugConsole.record(
+                    "BINGE_FALLBACK",
+                    "reason=${if (nextFilename == null) "no_expected_filename" else "no_filename_match"} action=binge_group_only"
+                )
                 // Early fallback: binge group alone
                 return StreamAutoPlaySelector.selectAutoPlayStreamAsync(
                     streams = allStreams,
