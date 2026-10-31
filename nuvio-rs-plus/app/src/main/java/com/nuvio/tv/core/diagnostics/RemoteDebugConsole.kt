@@ -120,11 +120,30 @@ object RemoteDebugConsole {
         a,button{background:#4e81ee;color:white;border:0;padding:11px 16px;border-radius:8px;text-decoration:none}
         </style><h2>Nuvio RS Plus • Debug Console</h2>
         <p>Aktualizace každé 2 sekundy. Pouze lokální síť.</p>
-        <a id="save">Stáhnout log</a> <button onclick="navigator.clipboard.writeText(document.querySelector('pre').textContent)">Kopírovat</button>
+        <a id="save">Stáhnout log</a> <button id="copy" type="button">Kopírovat</button> <span id="copyStatus" role="status"></span>
         <pre id="logs">Načítám...</pre>
         <script>
           const key=new URLSearchParams(location.search).get('key');
           document.getElementById('save').href='/export?key='+encodeURIComponent(key);
+          document.getElementById('copy').addEventListener('click', async () => {
+            const value=document.getElementById('logs').textContent;
+            const status=document.getElementById('copyStatus');
+            let copied=false;
+            if (navigator.clipboard && window.isSecureContext) {
+              try { await navigator.clipboard.writeText(value); copied=true; } catch (_) {}
+            }
+            if (!copied) {
+              const input=document.createElement('textarea');
+              input.value=value;
+              input.setAttribute('readonly','');
+              input.style.position='fixed';input.style.left='-9999px';
+              document.body.appendChild(input);
+              input.focus();input.select();input.setSelectionRange(0,input.value.length);
+              try { copied=document.execCommand('copy'); } catch (_) {}
+              input.remove();
+            }
+            status.textContent=copied?'Zkopírováno':'Kopírování blokováno – použij Stáhnout log';
+          });
           async function refresh(){
             try{const r=await fetch('/logs?key='+encodeURIComponent(key),{cache:'no-store'});
               document.getElementById('logs').textContent=r.ok?await r.text():'Chyba '+r.status;
