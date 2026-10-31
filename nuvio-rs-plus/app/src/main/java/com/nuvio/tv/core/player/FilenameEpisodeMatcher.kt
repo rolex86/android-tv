@@ -73,18 +73,18 @@ object FilenameEpisodeMatcher {
         val extension: String
     )
 
-    private val releaseMarker = Regex("""(?i)S\\s*(\\d{1,3})\\s*E\\s*(\\d{1,4})|(?<!\\d)(\\d{1,2})[xX](\\d{1,4})""")
-    private val releaseExtension = Regex("""(?i)\\.(mkv|mp4|avi|m4v|webm|ts)$""")
+    private val releaseMarker = Regex("""(?i)S\s*(\d{1,3})\s*E\s*(\d{1,4})|(?<!\d)(\d{1,2})[xX](\d{1,4})""")
+    private val releaseExtension = Regex("""(?i)\.(mkv|mp4|avi|m4v|webm|ts)$""")
 
     private fun releaseParts(filename: String): ReleaseParts? {
         val extension = releaseExtension.find(filename)?.groupValues?.get(1)?.lowercase() ?: return null
         val marker = releaseMarker.find(filename) ?: return null
         val season = (marker.groupValues[1].ifBlank { marker.groupValues[3] }).toIntOrNull() ?: return null
         val episode = (marker.groupValues[2].ifBlank { marker.groupValues[4] }).toIntOrNull() ?: return null
-        val prefix = marker.value.let {
+        val prefix = run {
             filename.substring(0, marker.range.first)
                 .lowercase()
-                .replace(Regex("""[^\\p{L}\\p{N}]+"""), " ")
+                .replace(Regex("""[^\p{L}\p{N}]+"""), " ")
                 .trim()
         }
         return ReleaseParts(prefix, season, episode, extension)
