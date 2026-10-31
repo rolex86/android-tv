@@ -39,6 +39,57 @@ object FilenameEpisodeMatcher {
     }
 
 
+
+    /**
+     * Matches consecutive episodes from the same release family even when their
+     * individual episode titles differ. Requires a matching series prefix before
+     * the episode marker, the expected episode numbers, and the same extension.
+     * Does not guess when the series prefix or episode marker is missing.
+     */
+    fun matchesNextRelease(
+        currentFilename: String,
+        candidateFilename: String?,
+        currentSeason: Int?,
+        currentEpisode: Int,
+        nextSeason: Int?,
+        nextEpisode: Int
+    ): Boolean {
+        if (candidateFilename.isNullOrBlank()) return false
+        val current = releaseParts(currentFilename) ?: return false
+        val candidate = releaseParts(candidateFilename) ?: return false
+        if (current.season != null && current.season != currentSeason) return false
+        if (current.episode != currentEpisode || candidate.episode != nextEpisode) return false
+        if (candidate.season != null && candidate.season != nextSeason) return false
+        if (current.season != null && candidate.season == null) return false
+        return current.prefix == candidate.prefix &&
+            current.prefix.length >= 8 &&
+            current.extension == candidate.extension
+    }
+
+    private data class ReleaseParts(
+        val prefix: String,
+        val season: Int?,
+        val episode: Int,
+        val extension: String
+    )
+
+    private val releaseMarker = Regex("""(?i)S\\s*(\\d{1,3})\\s*E\\s*(\\d{1,4})|(?<!\\d)(\\d{1,2})[xX](\\d{1,4})""")
+    private val releaseExtension = Regex("""(?i)\\.(mkv|mp4|avi|m4v|webm|ts)$""")
+
+    private fun releaseParts(filename: String): ReleaseParts? {
+        val extension = releaseExtension.find(filename)?.groupValues?.get(1)?.lowercase() ?: return null
+        val marker = releaseMarker.find(filename) ?: return null
+        val season = (marker.groupValues[1].ifBlank { marker.groupValues[3] }).toIntOrNull() ?: return null
+        val episode = (marker.groupValues[2].ifBlank { marker.groupValues[4] }).toIntOrNull() ?: return null
+        val prefix = marker.value.let {
+            filename.substring(0, marker.range.first)
+                .lowercase()
+                .replace(Regex("""[^\\p{L}\\p{N}]+"""), " ")
+                .trim()
+        }
+        return ReleaseParts(prefix, season, episode, extension)
+    }
+
     private interface EpisodePattern {
         fun replace(
             filename: String,
