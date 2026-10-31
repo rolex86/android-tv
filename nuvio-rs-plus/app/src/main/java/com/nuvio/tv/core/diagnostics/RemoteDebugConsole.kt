@@ -1,7 +1,6 @@
 package com.nuvio.tv.core.diagnostics
 
 import android.content.Context
-import android.os.Build
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
@@ -18,7 +17,7 @@ object RemoteDebugConsole {
     private val lines = ArrayDeque<String>()
     @Volatile private var listener: ServerSocket? = null
     @Volatile private var enabled = false
-    private val tokenBytes = ByteArray(24)
+    private val tokenBytes = ByteArray(12)
 
     fun isEnabled(context: Context): Boolean =
         context.getSharedPreferences("remote_debug", Context.MODE_PRIVATE).getBoolean("enabled", false)
