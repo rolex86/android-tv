@@ -324,7 +324,7 @@ private fun DebugProgressIndicatorPreview(
 }
 
 @Composable
-private fun DebugToggleCard(
+internal fun DebugToggleCard(
     title: String,
     subtitle: String,
     checked: Boolean,
