@@ -72,7 +72,7 @@ object StreamAutoPlaySelector {
         rankedRegexPatterns: List<String> = emptyList(),
         bingeKeepsFilters: Boolean = false // Nuvio RS: source recovery retries stay inside the user's filters
     ): Stream? {
-        return com.nuvio.tv.core.streams.ranking.RankedRegexWork.run(
+        val selected = com.nuvio.tv.core.streams.ranking.RankedRegexWork.run(
             enabled = mode == StreamAutoPlayMode.REGEX_MATCH && rankedRegexPatterns.isNotEmpty() && !bingeGroupOnly
         ) { checkpoint ->
             selectAutoPlayStream(
@@ -91,6 +91,12 @@ object StreamAutoPlaySelector {
                 bingeKeepsFilters = bingeKeepsFilters
             )
         }
+        com.nuvio.tv.core.diagnostics.RemoteDebugConsole.record(
+            "AUTO_SOURCE",
+            "mode=$mode candidates=${streams.size} selectedIndex=${selected?.let { streams.indexOf(it) } ?: -1} " +
+                "addon=${selected?.addonName?.take(70) ?: "none"} bingePreferred=${preferBingeGroupInSelection}"
+        )
+        return selected
     }
 
     fun selectAutoPlayStream(

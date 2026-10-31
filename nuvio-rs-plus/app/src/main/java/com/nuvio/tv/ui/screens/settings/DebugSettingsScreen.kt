@@ -3,6 +3,8 @@
 package com.nuvio.tv.ui.screens.settings
 
 import com.nuvio.tv.ui.theme.NuvioTheme
+import com.nuvio.tv.core.diagnostics.RemoteDebugConsole
+import androidx.compose.ui.platform.LocalContext
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -52,6 +54,20 @@ fun DebugSettingsContent(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showErrorDialog by remember { mutableStateOf(false) }
+    val debugContext = LocalContext.current
+    var remoteEnabled by remember { mutableStateOf(RemoteDebugConsole.isEnabled(debugContext)) }
+    val accessKey = remember { RemoteDebugConsole.accessKey(debugContext) }
+    val address = remember(remoteEnabled) {
+        runCatching {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
+                .filter { it.isUp && !it.isLoopback }
+                .sortedBy { if (it.name.startsWith("eth")) 0 else if (it.name.startsWith("wlan")) 1 else 2 }
+            interfaces.asSequence().flatMap { it.inetAddresses.toList().asSequence() }
+                .filterIsInstance<java.net.Inet4Address>()
+                .firstOrNull { !it.isLoopbackAddress && !it.isLinkLocalAddress }
+                ?.hostAddress
+        }.getOrNull() ?: "IP_SHIELDU"
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Text(
@@ -78,6 +94,19 @@ fun DebugSettingsContent(
             contentPadding = PaddingValues(top = NuvioTheme.spacing.md, bottom = NuvioTheme.spacing.xxl),
             verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.md)
         ) {
+            item(key = "remote_debug_toggle") {
+                DebugToggleCard(
+                    title = "Vzdálená diagnostika (mobil)",
+                    subtitle = if (remoteEnabled)
+                        "Otevři v mobilu: http://$address:8765/?key=$accessKey"
+                    else "Po zapnutí zobrazí webovou konzoli na portu 8765. Přístupový klíč nesdílej.",
+                    checked = remoteEnabled,
+                    onToggle = {
+                        RemoteDebugConsole.setEnabled(debugContext, it)
+                        remoteEnabled = it
+                    }
+                )
+            }
             // ── Popup / Dialog Testing ──
             item(key = "debug_popup_header") {
                 Text(

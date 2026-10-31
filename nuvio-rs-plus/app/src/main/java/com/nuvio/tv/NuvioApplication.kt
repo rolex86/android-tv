@@ -87,6 +87,7 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        com.nuvio.tv.core.diagnostics.RemoteDebugConsole.start(this)
         SentryInitializer.start(this, sentrySettingsDataStore)
         PluginRuntimeHooks.onApplicationCreate(this)
         com.nuvio.tv.reshaped.subtitlefont.SubtitleFontStore.warmUp(this) // Nuvio RS hook: custom subtitle font, loaded off the main thread

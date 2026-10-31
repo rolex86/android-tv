@@ -162,6 +162,25 @@ class PlayerViewModel @Inject constructor(
 
     init {
         controller.bindParty()
+        viewModelScope.launch {
+            controller.uiState
+                .map { state ->
+                    listOf(
+                        state.currentSeason?.toString() ?: "-",
+                        state.currentEpisode?.toString() ?: "-",
+                        state.error?.toString()?.take(250) ?: "",
+                        state.playbackEnded.toString(),
+                        state.streamAutoPlayMode.toString()
+                    )
+                }
+                .distinctUntilChanged()
+                .collect { fields ->
+                    com.nuvio.tv.core.diagnostics.RemoteDebugConsole.record(
+                        if (fields[2].isNotEmpty()) "PLAYBACK_ERROR" else "PLAYBACK",
+                        "season=${fields[0]} episode=${fields[1]} ended=${fields[3]} autoplay=${fields[4]} error=${fields[2]}"
+                    )
+                }
+        }
     }
 
     val party: com.nuvio.tv.core.party.PartyRepository
