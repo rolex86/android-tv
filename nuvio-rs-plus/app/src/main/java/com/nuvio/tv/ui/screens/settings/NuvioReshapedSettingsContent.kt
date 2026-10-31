@@ -7,6 +7,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import com.nuvio.tv.core.diagnostics.RemoteDebugConsole
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -25,11 +30,40 @@ internal fun NuvioReshapedSettingsContent(
     viewModel: PlaybackSettingsViewModel = hiltViewModel(),
 ) {
     val playerSettings by viewModel.playerSettings.collectAsStateWithLifecycle(initialValue = PlayerSettings())
+    val remoteContext = LocalContext.current
+    var remoteOn by remember { mutableStateOf(RemoteDebugConsole.isEnabled(remoteContext)) }
+    val remoteKey = remember { RemoteDebugConsole.accessKey(remoteContext) }
+    val remoteIp = remember(remoteOn) {
+        runCatching {
+            java.net.NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
+                .filter { it.isUp && !it.isLoopback }
+                .sortedBy { if (it.name.startsWith("eth")) 0 else 1 }
+                .asSequence().flatMap { it.inetAddresses.toList().asSequence() }
+                .filterIsInstance<java.net.Inet4Address>()
+                .firstOrNull { !it.isLoopbackAddress && !it.isLinkLocalAddress }?.hostAddress
+        }.getOrNull() ?: "IP_SHIELDU"
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.md),
     ) {
+        item(key = "remote_console_switch") {
+            DebugToggleCard(
+                title = "Vzdálená diagnostika – živá konzole",
+                subtitle = if (remoteOn) "Zapnuto • http://$remoteIp:8765/?key=$remoteKey" else "Zapnout živé protokoly přehrávání dostupné z telefonu",
+                checked = remoteOn,
+                onToggle = {
+                    RemoteDebugConsole.setEnabled(remoteContext, it)
+                    remoteOn = it
+                }
+            )
+        }
+        if (remoteOn && remoteIp != "IP_SHIELDU") {
+            item(key = "remote_console_qr") {
+                RemoteConsoleQrCode("http://$remoteIp:8765/?key=$remoteKey")
+            }
+        }
         item(key = "nuvio_reshaped_header") {
             SettingsDetailHeader(
                 title = stringResource(R.string.settings_nuvio_reshaped),
