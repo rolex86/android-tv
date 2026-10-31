@@ -107,6 +107,11 @@ fun DebugSettingsContent(
                     }
                 )
             }
+            if (remoteEnabled && address != "IP_SHIELDU") {
+                item(key = "remote_debug_qr") {
+                    RemoteConsoleQrCode("http://$address:8765/?key=$accessKey")
+                }
+            }
             // ── Popup / Dialog Testing ──
             item(key = "debug_popup_header") {
                 Text(
