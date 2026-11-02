@@ -107,6 +107,64 @@ jobs:
             mapfile -t CONFLICTS < <(git -C /tmp/nuvio-upstream diff --name-only --diff-filter=U)
             printf 'Upstream merge conflicts: %s\n' "${CONFLICTS[*]}"
 
+            # Reviewed beta.8.1 -> beta.9.1 subtitles conflict. Exact blob guards.
+            if [[ "$BASELINE" == "1.1.0-beta.8-autosync.1" &&
+                  "$LATEST" == "1.1.0-beta.9-autosync.1" &&
+                  "${CONFLICTS[*]}" == "app/src/main/java/com/nuvio/tv/ui/screens/settings/PlaybackSubtitleSettings.kt" ]]; then
+              python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          root = Path("/tmp/nuvio-upstream")
+          rel = "app/src/main/java/com/nuvio/tv/ui/screens/settings/PlaybackSubtitleSettings.kt"
+          def git(*args):
+              return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()
+          ours_sha = git("rev-parse", f":2:{rel}")
+          theirs_sha = git("rev-parse", f":3:{rel}")
+          if ours_sha != "c10b4c4c99db569ddd48bfeb1e09d5302c9d5ab1" or theirs_sha != "ea3539672fdc3b8db4d1c077dd93eb3aa6d66ec4":
+              raise SystemExit(f"Unreviewed beta.9 conflict blobs: ours={ours_sha} theirs={theirs_sha}")
+          ours = subprocess.check_output(["git", "-C", str(root), "show", f":2:{rel}"], text=True)
+          result = subprocess.check_output(["git", "-C", str(root), "show", f":3:{rel}"], text=True)
+          def region(text, start, end):
+              if text.count(start) != 1 or text.count(end) != 1:
+                  raise SystemExit(f"Unsafe subtitle merge: region anchors not unique: {start}")
+              return text[text.index(start):text.index(end)]
+          def insert_once(anchor, addition):
+              global result
+              if result.count(anchor) != 1:
+                  raise SystemExit(f"Unsafe subtitle merge: expected 1 anchor, got {result.count(anchor)}: {anchor}")
+              result = result.replace(anchor, addition + anchor, 1)
+          insert_once("import com.nuvio.tv.data.local.PlayerPreference\n", "import com.nuvio.tv.data.local.PlusSubtitleSourcePreference\n")
+          insert_once("    SettingsToggleRow(\n        title = stringResource(R.string.sub_use_forced_subtitles)", region(
+              ours,
+              '    SettingsActionRow(\n        title = stringResource(R.string.plus_subtitle_source_title)',
+              '\n\n    SettingsToggleRow(\n        title = stringResource(R.string.sub_use_forced_subtitles)'
+          ) + "\n\n")
+          insert_once("@Composable\ninternal fun subtitleLanguageLabel", region(
+              ours, "@Composable\nprivate fun plusSubtitleSourceLabel", "@Composable\ninternal fun subtitleLanguageLabel"
+          ))
+          insert_once("@Composable\ninternal fun SubtitleSettingsDialogs", region(
+              ours, "@Composable\nprivate fun PlusSubtitleSourceDialog", "@Composable\ninternal fun SubtitleSettingsDialogs"
+          ))
+          insert_once("        PlaybackDialog.SUBTITLE_TEXT_COLOR ->", region(
+              ours, "        PlaybackDialog.PLUS_SUBTITLE_SOURCE ->", "        PlaybackDialog.SUBTITLE_TEXT_COLOR ->"
+          ))
+          for token in (
+              "PlaybackDialog.PLUS_SUBTITLE_SOURCE", "PlusSubtitleSourcePreference.EMBEDDED",
+              "setPlusSubtitleSourcePreference(preference)", "PlaybackDialog.LIBASS_RENDER_MODE",
+              "setLibassRenderMode(mode)", "hdrDimPlayerControls", "setSubtitleHdrDimPlayerControls",
+              "LibassRenderMode.VIDEO_EFFECT", "LIBASS_RENDER_SCALE"
+          ):
+              if token not in result:
+                  raise SystemExit(f"Unsafe subtitle merge: missing {token}")
+          if "<<<<<<<" in result or ">>>>>>>" in result:
+              raise SystemExit("Conflict markers remain")
+          (root / rel).write_text(result)
+          print("Merged exact reviewed subtitle conflict, preserving Plus and beta.9 additions.")
+          PY
+              git -C /tmp/nuvio-upstream add -- "${CONFLICTS[@]}"
+              mapfile -t CONFLICTS < <(git -C /tmp/nuvio-upstream diff --name-only --diff-filter=U)
+            fi
+
             # Reviewed beta.7.3 -> beta.8.1 merge; preserve both Plus and upstream additions.
             if [[ "$BASELINE" == "1.1.0-beta.7-autosync.3" && "$LATEST" == "1.1.0-beta.8-autosync.1" && "${CONFLICTS[*]}" == "app/src/full/AndroidManifest.xml app/src/main/java/com/nuvio/tv/data/local/PlayerSettingsDataStore.kt app/src/main/java/com/nuvio/tv/ui/components/StartupSplashScreen.kt app/src/main/java/com/nuvio/tv/ui/screens/player/PlayerScreen.kt app/src/main/java/com/nuvio/tv/ui/screens/settings/PlaybackSubtitleSettings.kt" ]]; then
               python3 .github/scripts/resolve_nrsp_beta8.py /tmp/nuvio-upstream
