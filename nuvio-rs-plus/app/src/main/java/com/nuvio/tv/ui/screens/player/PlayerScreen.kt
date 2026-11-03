@@ -3041,7 +3041,29 @@ private fun PlayerControlsOverlay(
                     focusedControlTooltip = if (name == null) null else name to description
                 }
             ) {
-            Box(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(34.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    focusedControlTooltip?.second?.takeIf { it.isNotBlank() }?.let { description ->
+                        Text(
+                            text = description,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .background(
+                                    Color.White.copy(alpha = 0.14f),
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .padding(horizontal = 12.dp, vertical = 5.dp)
+                        )
+                    }
+                }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -3063,7 +3085,7 @@ private fun PlayerControlsOverlay(
                         icon = if (uiState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                         iconPainter = if (uiState.isPlaying) customPausePainter else customPlayPainter,
                         contentDescription = if (uiState.isPlaying) stringResource(R.string.cd_pause) else stringResource(R.string.cd_play),
-                        tooltipDescription = stringResource(R.string.player_tooltip_playpause),
+                        tooltipDescription = if (uiState.isPlaying) stringResource(R.string.player_tooltip_pause) else stringResource(R.string.player_tooltip_play),
                         onClick = onPlayPause,
                         focusRequester = playPauseFocusRequester,
                         upFocusRequester = progressUpTarget,
@@ -3283,21 +3305,6 @@ private fun PlayerControlsOverlay(
                 // Right side - Time display only
                 PlayerControlsTimeTextHost(viewModel = viewModel)
             }
-            focusedControlTooltip?.let { (title, description) ->
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .offset(y = (-68).dp)
-                        .background(Color.Black.copy(alpha = 0.9f), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 14.dp, vertical = 7.dp)
-                ) {
-                    Text(text = title, style = MaterialTheme.typography.titleSmall, color = Color.White)
-                    if (!description.isNullOrBlank()) {
-                        Text(text = description, style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.82f), maxLines = 2)
-                    }
-                }
-            }
             }
             }
         }
@@ -3433,6 +3440,10 @@ private fun ControlButton(
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val updateTooltip = LocalPlayerControlTooltip.current
+
+    LaunchedEffect(isFocused, contentDescription, tooltipDescription) {
+        if (isFocused) updateTooltip?.invoke(contentDescription, tooltipDescription)
+    }
 
     IconButton(
         onClick = onClick,
