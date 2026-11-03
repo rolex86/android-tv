@@ -177,6 +177,7 @@ import com.nuvio.tv.ui.util.rememberRawSvgPainter
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.lazy.rememberLazyListState
 import kotlinx.coroutines.Dispatchers
@@ -2862,6 +2863,7 @@ private fun PlayerControlsOverlay(
     LaunchedEffect(subtitleReportingActive, progressBarClearancePx, titleRightPx) {
         if (subtitleReportingActive) latestTitleBoundsCallback(progressBarClearancePx, titleRightPx)
     }
+    var focusedControlTooltip by remember { mutableStateOf<Pair<String, String?>?>(null) }
     val customPlayPainter = rememberRawSvgPainter(R.raw.ic_player_play)
     val customPausePainter = rememberRawSvgPainter(R.raw.ic_player_pause)
     val customSubtitlePainter = rememberRawSvgPainter(R.raw.ic_player_subtitles)
@@ -3033,7 +3035,13 @@ private fun PlayerControlsOverlay(
             }
 
             // Control buttons row — always LTR regardless of locale
-            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+            CompositionLocalProvider(
+                LocalLayoutDirection provides LayoutDirection.Ltr,
+                LocalPlayerControlTooltip provides { name, description ->
+                    focusedControlTooltip = if (name == null) null else name to description
+                }
+            ) {
+            Box(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -3055,6 +3063,7 @@ private fun PlayerControlsOverlay(
                         icon = if (uiState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                         iconPainter = if (uiState.isPlaying) customPausePainter else customPlayPainter,
                         contentDescription = if (uiState.isPlaying) stringResource(R.string.cd_pause) else stringResource(R.string.cd_play),
+                        tooltipDescription = stringResource(R.string.player_tooltip_playpause),
                         onClick = onPlayPause,
                         focusRequester = playPauseFocusRequester,
                         upFocusRequester = progressUpTarget,
@@ -3066,6 +3075,7 @@ private fun PlayerControlsOverlay(
                         ControlButton(
                             icon = Icons.Default.SkipNext,
                             contentDescription = stringResource(R.string.next_episode_label),
+                        tooltipDescription = stringResource(R.string.player_tooltip_next),
                             onClick = onPlayNextEpisode,
                             upFocusRequester = progressUpTarget,
                             onDownKey = onHideControls,
@@ -3077,6 +3087,7 @@ private fun PlayerControlsOverlay(
                         icon = Icons.Default.ClosedCaption,
                         iconPainter = customWhatDidTheySayPainter,
                         contentDescription = stringResource(R.string.cd_plus_what_did_they_say),
+                        tooltipDescription = stringResource(R.string.player_tooltip_repeat),
                         onClick = onWhatDidTheySay,
                         upFocusRequester = progressUpTarget,
                         onDownKey = onHideControls,
@@ -3088,6 +3099,7 @@ private fun PlayerControlsOverlay(
                             icon = Icons.Default.ClosedCaption,
                             iconPainter = customSubtitlePainter,
                             contentDescription = stringResource(R.string.cd_subtitles),
+                        tooltipDescription = stringResource(R.string.player_tooltip_subtitle),
                             onClick = onShowSubtitleDialog,
                             upFocusRequester = progressUpTarget,
                             onDownKey = onHideControls,
@@ -3100,6 +3112,7 @@ private fun PlayerControlsOverlay(
                             icon = Icons.AutoMirrored.Filled.VolumeUp,
                             iconPainter = customAudioPainter,
                             contentDescription = stringResource(R.string.cd_audio_tracks),
+                        tooltipDescription = stringResource(R.string.player_tooltip_audio),
                             onClick = onShowAudioDialog,
                             upFocusRequester = progressUpTarget,
                             onDownKey = onHideControls,
@@ -3111,6 +3124,7 @@ private fun PlayerControlsOverlay(
                         ControlButton(
                             icon = Icons.AutoMirrored.Filled.Toc,
                             contentDescription = stringResource(R.string.player_chapters),
+                        tooltipDescription = stringResource(R.string.player_tooltip_chapters),
                             onClick = onShowChaptersPanel,
                             upFocusRequester = progressUpTarget,
                             onDownKey = onHideControls,
@@ -3122,6 +3136,7 @@ private fun PlayerControlsOverlay(
                         icon = Icons.Default.SwapHoriz,
                         iconPainter = customSourcePainter,
                         contentDescription = stringResource(R.string.cd_sources),
+                        tooltipDescription = stringResource(R.string.player_tooltip_sources),
                         onClick = onShowSourcesPanel,
                         upFocusRequester = progressUpTarget,
                         onDownKey = onHideControls,
@@ -3133,6 +3148,7 @@ private fun PlayerControlsOverlay(
                             icon = Icons.AutoMirrored.Filled.List,
                             iconPainter = customEpisodesPainter,
                             contentDescription = stringResource(R.string.cd_episodes),
+                        tooltipDescription = stringResource(R.string.player_tooltip_episodes),
                             onClick = onShowEpisodesPanel,
                             upFocusRequester = progressUpTarget,
                             onDownKey = onHideControls,
@@ -3144,6 +3160,7 @@ private fun PlayerControlsOverlay(
                         ControlButton(
                             icon = Icons.Rounded.Groups,
                             contentDescription = stringResource(R.string.party_title),
+                        tooltipDescription = stringResource(R.string.player_tooltip_party),
                             onClick = onShowPartyPanel,
                             upFocusRequester = progressUpTarget,
                             onDownKey = onHideControls,
@@ -3170,6 +3187,7 @@ private fun PlayerControlsOverlay(
                             ControlButton(
                                 icon = Icons.Default.Speed,
                                 contentDescription = stringResource(R.string.cd_playback_speed),
+                        tooltipDescription = stringResource(R.string.player_tooltip_playpause),
                                 onClick = {
                                     onShowSpeedDialog()
                                 },
@@ -3181,6 +3199,7 @@ private fun PlayerControlsOverlay(
                                 icon = Icons.Default.AspectRatio,
                                 iconPainter = customAspectPainter,
                                 contentDescription = stringResource(R.string.cd_aspect_ratio),
+                        tooltipDescription = stringResource(R.string.player_tooltip_aspect),
                                 onClick = {
                                     onToggleAspectRatio()
                                 },
@@ -3191,6 +3210,7 @@ private fun PlayerControlsOverlay(
                             ControlButton(
                                 icon = Icons.Default.SwapHoriz,
                                 contentDescription = stringResource(R.string.cd_switch_player_engine),
+                        tooltipDescription = stringResource(R.string.player_tooltip_engine),
                                 onClick = { showEngineSwitchConfirm = true },
                                 upFocusRequester = progressUpTarget,
                                 onDownKey = onHideControls,
@@ -3200,6 +3220,7 @@ private fun PlayerControlsOverlay(
                                 ControlButton(
                                     icon = Icons.AutoMirrored.Filled.OpenInNew,
                                     contentDescription = stringResource(R.string.cd_open_external_player),
+                        tooltipDescription = stringResource(R.string.player_tooltip_external),
                                     onClick = openInExternalPlayer,
                                     upFocusRequester = progressUpTarget,
                                     onDownKey = onHideControls,
@@ -3209,6 +3230,7 @@ private fun PlayerControlsOverlay(
                             ControlButton(
                                 icon = Icons.Default.Info,
                                 contentDescription = stringResource(R.string.cd_stream_info),
+                        tooltipDescription = stringResource(R.string.player_tooltip_info),
                                 onClick = {
                                     onShowStreamInfo()
                                 },
@@ -3221,6 +3243,7 @@ private fun PlayerControlsOverlay(
                                 ControlButton(
                                     icon = Icons.Default.Tune,
                                     contentDescription = stringResource(R.string.cd_seek_preview_sync),
+                        tooltipDescription = stringResource(R.string.player_tooltip_sync),
                                     onClick = openSync,
                                     upFocusRequester = progressUpTarget,
                                     onDownKey = onHideControls,
@@ -3249,6 +3272,7 @@ private fun PlayerControlsOverlay(
                             Icons.AutoMirrored.Filled.KeyboardArrowRight
                         },
                         contentDescription = if (uiState.showMoreDialog) stringResource(R.string.cd_close_more_actions) else stringResource(R.string.cd_more_actions),
+                        tooltipDescription = stringResource(R.string.player_tooltip_more),
                         onClick = onToggleMoreActions,
                         upFocusRequester = progressUpTarget,
                         onDownKey = onHideControls,
@@ -3258,6 +3282,22 @@ private fun PlayerControlsOverlay(
 
                 // Right side - Time display only
                 PlayerControlsTimeTextHost(viewModel = viewModel)
+            }
+            focusedControlTooltip?.let { (title, description) ->
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .offset(y = (-68).dp)
+                        .background(Color.Black.copy(alpha = 0.9f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 14.dp, vertical = 7.dp)
+                ) {
+                    Text(text = title, style = MaterialTheme.typography.titleSmall, color = Color.White)
+                    if (!description.isNullOrBlank()) {
+                        Text(text = description, style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.82f), maxLines = 2)
+                    }
+                }
+            }
             }
             }
         }
@@ -3347,6 +3387,7 @@ private fun ReportControlButton(
         ControlButton(
             icon = Icons.Default.BugReport,
             contentDescription = stringResource(R.string.player_report_issue),
+            tooltipDescription = stringResource(R.string.player_tooltip_report),
             onClick = onClick,
             enabled = enabled,
             upFocusRequester = upFocusRequester,
@@ -3374,12 +3415,15 @@ private fun ReportControlButton(
     }
 }
 
+private val LocalPlayerControlTooltip = compositionLocalOf<((String?, String?) -> Unit)?> { null }
+
 @Composable
 private fun ControlButton(
     icon: ImageVector,
     iconPainter: Painter? = null,
     contentDescription: String,
     onClick: () -> Unit,
+    tooltipDescription: String? = null,
     focusRequester: FocusRequester? = null,
     upFocusRequester: FocusRequester? = null,
     enabled: Boolean = true,
@@ -3388,6 +3432,7 @@ private fun ControlButton(
     contentColor: Color = Color.White
 ) {
     var isFocused by remember { mutableStateOf(false) }
+    val updateTooltip = LocalPlayerControlTooltip.current
 
     IconButton(
         onClick = onClick,
@@ -3428,7 +3473,12 @@ private fun ControlButton(
             }
             .onFocusChanged {
                 isFocused = it.isFocused
-                if (it.isFocused) onFocused?.invoke()
+                if (it.isFocused) {
+                    updateTooltip?.invoke(contentDescription, tooltipDescription)
+                    onFocused?.invoke()
+                } else {
+                    updateTooltip?.invoke(null, null)
+                }
             },
         colors = IconButtonDefaults.colors(
             containerColor = Color.Transparent,
