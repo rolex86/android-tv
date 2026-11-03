@@ -3187,7 +3187,7 @@ private fun PlayerControlsOverlay(
                             ControlButton(
                                 icon = Icons.Default.Speed,
                                 contentDescription = stringResource(R.string.cd_playback_speed),
-                        tooltipDescription = stringResource(R.string.player_tooltip_playpause),
+                                tooltipDescription = stringResource(R.string.player_tooltip_speed),
                                 onClick = {
                                     onShowSpeedDialog()
                                 },
