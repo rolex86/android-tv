@@ -3435,4 +3435,21 @@
     <string name="stream_resume_from_percent">Resume from %1$d%%</string>
     <string name="playback_net_http2">Enable HTTP/2</string>
     <string name="playback_net_http2_sub">Enable HTTP/2 protocol for network connections, allowing request multiplexing and faster handshake times.</string>
+    <string name="player_tooltip_playpause">Play or pause the video.</string>
+    <string name="player_tooltip_next">Play the next episode.</string>
+    <string name="player_tooltip_repeat">Rewind 10 seconds and show subtitles for missed dialogue.</string>
+    <string name="player_tooltip_subtitle">Choose or adjust subtitles.</string>
+    <string name="player_tooltip_audio">Choose audio track and language.</string>
+    <string name="player_tooltip_chapters">Jump to a video chapter.</string>
+    <string name="player_tooltip_sources">Select another playback source.</string>
+    <string name="player_tooltip_episodes">Show the episode list.</string>
+    <string name="player_tooltip_party">Open watch party.</string>
+    <string name="player_tooltip_speed">Adjust playback speed.</string>
+    <string name="player_tooltip_aspect">Change the video aspect ratio.</string>
+    <string name="player_tooltip_engine">Switch the internal playback engine.</string>
+    <string name="player_tooltip_external">Open video in an external player.</string>
+    <string name="player_tooltip_info">Show information about the current stream.</string>
+    <string name="player_tooltip_sync">Adjust seek preview synchronization.</string>
+    <string name="player_tooltip_more">Show or hide additional controls.</string>
+    <string name="player_tooltip_report">Report a playback issue.</string>
 </resources>
