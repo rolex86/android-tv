@@ -3452,4 +3452,6 @@
     <string name="player_tooltip_sync">Adjust seek preview synchronization.</string>
     <string name="player_tooltip_more">Show or hide additional controls.</string>
     <string name="player_tooltip_report">Report a playback issue.</string>
+    <string name="player_tooltip_play">Resume playback</string>
+    <string name="player_tooltip_pause">Pause playback</string>
 </resources>
