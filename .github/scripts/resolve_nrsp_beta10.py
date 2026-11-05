@@ -68,8 +68,15 @@ def resolve_selector(ours: str, theirs: str) -> str:
         "        }\n" + addition + "    }\n\n    fun selectAutoPlayStream(",
         "selector diagnostics insertion",
     )
-    if 'if (mode == StreamAutoPlayMode.MANUAL || streams.isEmpty()) return null' in theirs:
-        raise SystemExit("Unsafe beta.10 merge: obsolete manual-mode short-circuit still present")
+    # The current NRSP manual-mode selector guard is a deliberate policy.
+    # Auto-next runs with effectiveMode FIRST_STREAM when configured, so this
+    # guard does not disable the existing auto-next settings or their fallback.
+    theirs = replace_exact(
+        theirs,
+        "        if (streams.isEmpty()) return null\\n",
+        "        if (mode == StreamAutoPlayMode.MANUAL || streams.isEmpty()) return null\\n",
+        "preserve NRSP manual-mode selector behavior",
+    )
     if "fun selectEarlyBingeGroupMatch(" not in theirs:
         raise SystemExit("Unsafe beta.10 merge: missing upstream early plugin matching")
     return theirs
