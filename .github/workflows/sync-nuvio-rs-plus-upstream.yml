@@ -107,6 +107,16 @@ jobs:
             mapfile -t CONFLICTS < <(git -C /tmp/nuvio-upstream diff --name-only --diff-filter=U)
             printf 'Upstream merge conflicts: %s\n' "${CONFLICTS[*]}"
 
+            # Reviewed beta.9.1 -> beta.10.1: retain NRSP's own
+            # auto-next options and diagnostics, while retaining beta.10 plugin
+            # matching with original plugin priority and all-source fallback.
+            if [[ "$BASELINE" == "1.1.0-beta.9-autosync.1" &&
+                  "$LATEST" == "1.1.0-beta.10-autosync.1" &&
+                  "${CONFLICTS[*]}" == "app/src/main/java/com/nuvio/tv/core/player/StreamAutoPlaySelector.kt app/src/main/java/com/nuvio/tv/ui/screens/player/PlayerRuntimeControllerStreams.kt scripts/perf_baseline.sh" ]]; then
+              python3 .github/scripts/resolve_nrsp_beta10.py /tmp/nuvio-upstream
+              mapfile -t CONFLICTS < <(git -C /tmp/nuvio-upstream diff --name-only --diff-filter=U)
+            fi
+
             # Reviewed beta.8.1 -> beta.9.1 subtitles conflict. Exact blob guards.
             if [[ "$BASELINE" == "1.1.0-beta.8-autosync.1" &&
                   "$LATEST" == "1.1.0-beta.9-autosync.1" &&
