@@ -1,14 +1,9 @@
 name: Sync Nuvio RS Plus upstream
 
+# Upstream synchronization is manual-only. Never publish an upstream
+# update without an explicit workflow dispatch.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '7,22,37,52 * * * *'
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/sync-nuvio-rs-plus-upstream.yml'
 
 permissions:
   contents: write
