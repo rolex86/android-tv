@@ -2136,25 +2136,27 @@ fun PlayerScreen(
             onCancel = { viewModel.cancelAiSubtitleTranslation() },
         )
 
-        androidx.compose.runtime.LaunchedEffect(
-            aiSubtitleTranslationState.phase,
-            aiSubtitleTranslationState.readySubtitle?.id,
-        ) {
-            when (aiSubtitleTranslationState.phase) {
-                com.nuvio.tv.ui.screens.player.aisubtitles.AiSubtitleTranslationPhase.READY -> {
-                    val message = if (aiSubtitleTranslationState.selectedAutomatically) {
-                        context.getString(R.string.ai_subtitle_ready_selected)
-                    } else {
-                        context.getString(R.string.ai_subtitle_ready_preserved)
-                    }
-                    android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
-                }
-                com.nuvio.tv.ui.screens.player.aisubtitles.AiSubtitleTranslationPhase.FAILED -> {
-                    aiSubtitleTranslationState.message?.let { message ->
+        // A completed translation is a one-shot event. The global state can
+        // remain READY across episodes, but reopening the player must not
+        // replay its notification.
+        LaunchedEffect(viewModel) {
+            com.nuvio.tv.ui.screens.player.aisubtitles.AiSubtitleTranslationStatus.notifications.collect { notification ->
+                when (notification.phase) {
+                    com.nuvio.tv.ui.screens.player.aisubtitles.AiSubtitleTranslationPhase.READY -> {
+                        val message = if (notification.selectedAutomatically) {
+                            context.getString(R.string.ai_subtitle_ready_selected)
+                        } else {
+                            context.getString(R.string.ai_subtitle_ready_preserved)
+                        }
                         android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
                     }
+                    com.nuvio.tv.ui.screens.player.aisubtitles.AiSubtitleTranslationPhase.FAILED -> {
+                        notification.message?.let { message ->
+                            android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+                        }
+                    }
+                    else -> Unit
                 }
-                else -> Unit
             }
         }
 
