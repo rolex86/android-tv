@@ -14,6 +14,8 @@ import com.nuvio.tv.ui.screens.player.currentSidecarGenerationFor
 import com.nuvio.tv.ui.screens.player.parseSidecarTimedCuesRobust
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -43,8 +45,16 @@ internal object AiSubtitleTranslationStatus {
     private val mutableState = MutableStateFlow(AiSubtitleTranslationState())
     val state: StateFlow<AiSubtitleTranslationState> = mutableState.asStateFlow()
 
+    // One-shot notifications: replay=0 prevents the previous episode's READY
+    // or FAILED result from showing another toast when PlayerScreen opens.
+    private val mutableNotifications = MutableSharedFlow<AiSubtitleTranslationState>(extraBufferCapacity = 8)
+    val notifications = mutableNotifications.asSharedFlow()
+
     internal fun set(value: AiSubtitleTranslationState) {
         mutableState.value = value
+        if (value.phase == AiSubtitleTranslationPhase.READY || value.phase == AiSubtitleTranslationPhase.FAILED) {
+            mutableNotifications.tryEmit(value)
+        }
     }
 
     internal fun update(block: (AiSubtitleTranslationState) -> AiSubtitleTranslationState) {
