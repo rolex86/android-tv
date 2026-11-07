@@ -42,8 +42,14 @@ jobs:
           cd /tmp/media3-dav1d
           chmod +x gradlew
           ./gradlew :lib-decoder-av1:assembleRelease --stacktrace --no-daemon
-          AAR="$(find libraries/decoder_av1/build/outputs/aar -name '*.aar' -type f | head -n1)"
-          test -n "$AAR"
+          # Media3 redirects module outputs to buildout/, rather than the module's build/ folder.
+          AAR="$(find buildout libraries/decoder_av1 -type f -name '*decoder*av1*release*.aar' -print -quit)"
+          if [[ -z "$AAR" ]]; then
+            echo "Built AV1 AAR not found; available AAR files:" >&2
+            find buildout libraries/decoder_av1 -type f -name '*.aar' -print >&2
+            exit 1
+          fi
+          echo "Using decoder AAR: $AAR"
           cp "$AAR" "$GITHUB_WORKSPACE/nuvio-rs-plus/app/libs/lib-decoder-dav1d-experimental.aar"
           unzip -l "$GITHUB_WORKSPACE/nuvio-rs-plus/app/libs/lib-decoder-dav1d-experimental.aar" | grep -q 'libdav1dJNI.so'
       - name: Configure temporary signing and minimum local properties
