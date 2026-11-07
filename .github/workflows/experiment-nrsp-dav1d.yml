@@ -1,4 +1,4 @@
-name: Experimental dav1d AV1 build (no release)
+name: Experimental signed NRSP dav1d update (no publication)
 on:
   workflow_dispatch:
   push:
@@ -52,22 +52,179 @@ jobs:
           echo "Using decoder AAR: $AAR"
           cp "$AAR" "$GITHUB_WORKSPACE/nuvio-rs-plus/app/libs/lib-decoder-dav1d-experimental.aar"
           unzip -l "$GITHUB_WORKSPACE/nuvio-rs-plus/app/libs/lib-decoder-dav1d-experimental.aar" | grep -q 'libdav1dJNI.so'
-      - name: Configure temporary signing and minimum local properties
+      - name: Configure public Nuvio services
         shell: bash
         run: |
           set -euo pipefail
-          keytool -genkeypair -keystore "$RUNNER_TEMP/nrsp-test.p12" -storetype PKCS12 -storepass testpass123 -keypass testpass123 -alias nrsp-test -keyalg RSA -keysize 2048 -validity 3 -dname "CN=NRSP Test" -noprompt
-          cat > nuvio-rs-plus/local.properties <<EOF
-          NUVIO_RELEASE_STORE_FILE=$RUNNER_TEMP/nrsp-test.p12
-          NUVIO_RELEASE_STORE_PASSWORD=testpass123
-          NUVIO_RELEASE_KEY_ALIAS=nrsp-test
-          NUVIO_RELEASE_KEY_PASSWORD=testpass123
-          EOF
-      - name: Compile experimental APK without publication
+
+          CONFIG="$(curl --fail --silent --show-error --retry 3 https://nuvio.tv/config.js)"
+          printf '%s' "$CONFIG" > /tmp/nuvio-config.js
+
+          python3 - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          raw = Path("/tmp/nuvio-config.js").read_text(encoding="utf-8")
+
+          match = re.search(r'window\.__NUVIO_CONFIG__\s*=\s*(\{.*?\})\s*;?\s*      - name: Select a single Shield APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p shield-apk
+          find nuvio-rs-plus/app/build/outputs/apk/full/release -type f -name '*.apk' -printf '%f %s bytes\\n'
+          APK="$(find nuvio-rs-plus/app/build/outputs/apk/full/release -type f -name '*arm64-v8a*.apk' -print -quit)"
+          if [[ -z "$APK" ]]; then
+            echo "arm64-v8a APK not found" >&2
+            exit 1
+          fi
+          cp "$APK" shield-apk/NRSP-dav1d-Shield-update-arm64.apk
+          # Validate that this is an upgrade of the installed NRSP package.
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          BADGING="$("$AAPT" dump badging "$APK" | head -n1)"
+          echo "$BADGING"
+          [[ "$BADGING" == *"name='com.rolex86.nuviorsplus'"* ]] || { echo "Unexpected package ID" >&2; exit 1; }
+          [[ "$BADGING" == *"versionName='1.1.0-beta.9-dav1d-test'"* ]] || { echo "Unexpected version name" >&2; exit 1; }
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
+          ls -lh shield-apk/NRSP-dav1d-Shield-update-arm64.apk
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: NRSP-dav1d-SIGNED-UPDATE-arm64-APK
+          path: shield-apk/NRSP-dav1d-Shield-update-arm64.apk
+          retention-days: 7
+, raw, re.S)
+          if not match:
+              raise SystemExit("Could not parse https://nuvio.tv/config.js")
+
+          cfg = json.loads(match.group(1))
+          url = (cfg.get("supabaseUrl") or "").strip()
+          anon = (cfg.get("supabaseAnonKey") or cfg.get("supabaseKey") or "").strip()
+          fallback = (cfg.get("supabaseFallbackUrl") or "").strip()
+
+          if not url or not anon:
+              raise SystemExit("Nuvio public config is missing Supabase URL/key")
+
+          lines = [
+              f"NUVIO_SUPABASE_URL={url}",
+              f"NUVIO_SUPABASE_ANON_KEY={anon}",
+              f"NUVIO_SUPABASE_FALLBACK_URL={fallback}",
+              "TV_LOGIN_WEB_BASE_URL=https://nuvio.tv/tv-login",
+              "DEVICE_LOGIN_WEB_BASE_URL=https://nuvio.tv/link",
+              f"AVATAR_PUBLIC_BASE_URL={url.rstrip('/')}/storage/v1/object/public/avatars",
+              "NUVIO_UPDATE_GITHUB_OWNER=rolex86",
+              "NUVIO_UPDATE_GITHUB_REPO=android-tv",
+              "AUTOSYNC_FORK=true",
+              "SIMKL_CLIENT_ID=dc20e0db975583b15096267cee79cd23b1f56d4bd301ce3c51e4a96a49c834a6",
+              "SIMKL_APP_NAME=nuvio",
+              "INTRODB_API_URL=https://api.introdb.app/",
+              "IMDB_RATINGS_API_BASE_URL=https://seriesgraph.com/",
+              "IMDB_TAPFRAME_API_BASE_URL=https://imdb.tapframe.space/",
+          ]
+          Path("local.properties").write_text("\n".join(lines) + "\n", encoding="utf-8")
+          Path("local.dev.properties").write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
+      - name: Configure Nuvio RS parity credentials
+        shell: bash
+        env:
+          TRAKT_CLIENT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
+          TRAKT_CLIENT_SECRET: ${{ secrets.TRAKT_CLIENT_SECRET }}
+          MDBLIST_CLIENT_ID: ${{ secrets.MDBLIST_CLIENT_ID }}
+          SEEKR_API_KEY: ${{ secrets.SEEKR_API_KEY }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          RESHAPED_GOOGLE_TV_CLIENT_ID: ${{ secrets.RESHAPED_GOOGLE_TV_CLIENT_ID }}
+          RESHAPED_GOOGLE_TV_CLIENT_SECRET: ${{ secrets.RESHAPED_GOOGLE_TV_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+          for key in \
+            TRAKT_CLIENT_ID \
+            MDBLIST_CLIENT_ID \
+            TMDB_API_KEY \
+            RESHAPED_GOOGLE_TV_CLIENT_ID \
+            RESHAPED_GOOGLE_TV_CLIENT_SECRET
+          do
+            if [[ -z "${!key:-}" ]]; then
+              missing+=("$key")
+            fi
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Parity credentials missing; build/tests will run, but release publication will be blocked:\n' >&2
+            printf ' - %s\n' "${missing[@]}" >&2
+            printf 'MISSING_PARITY_CREDENTIALS=%s\n' "$(IFS=,; echo "${missing[*]}")" >> "$GITHUB_ENV"
+          else
+            echo 'MISSING_PARITY_CREDENTIALS=' >> "$GITHUB_ENV"
+          fi
+
+          add_prop() {
+            local key="$1"
+            local value="$2"
+            if [[ -n "$value" ]]; then
+              printf '%s=%s\n' "$key" "$value" >> local.properties
+              printf '%s=%s\n' "$key" "$value" >> local.dev.properties
+            fi
+          }
+
+          add_prop TRAKT_CLIENT_ID "$TRAKT_CLIENT_ID"
+          add_prop TRAKT_CLIENT_SECRET "$TRAKT_CLIENT_SECRET"
+          add_prop MDBLIST_CLIENT_ID "$MDBLIST_CLIENT_ID"
+          add_prop SEEKR_API_KEY "$SEEKR_API_KEY"
+          add_prop TMDB_API_KEY "$TMDB_API_KEY"
+          add_prop RESHAPED_GOOGLE_TV_CLIENT_ID "$RESHAPED_GOOGLE_TV_CLIENT_ID"
+          add_prop RESHAPED_GOOGLE_TV_CLIENT_SECRET "$RESHAPED_GOOGLE_TV_CLIENT_SECRET"
+
+      - name: Restore persistent signing key
+        shell: bash
+        env:
+          STORE_BASE64: ${{ secrets.JPP_SIGNING_STORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.JPP_SIGNING_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.JPP_SIGNING_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.JPP_SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${STORE_BASE64:?Missing JPP_SIGNING_STORE_BASE64}"
+          : "${STORE_PASSWORD:?Missing JPP_SIGNING_STORE_PASSWORD}"
+          : "${KEY_ALIAS:?Missing JPP_SIGNING_KEY_ALIAS}"
+          : "${KEY_PASSWORD:?Missing JPP_SIGNING_KEY_PASSWORD}"
+
+          KEYSTORE="$RUNNER_TEMP/nuvio-rs-plus-release.p12"
+          printf '%s' "$STORE_BASE64" | base64 --decode > "$KEYSTORE"
+          keytool -list -keystore "$KEYSTORE" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
+
+          {
+            echo "NUVIO_RELEASE_STORE_FILE=$KEYSTORE"
+            echo "NUVIO_RELEASE_STORE_PASSWORD=$STORE_PASSWORD"
+            echo "NUVIO_RELEASE_KEY_ALIAS=$KEY_ALIAS"
+            echo "NUVIO_RELEASE_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
+      - name: Stamp isolated signed test version
+        shell: bash
+        working-directory: nuvio-rs-plus
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re
+          import time
+          from pathlib import Path
+          p = Path("app/build.gradle.kts")
+          code = 120000000 + int(time.time())
+          data = p.read_text(encoding="utf-8")
+          data, n1 = re.subn(r'versionCode\\s*=\\s*\\d+', f'versionCode = {code}', data, count=1)
+          data, n2 = re.subn(r'versionName\\s*=\\s*"[^"]+"', 'versionName = "1.1.0-beta.9-dav1d-test"', data, count=1)
+          if n1 != 1 or n2 != 1:
+              raise SystemExit("Failed to stamp dav1d test version")
+          p.write_text(data, encoding="utf-8")
+          print(f"Temporary dav1d test versionCode: {code}")
+          PY
+      - name: Build signed production-package APK (test only, no release)
         working-directory: nuvio-rs-plus
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleFullDebug --stacktrace --no-daemon --console=plain
+          ./gradlew :app:assembleFullRelease --stacktrace --no-daemon --console=plain
       - name: Select a single Shield APK
         shell: bash
         run: |
