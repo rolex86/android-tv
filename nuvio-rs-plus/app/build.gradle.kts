@@ -224,6 +224,11 @@ android {
 
     buildTypes {
         debug {
+            // Side-by-side install on Shield: never replace the production NRSP app.
+            if (providers.environmentVariable("NRSP_DAV1D_EXPERIMENT").orNull == "true") {
+                applicationIdSuffix = ".dav1dtest"
+                versionNameSuffix = "-dav1d-test"
+            }
             signingConfig = signingConfigs.getByName("release")
             isDebuggable = parseBooleanProperty(providers.gradleProperty("debuggable").orNull)
             isMinifyEnabled = false
