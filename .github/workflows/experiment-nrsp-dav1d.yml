@@ -1,0 +1,67 @@
+name: Experimental dav1d AV1 build (no release)
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - experiment/dav1d-av1
+    paths:
+      - 'nuvio-rs-plus/**'
+      - '.github/workflows/experiment-nrsp-dav1d.yml'
+permissions:
+  contents: read
+jobs:
+  dav1d:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      NRSP_DAV1D_EXPERIMENT: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm cmake
+          sdkmanager --install "ndk;27.2.12479018" "platforms;android-36" "build-tools;36.0.0" "cmake;3.22.1"
+      - name: Build official Media3 1.9 dav1d decoder AAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch 1.9.0 https://github.com/androidx/media.git /tmp/media3-dav1d
+          AV1="/tmp/media3-dav1d/libraries/decoder_av1/src/main"
+          git clone --depth 1 https://github.com/google/cpu_features.git "$AV1/jni/cpu_features"
+          git clone --depth 1 https://code.videolan.org/videolan/dav1d.git "$AV1/jni/dav1d"
+          bash "$AV1/jni/build_dav1d.sh" "$AV1" "$ANDROID_HOME/ndk/27.2.12479018" linux-x86_64
+          cd /tmp/media3-dav1d
+          chmod +x gradlew
+          ./gradlew :lib-decoder-av1:assembleRelease --stacktrace --no-daemon
+          AAR="$(find libraries/decoder_av1/build/outputs/aar -name '*.aar' -type f | head -n1)"
+          test -n "$AAR"
+          cp "$AAR" "$GITHUB_WORKSPACE/nuvio-rs-plus/app/libs/lib-decoder-dav1d-experimental.aar"
+          unzip -l "$GITHUB_WORKSPACE/nuvio-rs-plus/app/libs/lib-decoder-dav1d-experimental.aar" | grep -q 'libdav1dJNI.so'
+      - name: Configure temporary signing and minimum local properties
+        shell: bash
+        run: |
+          set -euo pipefail
+          keytool -genkeypair -keystore "$RUNNER_TEMP/nrsp-test.p12" -storetype PKCS12 -storepass testpass123 -keypass testpass123 -alias nrsp-test -keyalg RSA -keysize 2048 -validity 3 -dname "CN=NRSP Test" -noprompt
+          cat > nuvio-rs-plus/local.properties <<EOF
+          NUVIO_RELEASE_STORE_FILE=$RUNNER_TEMP/nrsp-test.p12
+          NUVIO_RELEASE_STORE_PASSWORD=testpass123
+          NUVIO_RELEASE_KEY_ALIAS=nrsp-test
+          NUVIO_RELEASE_KEY_PASSWORD=testpass123
+          EOF
+      - name: Compile experimental APK without publication
+        working-directory: nuvio-rs-plus
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleFullDebug --stacktrace --no-daemon --console=plain
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: NRSP-dav1d-experimental-unsigned-for-production
+          path: nuvio-rs-plus/app/build/outputs/apk/full/debug/*.apk
+          retention-days: 7
