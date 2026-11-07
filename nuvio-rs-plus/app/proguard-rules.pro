@@ -151,3 +151,6 @@
 -dontwarn java.beans.Transient
 # JNI entry points belong to the detached seek-preview decoder.
 -keep class com.nuvio.tv.ui.screens.player.seekpreview.engine.ThumbNative { *; }
+
+# dav1d experiment: renderer is loaded reflectively, retain its native bridge and constructors.
+-keep class androidx.media3.decoder.av1.** { *; }
