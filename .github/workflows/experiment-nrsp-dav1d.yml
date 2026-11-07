@@ -68,9 +68,22 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew :app:assembleFullDebug --stacktrace --no-daemon --console=plain
+      - name: Select a single Shield APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p shield-apk
+          find nuvio-rs-plus/app/build/outputs/apk/full/debug -type f -name '*.apk' -printf '%f %s bytes\\n'
+          APK="$(find nuvio-rs-plus/app/build/outputs/apk/full/debug -type f -name '*arm64-v8a*.apk' -print -quit)"
+          if [[ -z "$APK" ]]; then
+            echo "arm64-v8a APK not found" >&2
+            exit 1
+          fi
+          cp "$APK" shield-apk/NRSP-dav1d-Shield-arm64.apk
+          ls -lh shield-apk/NRSP-dav1d-Shield-arm64.apk
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: NRSP-dav1d-experimental-unsigned-for-production
-          path: nuvio-rs-plus/app/build/outputs/apk/full/debug/*.apk
+          name: NRSP-dav1d-Shield-arm64-APK
+          path: shield-apk/NRSP-dav1d-Shield-arm64.apk
           retention-days: 7
