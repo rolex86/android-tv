@@ -53,6 +53,7 @@ jobs:
           cp "$AAR" "$GITHUB_WORKSPACE/nuvio-rs-plus/app/libs/lib-decoder-dav1d-experimental.aar"
           unzip -l "$GITHUB_WORKSPACE/nuvio-rs-plus/app/libs/lib-decoder-dav1d-experimental.aar" | grep -q 'libdav1dJNI.so'
       - name: Configure public Nuvio services
+        working-directory: nuvio-rs-plus
         shell: bash
         run: |
           set -euo pipefail
@@ -78,6 +79,12 @@ jobs:
             echo "arm64-v8a APK not found" >&2
             exit 1
           fi
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          BADGING="$("$AAPT" dump badging "$APK" | head -n1)"
+          echo "$BADGING"
+          [[ "$BADGING" == *"name='com.rolex86.nuviorsplus'"* ]] || { echo "Unexpected package ID" >&2; exit 1; }
+          [[ "$BADGING" == *"versionName='1.1.0-beta.9-dav1d-test'"* ]] || { echo "Unexpected version" >&2; exit 1; }
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
           cp "$APK" shield-apk/NRSP-dav1d-Shield-update-arm64.apk
           # Validate that this is an upgrade of the installed NRSP package.
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
@@ -126,6 +133,7 @@ jobs:
           PY
 
       - name: Configure Nuvio RS parity credentials
+        working-directory: nuvio-rs-plus
         shell: bash
         env:
           TRAKT_CLIENT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
@@ -213,8 +221,8 @@ jobs:
           p = Path("app/build.gradle.kts")
           code = 120000000 + int(time.time())
           data = p.read_text(encoding="utf-8")
-          data, n1 = re.subn(r'versionCode\\s*=\\s*\\d+', f'versionCode = {code}', data, count=1)
-          data, n2 = re.subn(r'versionName\\s*=\\s*"[^"]+"', 'versionName = "1.1.0-beta.9-dav1d-test"', data, count=1)
+          data, n1 = re.subn(r'versionCode\s*=\s*\d+', f'versionCode = {code}', data, count=1)
+          data, n2 = re.subn(r'versionName\s*=\s*"[^"]+"', 'versionName = "1.1.0-beta.9-dav1d-test"', data, count=1)
           if n1 != 1 or n2 != 1:
               raise SystemExit("Failed to stamp dav1d test version")
           p.write_text(data, encoding="utf-8")
@@ -230,17 +238,17 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p shield-apk
-          find nuvio-rs-plus/app/build/outputs/apk/full/debug -type f -name '*.apk' -printf '%f %s bytes\\n'
-          APK="$(find nuvio-rs-plus/app/build/outputs/apk/full/debug -type f -name '*arm64-v8a*.apk' -print -quit)"
+          find nuvio-rs-plus/app/build/outputs/apk/full/release -type f -name '*.apk' -printf '%f %s bytes\\n'
+          APK="$(find nuvio-rs-plus/app/build/outputs/apk/full/release -type f -name '*arm64-v8a*.apk' -print -quit)"
           if [[ -z "$APK" ]]; then
             echo "arm64-v8a APK not found" >&2
             exit 1
           fi
-          cp "$APK" shield-apk/NRSP-dav1d-Shield-arm64.apk
-          ls -lh shield-apk/NRSP-dav1d-Shield-arm64.apk
+          cp "$APK" shield-apk/NRSP-dav1d-Shield-update-arm64.apk
+          ls -lh shield-apk/NRSP-dav1d-Shield-update-arm64.apk
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: NRSP-dav1d-Shield-arm64-APK
-          path: shield-apk/NRSP-dav1d-Shield-arm64.apk
+          name: NRSP-dav1d-Shield-update-arm64-APK
+          path: shield-apk/NRSP-dav1d-Shield-update-arm64.apk
           retention-days: 7
