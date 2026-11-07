@@ -311,8 +311,14 @@ android {
         abi {
             isEnable = !buildingAppBundle
             reset()
-            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
-            isUniversalApk = true
+            if (providers.environmentVariable("NRSP_DAV1D_EXPERIMENT").orNull == "true") {
+                // Shield TV: one small APK, no universal or other architectures.
+                include("arm64-v8a")
+                isUniversalApk = false
+            } else {
+                include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+                isUniversalApk = true
+            }
         }
     }
 
