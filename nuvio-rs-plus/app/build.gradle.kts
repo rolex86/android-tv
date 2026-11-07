@@ -224,6 +224,11 @@ android {
 
     buildTypes {
         debug {
+            // Side-by-side install on Shield: never replace the production NRSP app.
+            if (providers.environmentVariable("NRSP_DAV1D_EXPERIMENT").orNull == "true") {
+                applicationIdSuffix = ".dav1dtest"
+                versionNameSuffix = "-dav1d-test"
+            }
             signingConfig = signingConfigs.getByName("release")
             isDebuggable = parseBooleanProperty(providers.gradleProperty("debuggable").orNull)
             isMinifyEnabled = false
@@ -306,8 +311,14 @@ android {
         abi {
             isEnable = !buildingAppBundle
             reset()
-            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
-            isUniversalApk = true
+            if (providers.environmentVariable("NRSP_DAV1D_SHIELD_ONLY").orNull == "true") {
+                // Optional Shield-only APK, for experiments; normal releases keep every ABI.
+                include("arm64-v8a")
+                isUniversalApk = false
+            } else {
+                include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+                isUniversalApk = true
+            }
         }
     }
 
@@ -533,11 +544,11 @@ dependencies {
     ))
     implementation(libs.media3.ui)
 
-    // Local decoder AARs (AV1, IAMF, MPEG-H)
-    implementation(files(
-        "libs/lib-decoder-av1-release.aar",
-        "libs/lib-decoder-mpegh-release.aar"
-    ))
+    // AV1 experiment: CI supplies a locally built Media3 1.9.0 dav1d AAR.
+    // Normal builds retain the existing libgav1 AAR unchanged.
+    val dav1dExperiment = providers.environmentVariable("NRSP_DAV1D_EXPERIMENT").orNull == "true"
+    implementation(files(if (dav1dExperiment) "libs/lib-decoder-dav1d-experimental.aar" else "libs/lib-decoder-av1-release.aar"))
+    implementation(files("libs/lib-decoder-mpegh-release.aar"))
     add("fullImplementation", files("libs/lib-decoder-iamf-release.aar"))
     implementation(files("libs/lib-nuvio-engine-android-0.1.6.aar"))
     if (useLocalFfmpegDecoder) {

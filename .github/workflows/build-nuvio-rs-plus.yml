@@ -55,6 +55,28 @@ jobs:
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
+      - name: Build dav1d AV1 decoder for all Android ABIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm cmake
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.2.12479018" "cmake;3.22.1"
+          git clone --depth 1 --branch 1.9.0 https://github.com/androidx/media.git "$RUNNER_TEMP/media3-dav1d"
+          AV1="$RUNNER_TEMP/media3-dav1d/libraries/decoder_av1/src/main"
+          git clone --depth 1 https://github.com/google/cpu_features.git "$AV1/jni/cpu_features"
+          git clone --depth 1 https://code.videolan.org/videolan/dav1d.git "$AV1/jni/dav1d"
+          bash "$AV1/jni/build_dav1d.sh" "$AV1" "$ANDROID_HOME/ndk/27.2.12479018" linux-x86_64
+          pushd "$RUNNER_TEMP/media3-dav1d"
+          chmod +x gradlew
+          ./gradlew :lib-decoder-av1:assembleRelease --no-daemon --stacktrace --console=plain
+          AAR="$(find buildout libraries/decoder_av1 -type f -name '*decoder*av1*release*.aar' -print -quit)"
+          test -n "$AAR"
+          cp "$AAR" "$GITHUB_WORKSPACE/nuvio-rs-plus/app/libs/lib-decoder-dav1d-experimental.aar"
+          popd
+          unzip -l app/libs/lib-decoder-dav1d-experimental.aar | grep -q 'libdav1dJNI.so'
+          echo "NRSP_DAV1D_EXPERIMENT=true" >> "$GITHUB_ENV"
+
       - name: Configure public Nuvio services
         shell: bash
         run: |
@@ -253,6 +275,7 @@ jobs:
         shell: bash
         run: |
           ./gradlew :app:assembleFullRelease --stacktrace --console=plain
+          test -f app/build/outputs/apk/full/release/app-full-arm64-v8a-release.apk
 
       - name: Enforce full Nuvio RS service parity
         shell: bash
@@ -321,6 +344,7 @@ jobs:
             printf '%s\n' '- In-app updater points to `rolex86/android-tv`'
             printf '%s\n' '- Keeps upstream Google sync, Trakt, MDBList, Seekr and TMDB integrations enabled'
             printf '%s\n' '- Includes Plus AI subtitle and AutoSync UI changes'
+            printf '%s\n' '- AV1 decoding: dav1d (software fallback), platform codecs retained'
           } > ../release-notes.md
 
           EXPECTED_BASELINE="- Synced with Nuvio Reshaped beta upstream through \`$UPSTREAM_BASELINE\`"

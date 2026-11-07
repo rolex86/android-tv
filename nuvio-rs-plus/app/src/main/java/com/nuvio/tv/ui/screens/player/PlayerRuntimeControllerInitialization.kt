@@ -2313,6 +2313,34 @@ private class SubtitleOffsetRenderersFactory(
             allowedVideoJoiningTimeMs,
             built
         )
+        // dav1d experiment: load the optional extension reflectively. The production libgav1
+        // decoder stays untouched when the experimental AAR is not bundled.
+        // Place dav1d before platform/legacy renderers only when the native library loads.
+        if (runCatching {
+                val library = Class.forName("androidx.media3.decoder.av1.Dav1dLibrary")
+                library.getMethod("isAvailable").invoke(null) == true
+            }.getOrDefault(false)
+        ) {
+            runCatching {
+                val rendererClass = Class.forName("androidx.media3.decoder.av1.Libdav1dVideoRenderer")
+                val constructor = rendererClass.getConstructor(
+                    Long::class.javaPrimitiveType,
+                    Handler::class.java,
+                    VideoRendererEventListener::class.java,
+                    Int::class.javaPrimitiveType
+                )
+                val renderer = constructor.newInstance(
+                    allowedVideoJoiningTimeMs,
+                    eventHandler,
+                    eventListener,
+                    DefaultRenderersFactory.MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY
+                ) as Renderer
+                out.add(renderer)
+                Log.i("NRSP_AV1", "dav1d renderer enabled (experimental)")
+            }.onFailure { error ->
+                Log.w("NRSP_AV1", "dav1d renderer unavailable; using existing video renderers", error)
+            }
+        }
         // Same settings as the platform renderer it replaces; the factory's own DV7 setting only reaches that one.
         for (renderer in built) {
             if (renderer::class.java == MediaCodecVideoRenderer::class.java) {
