@@ -533,11 +533,11 @@ dependencies {
     ))
     implementation(libs.media3.ui)
 
-    // Local decoder AARs (AV1, IAMF, MPEG-H)
-    implementation(files(
-        "libs/lib-decoder-av1-release.aar",
-        "libs/lib-decoder-mpegh-release.aar"
-    ))
+    // AV1 experiment: CI supplies a locally built Media3 1.9.0 dav1d AAR.
+    // Normal builds retain the existing libgav1 AAR unchanged.
+    val dav1dExperiment = providers.environmentVariable("NRSP_DAV1D_EXPERIMENT").orNull == "true"
+    implementation(files(if (dav1dExperiment) "libs/lib-decoder-dav1d-experimental.aar" else "libs/lib-decoder-av1-release.aar"))
+    implementation(files("libs/lib-decoder-mpegh-release.aar"))
     add("fullImplementation", files("libs/lib-decoder-iamf-release.aar"))
     implementation(files("libs/lib-nuvio-engine-android-0.1.6.aar"))
     if (useLocalFfmpegDecoder) {
