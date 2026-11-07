@@ -311,8 +311,8 @@ android {
         abi {
             isEnable = !buildingAppBundle
             reset()
-            if (providers.environmentVariable("NRSP_DAV1D_EXPERIMENT").orNull == "true") {
-                // Shield TV: one small APK, no universal or other architectures.
+            if (providers.environmentVariable("NRSP_DAV1D_SHIELD_ONLY").orNull == "true") {
+                // Optional Shield-only APK, for experiments; normal releases keep every ABI.
                 include("arm64-v8a")
                 isUniversalApk = false
             } else {
