@@ -1,5 +1,173 @@
 # JustPlayer Plus changelog
 
+## Step 34 — Fix the source-wait slider resource namespace
+
+- Use Android's framework `max` attribute for the aggregation `SeekBarPreference`, while keeping
+  the AndroidX-specific minimum, increment, value display and continuous persistence attributes.
+- Extend the preference audit to require the resource-linkable namespace combination.
+- Raised the application version code to 276; the Connector remains at `1.14.0` because behavior
+  and its local add-on protocol are unchanged from the configurable-wait implementation.
+
+## Step 33 — Make the Connector source wait configurable on TV
+
+- Added a TV-friendly source-wait slider to the aggregation settings with a range of 3–30 seconds,
+  one-second remote-control steps and the existing nine-second behavior as its default.
+- Persist each slider step immediately. A running lookup keeps the snapshot it started with, while
+  the next lookup uses the new value without requiring the user to leave the settings row.
+- Apply the selected value to both the overall aggregation deadline and the bounded upstream stream
+  request, including a cold manifest lookup, so increasing the slider genuinely allows a slow
+  healthy source more time without creating an unbounded request.
+- Include the selected wait in aggregation cache identity and Connector diagnostics so changing the
+  value cannot reuse a partial response produced under a different deadline and remains auditable.
+- Raised the application version code to 275; the Connector remains at `1.14.0` because its local
+  add-on protocol and response schema are unchanged.
+
+## Step 32 — Let slow Connector sources finish without blocking on broken ones
+
+- Removed the 1.5-second post-result cutoff. Every healthy enabled source can now use the normal
+  nine-second aggregation window, so a fast add-on no longer suppresses slower Torrentio-like
+  results merely by finishing first.
+- Added a two-minute in-memory circuit breaker per source and manifest URL. A source that times out
+  or fails is still queried on later requests, but outside the foreground critical path; any clean
+  background result immediately restores it to normal waiting.
+- Let unfinished source calls continue within their own bounded HTTP timeout instead of cancelling
+  them when the foreground response is ready. Their exact stream response is cached briefly, so a
+  later lookup can include results that completed after the current Stremio response was returned.
+- Added a persistent routing-only manifest cache. A validated manifest is fresh for one hour, can
+  be used while it is revalidated in the background for at most 24 hours, and supports conditional
+  `ETag` / `Last-Modified` requests when the add-on supplies validators.
+- Manifest URL changes select a different cache fingerprint. Definitive `401`, `403`, `404` and
+  `410` responses, or a valid manifest without a stream resource, invalidate the cached route;
+  timeouts, throttling and server failures retain only the bounded stale fallback.
+- Kept incomplete aggregate responses on a one-second cache while complete responses retain the
+  existing 30-second cache. Protected next-episode prefetch still requires every source to finish
+  cleanly before it is persisted.
+- Raised the application version code to 274; the Connector remains at `1.14.0` because its local
+  add-on protocol and response schema are unchanged.
+
+## Step 31 — Isolate stalled Connector sources
+
+- Kept all enabled stream add-ons concurrent, but once a foreground request has at least one
+  usable result it waits only a 1.5-second grace period for the remaining sources instead of being
+  held for the full nine-second aggregation deadline.
+- A valid empty response does not start the grace period, so the Connector can still wait for a
+  different source that actually has streams for the requested item.
+- A pending source is deferred only for the current foreground response and is tried again on a
+  later lookup; it is never automatically disabled or permanently classified as broken.
+- Background next-episode prefetch retains the full aggregation deadline and protected prefetch
+  still requires every compatible enabled source to finish cleanly.
+- Contained unexpected per-source task failures so one failed future cannot cancel collection of
+  results already arriving from other sources.
+- Raised the application version code to 273; the Connector remains at `1.14.0` because its local
+  addon protocol and response schema are unchanged.
+
+## Step 30 — Restore the Connector after application updates
+
+- Registered the app-targeted `MY_PACKAGE_REPLACED` broadcast so Android restarts an explicitly
+  enabled local Connector immediately after installing a newer APK.
+- Reused the existing foreground-service startup path, which remains gated by the persisted
+  Connector preference; an explicitly disabled Connector stays disabled after an update.
+- Kept account queue recovery limited to device boot because WorkManager already preserves its
+  scheduled work across application updates.
+- Added regression and manifest audit coverage for both reboot and package-replacement recovery.
+- Raised the application version code to 272; the Connector remains at `1.14.0` because its local
+  addon protocol is unchanged.
+
+## Step 29 — Keep account synchronization off media startup
+
+- Disabled WorkManager's automatic process-start initializer and switched it to supported
+  on-demand configuration.
+- Removed the account queue flush from `PlayerActivity.onCreate()` so first media preparation does
+  not read the encrypted account key, parse the retry queue or initialize background schedulers.
+- Dispatch the persisted-queue check only once after playback is actually running, with Keystore
+  and queue work performed off the main thread.
+- Preserved network-constrained retry, checkpoint scheduling and reboot recovery.
+- Raised the application version code to 271; the Connector remains at `1.14.0` because its local
+  addon protocol is unchanged.
+
+## Step 28 — Optional Stremio account progress synchronization
+
+- Added a single default-off gate for synchronizing only episodes that continue inside JustPlayer
+  Plus and therefore cannot use Stremio's original external-player callback.
+- Account linking uses Stremio's one-time link flow; the resulting auth key is encrypted with a
+  non-exportable Android Keystore key in the no-backup directory and is never stored in preferences.
+- Read–modify–write synchronization preserves the complete current `libraryItem`, verifies a
+  second pre-write snapshot and rereads the server object after every update.
+- Completed episodes update the official anchored watched bitfield while preserving all existing
+  episode bits. Partial episodes update the exact video ID, resume position, duration and
+  `lastWatched` state without inferring watched time from seeks.
+- Added durable, credential-free retry checkpoints, 90-second in-player progress snapshots and
+  immediate snapshots on pause or exit. A network-constrained WorkManager task survives app and
+  device restarts and retries failed delivery with exponential backoff until the queue is verified
+  on the server. Disabling the gate cancels scheduled/running work and clears the queue.
+- Movies and a single Stremio-launched episode that exits without internal continuation remain on
+  the standard callback path. Once an internal continuation is accepted and that callback must be
+  suppressed, account sync records the completed current episode as well as every later episode.
+- Raised the application version code to 270; the Connector remains at `1.14.0` because its local
+  addon protocol is unchanged.
+
+## Step 27 — Shield-safe in-player episode continuation
+
+- JustPlayer Plus now keeps the external-player activity alive and resolves the exact next series
+  episode through the local Connector instead of returning early to Stremio.
+- Protected prefetch persists the complete ordered direct-stream plan before the end of the current
+  episode, while actual media probing remains sequential and starts only after the transition so a
+  second decoder or concurrent video load cannot burden Shield-class devices.
+- Every candidate is verified against Media3's real audio and subtitle tracks. The remembered
+  per-series selection is a hard contract; an unknown or conflicting language is skipped instead
+  of being played optimistically.
+- Candidate failover is now paused and muted with fixed per-candidate and overall timeouts, zero
+  probe retries and an explicit safe-failure dialog when no compatible release exists.
+- Manual Play and natural completion use the same continuation path. Direct-stream recovery for
+  the current episode follows the same strict track validation before resuming at its old position.
+- Added a bounded, episode-deduplicated local watched journal as the stable handoff point for a
+  future user-authorized Trakt synchronization module.
+- Raised the application version code to 269 and the Connector manifest to `1.14.0`.
+
+## Step 26 — Return next-episode control to Stremio
+
+- Removed the custom `stremio:///detail/...?...autoPlay=true` launch that opened an episode detail
+  or stream list instead of continuing through Stremio's active external-player session.
+- Natural completion now returns the standard MX Player-compatible
+  `end_by=playback_completion` result without old-episode position or duration, leaving episode
+  selection and autoplay to the calling Stremio activity.
+- The popup's explicit Play action uses the same result handoff immediately instead of seeking the
+  old stream to its final frame or launching a second Stremio activity.
+- The exact resolved next episode remains stored as a short-lived Connector correlation hint before
+  the result is returned, preserving track memory, prefetch and direct-stream fallback identity.
+- Dismissing the popup still returns a user exit at natural end and therefore opts out of automatic
+  continuation.
+- Raised the application version code to 268; the Connector remains at `1.13.0` because its stream
+  API and ordering are unchanged.
+
+## Step 25 — Preserve complete upstream stream relevance
+
+- Source-provided numeric match scores now take precedence over cache, language and file-size
+  preferences inside that source's already assigned result positions.
+- Fixed the real Webshare false-positive case where both `Bluey` and `KILL BLUE` are marked as
+  strong matches, but their numeric scores are `1.0` and `0.545454…` respectively.
+- Per-source limits now retain the source's most relevant candidates instead of allowing a larger
+  similarly named file to consume the available slots.
+- Sources without explicit relevance metadata keep the existing technical sorting behavior.
+- Invalidated pre-version-267 aggregation and protected-prefetch cache entries, raised the
+  Connector manifest to `1.13.0`, and raised the application version code to 267.
+
+## Step 24 — Resilient next-episode stream handoff
+
+- Protected next-episode prefetch now requires a complete, non-empty response from every
+  compatible enabled source; partial and empty results remain short-lived and are retried.
+- The Connector remembers the final ordered direct-URL stream queue for each exact episode ID.
+- A series source error can continue with the next filtered stream, including another source,
+  without confusing episodes or depending on Stremio retrying the same cached stream.
+- Direct fallback retains the stable Stremio series identity, playback position, supplied
+  subtitles and remembered manual audio/subtitle choices.
+- Exact launch-marker and stream-URL associations take precedence over unrelated newer Connector
+  requests while the legacy expected-episode hint remains bounded and user navigation-safe.
+- Remembered known-language tracks can map to an untagged equivalent on another release; an
+  untagged remembered track maps to a tagged track only when their semantic labels agree.
+- Invalidated pre-version-266 aggregation and protected-prefetch cache entries, raised the
+  Connector manifest to `1.12.0`, and raised the application version code to 266.
+
 ## Step 23 — Reliable next-episode popup fallback
 
 - Kept the precise Media3 position message as the primary next-episode popup trigger.
