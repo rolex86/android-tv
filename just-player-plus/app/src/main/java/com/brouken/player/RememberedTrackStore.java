@@ -32,6 +32,7 @@ import java.util.regex.Pattern;
  * decoding, audio passthrough, FFmpeg, tunneling or Dolby Vision handling.
  */
 final class RememberedTrackStore {
+    private static final long UNKNOWN_LANGUAGE_FALLBACK_PENALTY = 100_000L;
     private static final String PREFS_NAME = "justplayer_plus_track_memory";
     private static final Pattern FILE_EXTENSION = Pattern.compile("\\.[a-z0-9]{2,5}$");
     private static final Pattern BRACKETED_YEAR = Pattern.compile("[\\s._-]*[\\[(](?:19|20)\\d{2}[\\])]\\s*$");
@@ -212,7 +213,12 @@ final class RememberedTrackStore {
                     continue;
                 }
                 Format format = trackGroup.getFormat(i);
-                if (!languageMatches(remembered.audioLanguage, format.language)) {
+                long languagePenalty = languageMatchPenalty(
+                        remembered.audioLanguage,
+                        format.language,
+                        remembered.audioLabel,
+                        format.label);
+                if (languagePenalty < 0L) {
                     order++;
                     continue;
                 }
@@ -221,7 +227,7 @@ final class RememberedTrackStore {
                     order++;
                     continue;
                 }
-                long score = order++;
+                long score = order++ + languagePenalty;
                 if (!remembered.audioLabel.isEmpty()
                         && !remembered.audioLabel.equals(normalizeLabel(format.label))) {
                     score += 10_000L;
@@ -260,7 +266,12 @@ final class RememberedTrackStore {
                     continue;
                 }
                 Format format = trackGroup.getFormat(i);
-                if (!languageMatches(remembered.subtitleLanguage, format.language)) {
+                long languagePenalty = languageMatchPenalty(
+                        remembered.subtitleLanguage,
+                        format.language,
+                        remembered.subtitleLabel,
+                        format.label);
+                if (languagePenalty < 0L) {
                     order++;
                     continue;
                 }
@@ -268,7 +279,7 @@ final class RememberedTrackStore {
                     order++;
                     continue;
                 }
-                long score = order++;
+                long score = order++ + languagePenalty;
                 if (!remembered.subtitleLabel.isEmpty()
                         && !remembered.subtitleLabel.equals(normalizeLabel(format.label))) {
                     score += 10_000L;
@@ -311,11 +322,38 @@ final class RememberedTrackStore {
         return false;
     }
 
-    private static boolean languageMatches(String remembered, @Nullable String candidate) {
-        if (remembered.isEmpty() || "und".equalsIgnoreCase(remembered)) {
-            return candidate == null || candidate.isEmpty() || "und".equalsIgnoreCase(candidate);
+    /**
+     * Exact language metadata always wins. A remembered known language may fall back to an
+     * untagged track from another release, while an untagged remembered track may map to a known
+     * language only when both providers expose the same non-empty semantic label.
+     */
+    static long languageMatchPenalty(
+            @Nullable String remembered,
+            @Nullable String candidate,
+            @Nullable String rememberedLabel,
+            @Nullable String candidateLabel) {
+        boolean rememberedUnknown = isUnknownLanguage(remembered);
+        boolean candidateUnknown = isUnknownLanguage(candidate);
+        if (rememberedUnknown && candidateUnknown) {
+            return 0L;
         }
-        return normalizeLanguage(remembered).equals(normalizeLanguage(candidate));
+        if (!rememberedUnknown && !candidateUnknown) {
+            return normalizeLanguage(remembered).equals(normalizeLanguage(candidate))
+                    ? 0L : -1L;
+        }
+        if (!rememberedUnknown) {
+            return UNKNOWN_LANGUAGE_FALLBACK_PENALTY;
+        }
+        String rememberedSemanticLabel = normalizeLabel(rememberedLabel);
+        return !rememberedSemanticLabel.isEmpty()
+                && rememberedSemanticLabel.equals(normalizeLabel(candidateLabel))
+                ? UNKNOWN_LANGUAGE_FALLBACK_PENALTY : -1L;
+    }
+
+    private static boolean isUnknownLanguage(@Nullable String language) {
+        return language == null
+                || language.isEmpty()
+                || "und".equalsIgnoreCase(language);
     }
 
     private static String normalizeLanguage(@Nullable String language) {

@@ -16,6 +16,8 @@ import org.json.JSONObject;
 import org.junit.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 
 public class StremioNextEpisodeTest {
@@ -78,6 +80,27 @@ public class StremioNextEpisodeTest {
     }
 
     @Test
+    public void nextEpisodeStreamPrefetchStartsThreeMinutesBeforeTheEnd() {
+        long durationMs = 30 * 60_000L;
+
+        assertEquals(durationMs - NextEpisodeStreamPrefetchPolicy.LEAD_MS,
+                NextEpisodeStreamPrefetchPolicy.triggerPositionMs(durationMs));
+        assertFalse(NextEpisodeStreamPrefetchPolicy.shouldStart(
+                durationMs, durationMs - NextEpisodeStreamPrefetchPolicy.LEAD_MS - 1L));
+        assertTrue(NextEpisodeStreamPrefetchPolicy.shouldStart(
+                durationMs, durationMs - NextEpisodeStreamPrefetchPolicy.LEAD_MS));
+    }
+
+    @Test
+    public void shortEpisodePrefetchesAsSoonAsItsMetadataIsReady() {
+        long durationMs = 2 * 60_000L;
+
+        assertEquals(0L, NextEpisodeStreamPrefetchPolicy.triggerPositionMs(durationMs));
+        assertTrue(NextEpisodeStreamPrefetchPolicy.shouldStart(durationMs, 0L));
+        assertEquals(-1L, NextEpisodeStreamPrefetchPolicy.triggerPositionMs(C.TIME_UNSET));
+    }
+
+    @Test
     public void episodeIdUsesLastTwoSegments() {
         StremioEpisodeId id = StremioEpisodeId.parse("custom:meta:2:7");
 
@@ -121,6 +144,137 @@ public class StremioNextEpisodeTest {
                 events(event("tt1:2:4", now - 899_000L)), now));
         assertNull(StremioConnectorStore.findRecentContent(
                 events(event("tt1:2:4", now - 901_000L)), now));
+    }
+
+    @Test
+    public void expectedNextNeverOverridesANewerStreamRequest() {
+        StremioConnectorStore.ExpectedEpisode expected =
+                new StremioConnectorStore.ExpectedEpisode(
+                        StremioEpisodeId.parse("tt1:2:4"), 10_000L);
+
+        assertTrue(StremioConnectorStore.shouldUseExpectedEpisode(
+                event("tt1:2:3", 9_999L), expected));
+        assertTrue(StremioConnectorStore.shouldUseExpectedEpisode(null, expected));
+        assertFalse(StremioConnectorStore.shouldUseExpectedEpisode(
+                event("tt1:2:3", 10_001L), expected));
+        assertFalse(StremioConnectorStore.shouldUseExpectedEpisode(
+                event("tt1:2:3", 10_000L), expected));
+    }
+
+    @Test
+    public void directFallbackQueuePreservesFinalConnectorOrderAcrossSources() {
+        List<StremioConnectorStore.StreamFallback> fallbacks =
+                StremioConnectorStore.parseDirectFallbacks("{\"streams\":["
+                        + "{\"url\":\"https://one.example/bluey\","
+                        + "\"name\":\"1080p • Source A\"},"
+                        + "{\"infoHash\":\"abcdef\",\"name\":\"Torrent\"},"
+                        + "{\"url\":\"https://two.example/bluey\","
+                        + "\"name\":\"720p • Source B\"},"
+                        + "{\"url\":\"https://one.example/bluey\"},"
+                        + "{\"externalUrl\":\"https://page.example/bluey\"}]}");
+
+        assertEquals(2, fallbacks.size());
+        assertEquals("https://one.example/bluey", fallbacks.get(0).url);
+        assertEquals("https://two.example/bluey", fallbacks.get(1).url);
+        assertTrue(fallbacks.get(0).label.contains("Source A"));
+    }
+
+    @Test
+    public void fallbackRequiresTheExactCurrentEpisodeStreamAndSkipsAttempts() {
+        List<StremioConnectorStore.StreamFallback> fallbacks = Arrays.asList(
+                new StremioConnectorStore.StreamFallback("https://one/episode", "A"),
+                new StremioConnectorStore.StreamFallback("https://two/episode", "B"),
+                new StremioConnectorStore.StreamFallback("https://three/episode", "C"));
+        HashSet<String> attempted = new HashSet<>(
+                Collections.singletonList("https://two/episode"));
+
+        StremioConnectorStore.StreamFallback selected =
+                StremioConnectorStore.nextFallback(
+                        fallbacks, "https://one/episode", attempted);
+
+        assertNotNull(selected);
+        assertEquals("https://three/episode", selected.url);
+        assertNull(StremioConnectorStore.nextFallback(
+                fallbacks, "https://other-series/episode", attempted));
+    }
+
+    @Test
+    public void playbackPlanCarriesSourceQualityLanguageAndProxyHeaders() {
+        List<StremioConnectorStore.StreamFallback> candidates =
+                StremioConnectorStore.parseDirectFallbacks("{\"streams\":[{"
+                        + "\"url\":\"https://one.example/bluey\","
+                        + "\"name\":\"1080p • Source A\","
+                        + "\"behaviorHints\":{"
+                        + "\"jppSourceId\":\"source-a\","
+                        + "\"jppSourceName\":\"Source A\","
+                        + "\"jppResolution\":\"1080p\","
+                        + "\"jppFilename\":\"Bluey.S02E14.CZ.mkv\","
+                        + "\"jppLanguages\":[\"cz\",\"en\"],"
+                        + "\"proxyHeaders\":{\"request\":{"
+                        + "\"Referer\":\"https://source.example/\"}}}}]}");
+
+        assertEquals(1, candidates.size());
+        StremioConnectorStore.StreamFallback candidate = candidates.get(0);
+        assertEquals("source-a", candidate.sourceId);
+        assertEquals("1080p", candidate.quality);
+        assertEquals(Arrays.asList("cz", "en"), candidate.languages);
+        assertEquals("https://source.example/", candidate.requestHeaders.get("Referer"));
+        assertEquals("Bluey.S02E14.CZ.mkv", candidate.filename);
+    }
+
+    @Test
+    public void playbackPlanPrefersComparableReleaseThenLanguageHint() {
+        StremioConnectorStore.StreamFallback current = fallback(
+                "https://current", "source-a", "1080p", "cz");
+        StremioConnectorStore.StreamFallback otherSource = fallback(
+                "https://other", "source-b", "1080p", "cz");
+        StremioConnectorStore.StreamFallback sameSourceWrongLanguage = fallback(
+                "https://same-source-en", "source-a", "720p", "en");
+        StremioConnectorStore.StreamFallback exact = fallback(
+                "https://exact", "source-a", "1080p", "cz");
+        StremioConnectorStore.StreamFallback sameSourceCzech = fallback(
+                "https://same-source-cz", "source-a", "720p", "cz");
+
+        List<StremioConnectorStore.StreamFallback> ordered =
+                NextEpisodePlaybackPlan.order(Arrays.asList(
+                        otherSource,
+                        sameSourceWrongLanguage,
+                        exact,
+                        sameSourceCzech), current, "ces");
+
+        assertEquals("https://exact", ordered.get(0).url);
+        assertEquals("https://same-source-cz", ordered.get(1).url);
+        assertEquals("https://same-source-en", ordered.get(2).url);
+        assertEquals("https://other", ordered.get(3).url);
+    }
+
+    @Test
+    public void strictTrackContractRejectsEnglishAndAcceptsExplicitCzechLabel() {
+        assertFalse(NextEpisodeTrackContract.matchesIdentity(
+                "ces", "Čeština", "eng", "English"));
+        assertTrue(NextEpisodeTrackContract.matchesIdentity(
+                "ces", "Čeština", "cs", "Čeština"));
+        assertTrue(NextEpisodeTrackContract.matchesIdentity(
+                "ces", "Čeština", "und", "Czech dubbing"));
+        assertFalse(NextEpisodeTrackContract.matchesIdentity(
+                "ces", "Čeština", "und", "Audio 1"));
+    }
+
+    @Test
+    public void watchJournalKeepsOneLatestEntryPerEpisode() {
+        StremioEpisodeId first = StremioEpisodeId.parse("tt1:2:14");
+        StremioEpisodeId second = StremioEpisodeId.parse("tt1:2:15");
+        JSONArray journal = StremioWatchJournal.update(
+                null, first, 1_000L, "Bluey", "Pass the Parcel");
+        journal = StremioWatchJournal.update(
+                journal.toString(), second, 2_000L, "Bluey", "Explorers");
+        journal = StremioWatchJournal.update(
+                journal.toString(), first, 3_000L, "Bluey", "Pass the Parcel");
+
+        assertEquals(2, journal.length());
+        assertEquals("tt1:2:14", journal.optJSONObject(0).optString("video_id"));
+        assertEquals(3_000L, journal.optJSONObject(0).optLong("watched_at_ms"));
+        assertEquals("tt1:2:15", journal.optJSONObject(1).optString("video_id"));
     }
 
     @Test
@@ -535,5 +689,18 @@ public class StremioNextEpisodeTest {
     private static List<StremioConnectorStore.Event> events(
             StremioConnectorStore.Event... events) {
         return Arrays.asList(events);
+    }
+
+    private static StremioConnectorStore.StreamFallback fallback(
+            String url, String source, String quality, String language) {
+        return new StremioConnectorStore.StreamFallback(
+                url,
+                source + " " + quality,
+                source,
+                source,
+                quality,
+                null,
+                Collections.singletonList(language),
+                Collections.emptyMap());
     }
 }

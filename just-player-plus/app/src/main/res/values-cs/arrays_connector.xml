@@ -23,4 +23,78 @@
         <item>Větší — až 90 s / 256 MiB</item>
         <item>Maximální ⚠ — až 120 s / 384 MiB; vyšší riziko nedostatku paměti</item>
     </string-array>
+
+    <string-array name="plus_stremio_sort_entries">
+        <item>Rozlišení, potom prokládat zdroje</item>
+        <item>Rozlišení, potom priorita zdrojů</item>
+        <item>Priorita zdrojů, potom rozlišení</item>
+        <item>Původní pořadí uvnitř každého zdroje</item>
+    </string-array>
+
+    <string-array name="plus_stremio_size_sort_entries">
+        <item>Neřadit podle velikosti</item>
+        <item>Větší soubory první</item>
+        <item>Menší soubory první</item>
+    </string-array>
+
+    <string-array name="plus_stremio_resolution_entries">
+        <item>4K / 2160p</item>
+        <item>Full HD / 1080p</item>
+        <item>HD / 720p</item>
+        <item>SD / 480p / 576p</item>
+        <item>Neznámé rozlišení</item>
+    </string-array>
+
+    <string-array name="plus_stremio_stream_type_entries">
+        <item>Přímé URL streamy</item>
+        <item>Torrent streamy s infoHash</item>
+        <item>Externí odkazy</item>
+    </string-array>
+
+    <string-array name="plus_stremio_bad_release_entries">
+        <item>CAM / CAMRip</item>
+        <item>TS / Telesync</item>
+        <item>TC / Telecine</item>
+        <item>SCR / Screener</item>
+        <item>3D / SBS / TAB</item>
+    </string-array>
+
+    <string-array name="plus_stremio_codec_entries">
+        <item>H.264 / AVC</item>
+        <item>HEVC / H.265</item>
+        <item>AV1</item>
+        <item>Jiné rozpoznané kodeky</item>
+    </string-array>
+
+    <string-array name="plus_stremio_hdr_entries">
+        <item>SDR</item>
+        <item>HDR / HDR10</item>
+        <item>Dolby Vision</item>
+    </string-array>
+
+    <string-array name="plus_stremio_deduplication_entries">
+        <item>Vypnuto</item>
+        <item>Bezpečné — přesná identita přehrávání</item>
+        <item>Rozšířené — navíc přesný název a velikost</item>
+    </string-array>
+
+    <string-array name="plus_stremio_binge_entries">
+        <item>Stejné rozlišení napříč všemi zdroji</item>
+        <item>Stejný zdroj při libovolném rozlišení</item>
+        <item>Stejný zdroj a rozlišení</item>
+        <item>Libovolný agregovaný stream</item>
+        <item>Ponechat bingeGroup původního doplňku</item>
+    </string-array>
+
+    <string-array name="plus_stremio_display_entries">
+        <item>Rozlišení</item>
+        <item>Jazyky</item>
+        <item>Kodek</item>
+        <item>HDR / Dolby Vision</item>
+        <item>Formát zvuku a kanály</item>
+        <item>Velikost souboru</item>
+        <item>Stav cached / ready</item>
+        <item>Název souboru</item>
+        <item>Původní popis doplňku</item>
+    </string-array>
 </resources>

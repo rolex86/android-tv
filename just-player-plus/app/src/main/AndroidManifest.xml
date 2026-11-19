@@ -33,6 +33,7 @@
     </queries>
 
     <application
+        android:name=".JustPlayerPlusApplication"
         android:allowBackup="false"
         android:appCategory="video"
         android:banner="@mipmap/banner"
@@ -47,6 +48,18 @@
         android:theme="@style/Theme.Player"
         tools:replace="android:allowBackup"
         tools:targetApi="n">
+        <!-- Keep WorkManager off the cold player-start path. It initializes on first use through
+             JustPlayerPlusApplication after playback has started or when background work runs. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
+
         <service
             android:name=".StremioConnectorService"
             android:exported="false"
@@ -62,6 +75,7 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 
