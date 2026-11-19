@@ -269,7 +269,7 @@ jobs:
         shell: bash
         run: |
           chmod +x gradlew
-          ./gradlew :app:testFullReleaseUnitTest --tests 'com.nuvio.tv.updater.*' --stacktrace --console=plain
+          ./gradlew :app:testFullReleaseUnitTest --tests 'com.nuvio.tv.updater.*' --tests 'com.nuvio.tv.ui.screens.stream.CzechStreamAudioHintTest' --stacktrace --console=plain
 
       - name: Build signed APKs
         shell: bash
