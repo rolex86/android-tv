@@ -658,11 +658,26 @@ final class OpenSubtitlesV3Client {
         String normalized = normalizeReleaseName(value)
                 .replace("web-dl", "webdl")
                 .replace("web dl", "webdl")
+                .replace("webdlrip", "webdl")
+                .replace("bd-remux", "bdremux")
+                .replace("bd remux", "bdremux")
+                .replace("bd-rip", "bdrip")
+                .replace("bd rip", "bdrip")
                 .replace("blu-ray", "bluray")
                 .replace("blu ray", "bluray")
+                .replace("blurayremux", "bluray remux")
+                .replace("blurayrip", "brrip")
+                .replace("h.265", "hevc")
+                .replace("h 265", "hevc")
                 .replace("x265", "hevc")
                 .replace("h265", "hevc")
+                .replace("h.264", "h264")
+                .replace("h 264", "h264")
                 .replace("x264", "h264")
+                .replace("dolby vision", "dv")
+                .replace("dolbyvision", "dv")
+                .replace("dovi", "dv")
+                .replace("hdr10+", "hdr10")
                 .replaceAll("(?<![a-z0-9])4k(?![a-z0-9])", "2160p")
                 .replaceAll("[^a-z0-9]+", " ")
                 .trim();
@@ -670,12 +685,48 @@ final class OpenSubtitlesV3Client {
             return Collections.emptySet();
         }
         Set<String> result = new LinkedHashSet<>();
-        for (String token : normalized.split("\\s+")) {
+        for (String rawToken : normalized.split("\\s+")) {
+            String token = normalizeReleaseToken(rawToken);
             if ((token.length() >= 3 || "dv".equals(token)) && !isNoise(token)) {
                 result.add(token);
             }
         }
         return result;
+    }
+
+    private static String normalizeReleaseToken(String token) {
+        switch (token) {
+            case "bdremux":
+                return "remux";
+            case "bdrip":
+                return "brrip";
+            case "webdlrip":
+                return "webdl";
+            case "dovi":
+                return "dv";
+            case "dolbyvision":
+                return "vision";
+            case "hdr10plus":
+                return "hdr10";
+            case "avc":
+                return "h264";
+            case "nf":
+                return "netflix";
+            case "amzn":
+                return "amazon";
+            case "dsnp":
+                return "disneyplus";
+            case "hmax":
+                return "hbomax";
+            case "atvp":
+                return "appletv";
+            case "pcok":
+                return "peacock";
+            case "pmnt":
+                return "paramount";
+            default:
+                return token;
+        }
     }
 
     private static boolean isNoise(String token) {
@@ -691,7 +742,8 @@ final class OpenSubtitlesV3Client {
     private static boolean isDistinctive(String token) {
         return token.matches("(2160p|1080p|720p|480p|bluray|brrip|remux|webdl|webrip|hdtv|"
                 + "dvdrip|uhd|x264|x265|h264|h265|hevc|av1|hdr|hdr10|dolby|vision|atmos|"
-                + "proper|repack|extended|criterion|theatrical|uncut|directors|final|dv|10bit)");
+                + "proper|repack|extended|criterion|theatrical|uncut|directors|final|dv|10bit|"
+                + "netflix|amazon|disneyplus|hbomax|appletv|peacock|paramount|hulu)");
     }
 
     private static final Set<String> RESOLUTIONS = tokenSet(
